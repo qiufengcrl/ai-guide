@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+cookie*
+*cookie*
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/

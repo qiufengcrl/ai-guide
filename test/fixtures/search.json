@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "model_type": "note",
+        "id": "64f000000000000000000001",
+        "xsec_token": "fixture-token",
+        "note_card": { "display_title": "京都五天不赶路" }
+      },
+      {
+        "model_type": "user",
+        "id": "ignored"
+      }
+    ]
+  }
+}

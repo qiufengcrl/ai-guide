@@ -1,0 +1,14 @@
+{
+  "name": "ai-guide",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "npx -y trek-plugin-sdk dev",
+    "pack": "npx -y trek-plugin-sdk pack",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "trek-plugin-sdk": "^1.7.0"
+  }
+}

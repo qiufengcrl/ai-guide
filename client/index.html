@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Guide</title>
+  <!-- trek:ui -->
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { background: transparent; color: var(--text-primary); }
+    main { max-width: 980px; margin: 0 auto; padding: 24px; }
+    .hero { padding: 28px; }
+    .hero h1 { margin: 0 0 8px; font-size: clamp(28px, 5vw, 48px); letter-spacing: -.04em; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .full { grid-column: 1 / -1; }
+    .field { display: grid; gap: 7px; }
+    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .progress { height: 7px; overflow: hidden; border-radius: 999px; background: var(--bg-hover); }
+    .progress > i { display: block; width: 35%; height: 100%; background: var(--accent); animation: move 1.2s ease-in-out infinite alternate; }
+    .day { padding: 18px; }
+    .place { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border-primary); }
+    .place:first-of-type { border-top: 0; }
+    .place input { width: 20px; height: 20px; margin-top: 2px; }
+    .warning-list { margin: 0; padding-left: 20px; }
+    .hidden { display: none !important; }
+    @keyframes move { to { transform: translateX(180%); } }
+    @media (max-width: 680px) { main { padding: 14px; } .grid { grid-template-columns: 1fr; } .full { grid-column: auto; } }
+    @media (prefers-reduced-motion: reduce) { .progress > i { animation: none; width: 70%; } }
+  </style>
+</head>
+<body>
+  <main class="trek-stack trek-page-enter">
+    <section class="trek-glass hero trek-stack">
+      <span class="trek-chip trek-chip--accent" data-i18n="eyebrow">Notes → mapped itinerary</span>
+      <div>
+        <h1 data-i18n="title">AI Guide</h1>
+        <p class="trek-muted" data-i18n="subtitle">Turn a destination, Xiaohongshu link, or pasted note into an editable TREK trip.</p>
+      </div>
+      <div class="actions"><p class="trek-muted" data-i18n="cookieHint">Keyword search uses the private Cookie from Settings → Plugins. Links, pasted text, and the form work without it.</p><button class="trek-btn trek-btn--ghost" id="open-settings" type="button" data-i18n="settings">Plugin settings</button></div>
+    </section>
+
+    <form id="plan-form" class="trek-card trek-stack" style="padding:20px">
+      <div class="grid">
+        <label class="field"><span data-i18n="destination">Destination</span><input class="trek-input" id="destination" placeholder="Kyoto" /></label>
+        <label class="field"><span data-i18n="interests">Interests</span><input class="trek-input" id="interests" placeholder="Temples, coffee" /></label>
+        <label class="field"><span data-i18n="startDate">Start date</span><input class="trek-input" id="start-date" type="date" /></label>
+        <label class="field"><span data-i18n="endDate">End date</span><input class="trek-input" id="end-date" type="date" /></label>
+        <label class="field"><span data-i18n="days">Days</span><input class="trek-input" id="day-count" type="number" min="1" max="14" value="5" /></label>
+        <label class="field"><span data-i18n="pace">Pace</span><select class="trek-select" id="pace"><option value="relaxed" data-i18n="relaxed">Relaxed</option><option value="balanced" data-i18n="balanced">Balanced</option><option value="packed" data-i18n="packed">Packed</option></select></label>
+        <label class="field full"><span data-i18n="urls">Xiaohongshu links (optional)</span><textarea class="trek-textarea" id="urls" rows="3" placeholder="https://www.xiaohongshu.com/explore/..."></textarea></label>
+        <label class="field full"><span data-i18n="paste">Pasted note text (optional)</span><textarea class="trek-textarea" id="source-text" rows="6"></textarea></label>
+      </div>
+      <div class="actions">
+        <button class="trek-btn trek-btn--primary" type="submit" id="generate" data-i18n="generate">Generate preview</button>
+        <span class="trek-muted" id="status"></span>
+      </div>
+      <div class="progress hidden" id="progress"><i></i></div>
+    </form>
+
+    <section id="warnings" class="trek-card trek-stack hidden" style="padding:18px">
+      <strong data-i18n="warnings">Warnings</strong><ul class="warning-list" id="warning-list"></ul>
+    </section>
+    <section id="preview" class="trek-stack hidden">
+      <div class="actions"><h2 style="margin:0" data-i18n="preview">Preview</h2><span class="trek-muted" data-i18n="previewHint">Uncheck a day or place before writing.</span></div>
+      <div class="trek-card trek-stack" id="source-card" style="padding:18px"><strong data-i18n="sources">Sources</strong><div id="sources" class="trek-stack"></div></div>
+      <div id="days" class="trek-stack"></div>
+      <div class="trek-card trek-stack" style="padding:20px">
+        <label class="field"><span data-i18n="tripTitle">New trip title</span><input class="trek-input" id="trip-title" /></label>
+        <button class="trek-btn trek-btn--primary" id="commit" type="button" data-i18n="commit">Create new trip</button>
+      </div>
+    </section>
+  </main>
+  <script>
+    var locale = 'en', currentJobId = null, currentDraft = null, polling = false, resumed = false;
+    var copy = {
+      en: { eyebrow:'Notes → mapped itinerary', title:'AI Guide', subtitle:'Turn a destination, Xiaohongshu link, or pasted note into an editable TREK trip.', cookieHint:'Keyword search uses the private Cookie from Settings → Plugins. Links, pasted text, and the form work without it.', settings:'Plugin settings', destination:'Destination', interests:'Interests', startDate:'Start date', endDate:'End date', days:'Days', pace:'Pace', relaxed:'Relaxed', balanced:'Balanced', packed:'Packed', urls:'Xiaohongshu links (optional)', paste:'Pasted note text (optional)', generate:'Generate preview', warnings:'Warnings', preview:'Preview', previewHint:'Uncheck a day or place before writing.', sources:'Sources', guides:'notes read', tripTitle:'New trip title', commit:'Create new trip', working:'Building map evidence…', ready:'Preview ready', tooFar:'Over 40 km — off by default', failed:'Planning failed' },
+      zh: { eyebrow:'攻略 → 地图行程', title:'AI 攻略', subtitle:'把目的地、小红书链接或粘贴正文变成可编辑的 TREK 新行程。', cookieHint:'关键词搜索使用“设置 → 插件”中私密保存的 Cookie；没有 Cookie 也可用表单、链接和粘贴正文。', settings:'插件设置', destination:'目的地', interests:'兴趣', startDate:'开始日期', endDate:'结束日期', days:'天数', pace:'节奏', relaxed:'轻松', balanced:'均衡', packed:'紧凑', urls:'小红书链接（可选）', paste:'粘贴攻略正文（可选）', generate:'生成预览', warnings:'提示', preview:'预览', previewHint:'写入前可取消整天或单个地点。', sources:'来源', guides:'篇攻略已读', tripTitle:'新行程标题', commit:'创建新行程', working:'正在生成地图证据…', ready:'预览已就绪', tooFar:'相邻超过 40 公里，默认不选', failed:'规划失败' }
+    };
+    function t(key) { return copy[locale.startsWith('zh') ? 'zh' : 'en'][key] || key; }
+    function translate() { document.documentElement.lang = locale; document.querySelectorAll('[data-i18n]').forEach(function(el){ el.textContent = t(el.dataset.i18n); }); }
+    trek.onContext(function (ctx) {
+      locale = (ctx.locale || 'en').toLowerCase(); translate();
+      if (!resumed) { resumed = true; resume(); }
+    });
+    document.getElementById('open-settings').addEventListener('click', function () { trek.navigate('/settings?tab=plugins'); });
+    function setBusy(value) {
+      polling = value; document.getElementById('generate').disabled = value; document.getElementById('commit').disabled = value;
+      document.getElementById('progress').classList.toggle('hidden', !value);
+    }
+    async function resume() {
+      try {
+        var data = await trek.invoke('/plan', { method:'GET' });
+        if (data && data.status !== 'idle') { currentJobId = data.jobId; await handleProgress(data); }
+      } catch (_) {}
+    }
+    async function poll() {
+      if (!currentJobId || polling) return;
+      setBusy(true);
+      try {
+        var data = await trek.invoke('/plan?jobId='+encodeURIComponent(currentJobId), { method:'GET' });
+        await handleProgress(data);
+      } catch (e) { trek.notify('error', e.message); setBusy(false); }
+    }
+    async function handleProgress(data) {
+      var guideProgress = data.progress && data.progress.guidesTotal
+        ? ' · ' + data.progress.guidesRead + '/' + data.progress.guidesTotal + ' ' + t('guides')
+        : '';
+      document.getElementById('status').textContent = data.status === 'ready' ? t('ready') : ((data.error || t('working')) + guideProgress);
+      if (data.status === 'ready') { currentDraft = data; render(data); setBusy(false); return; }
+      if (data.status === 'failed') { trek.notify('error', data.error || t('failed')); setBusy(false); return; }
+      setBusy(false); setTimeout(poll, 120);
+    }
+    document.getElementById('plan-form').addEventListener('submit', async function (event) {
+      event.preventDefault(); setBusy(true);
+      try {
+        var data = await trek.invoke('/plan', { method:'POST', body:{
+          destination:document.getElementById('destination').value, interests:document.getElementById('interests').value,
+          startDate:document.getElementById('start-date').value, endDate:document.getElementById('end-date').value,
+          dayCount:Number(document.getElementById('day-count').value), pace:document.getElementById('pace').value,
+          urls:document.getElementById('urls').value, sourceText:document.getElementById('source-text').value, locale:locale
+        }});
+        currentJobId = data.jobId; setBusy(false); poll();
+      } catch (e) { trek.notify('error', e.message); setBusy(false); }
+    });
+    function render(data) {
+      var warnings = data.warnings || [], list = document.getElementById('warning-list');
+      list.innerHTML = ''; warnings.forEach(function(text){ var li=document.createElement('li'); li.textContent=text; list.appendChild(li); });
+      document.getElementById('warnings').classList.toggle('hidden', !warnings.length);
+      var sources = document.getElementById('sources'); sources.innerHTML = '';
+      (data.guides || []).forEach(function(guide) {
+        var row=document.createElement('div'); row.className='trek-row';
+        row.textContent=(guide.title || guide.noteId || guide.via)+(guide.url ? ' · '+guide.url : '');
+        sources.appendChild(row);
+      });
+      document.getElementById('source-card').classList.toggle('hidden', !(data.guides || []).length);
+      var root = document.getElementById('days'); root.innerHTML = '';
+      (data.days || []).forEach(function(day, dayIndex) {
+        var section=document.createElement('section'); section.className='trek-card day trek-stack';
+        var heading=document.createElement('label'); heading.className='actions';
+        heading.innerHTML='<input type="checkbox" class="day-check" data-day="'+dayIndex+'" checked><strong></strong><span class="trek-muted"></span>';
+        heading.querySelector('strong').textContent=day.title; heading.querySelector('span').textContent=day.date || '';
+        section.appendChild(heading);
+        (day.places || []).forEach(function(place) {
+          var row=document.createElement('label'); row.className='place';
+          row.innerHTML='<input type="checkbox" class="place-check"><span><strong></strong><small class="trek-muted" style="display:block"></small></span><span></span>';
+          var check=row.querySelector('input'); check.dataset.evidence=place.evidenceId; check.dataset.day=dayIndex; check.checked=place.selected !== false;
+          row.querySelector('strong').textContent=place.name; row.querySelector('small').textContent=place.notes || place.address || '';
+          if (place.tooFar) { var badge=document.createElement('span'); badge.className='trek-chip trek-chip--warning'; badge.textContent=t('tooFar'); row.lastElementChild.appendChild(badge); }
+          section.appendChild(row);
+        });
+        root.appendChild(section);
+      });
+      root.querySelectorAll('.day-check').forEach(function(check){ check.addEventListener('change', function(){ root.querySelectorAll('.place-check[data-day="'+check.dataset.day+'"]').forEach(function(p){ p.checked=check.checked && !currentDraft.days[Number(check.dataset.day)].places.find(function(x){return x.evidenceId===p.dataset.evidence;}).tooFar; }); }); });
+      document.getElementById('trip-title').value=(data.intent && data.intent.destination ? data.intent.destination+' '+data.intent.dayCount+(locale.startsWith('zh')?'日行程':' day trip') : '');
+      document.getElementById('preview').classList.remove('hidden');
+    }
+    document.getElementById('commit').addEventListener('click', async function () {
+      if (!currentDraft) return; setBusy(true);
+      var evidenceIds=Array.from(document.querySelectorAll('.place-check:checked')).map(function(el){return el.dataset.evidence;});
+      try {
+        var data=await trek.invoke('/commit',{method:'POST',body:{jobId:currentJobId,title:document.getElementById('trip-title').value,evidenceIds:evidenceIds}});
+        trek.navigate('/trips/'+data.tripId);
+      } catch(e) { trek.notify('error',e.message); setBusy(false); }
+    });
+    translate();
+  </script>
+</body>
+</html>

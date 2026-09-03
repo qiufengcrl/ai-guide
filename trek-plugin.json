@@ -1,0 +1,87 @@
+{
+  "id": "ai-guide",
+  "name": "AI 攻略",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "author": "Your Name",
+  "description": "Turn Xiaohongshu travel notes into a TREK itinerary",
+  "type": "page",
+  "trek": ">=4.0.0 <5.0.0",
+  "nativeModules": false,
+  "permissions": [
+    "ai:invoke",
+    "db:own",
+    "db:create:trips",
+    "db:read:trips",
+    "db:write:places",
+    "db:write:itinerary",
+    "db:read:categories",
+    "db:meta",
+    "hook:user-data",
+    "http:outbound:www.xiaohongshu.com",
+    "http:outbound:edith.xiaohongshu.com",
+    "http:outbound:xhslink.com",
+    "http:outbound:nominatim.openstreetmap.org"
+  ],
+  "requiredAddons": [
+    "llm_parsing"
+  ],
+  "pluginDependencies": [],
+  "icon": "Sparkles",
+  "egress": [
+    "www.xiaohongshu.com",
+    "edith.xiaohongshu.com",
+    "xhslink.com",
+    "nominatim.openstreetmap.org"
+  ],
+  "settings": [
+    {
+      "key": "max_days",
+      "label": "Maximum days",
+      "input_type": "number",
+      "scope": "instance",
+      "placeholder": "8",
+      "hint": "Maximum 14"
+    },
+    {
+      "key": "max_places_per_day",
+      "label": "Maximum places per day",
+      "input_type": "number",
+      "scope": "instance",
+      "placeholder": "6"
+    },
+    {
+      "key": "max_notes",
+      "label": "Maximum Xiaohongshu notes",
+      "input_type": "number",
+      "scope": "instance",
+      "placeholder": "4",
+      "hint": "Maximum 8"
+    },
+    {
+      "key": "xhs_enabled",
+      "label": "Try Xiaohongshu keyword search",
+      "input_type": "select",
+      "scope": "instance",
+      "options": [
+        { "value": "true", "label": "Enabled" },
+        { "value": "false", "label": "Disabled" }
+      ]
+    },
+    {
+      "key": "xhs_cookie",
+      "label": "Your Xiaohongshu Web Cookie",
+      "input_type": "password",
+      "scope": "user",
+      "secret": true,
+      "hint": "Used only by the plugin server for your requests; never sent to the iframe or AI."
+    }
+  ],
+  "actions": [
+    {
+      "key": "testXhs",
+      "label": "Test Xiaohongshu session",
+      "hint": "Runs one minimal search using your own Cookie."
+    }
+  ]
+}
