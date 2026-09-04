@@ -285,8 +285,13 @@ test('地图证据会丢掉远离目的地的误匹配', () => {
   const bias = { lat: 52.3, lng: 124.7 };
   assert.equal(evidenceFromSearch(candidate, {
     source: 'nominatim',
-    places: [{ name: '古塔', lat: 48.95, lng: 27.05, types: ['tourism'] }],
+    places: [{ name: '古塔', lat: 48.95, lng: 27.05, types: ['tourism'], address: '乌克兰' }],
   }, 0, '大兴安岭', bias), null);
+  const labeled = evidenceFromSearch(candidate, {
+    source: 'nominatim',
+    places: [{ name: '北极镇', lat: 53.48, lng: 122.35, types: ['town'], address: '北极镇, 漠河市, 大兴安岭地区, 黑龙江省, 中国' }],
+  }, 0, '大兴安岭', { lat: 43.0, lng: 118.0 });
+  assert.equal(labeled.name, '北极镇');
   const near = evidenceFromSearch(candidate, {
     source: 'nominatim',
     places: [{ name: '洛古河村', lat: 53.3, lng: 122.35, types: ['village'] }],

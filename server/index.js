@@ -238,7 +238,9 @@ async function advance(job, ctx) {
     if (!job.work.bias && !job.work.biasFailed && job.draft.intent.destination) {
       try {
         const result = await searchPlaces(job.draft.intent.destination, { lang: locale });
-        const first = (result.places || []).find((place) => Number.isFinite(place?.lat) && Number.isFinite(place?.lng));
+        const dest = String(job.draft.intent.destination || '').trim();
+        const ranked = (result.places || []).filter((place) => Number.isFinite(place?.lat) && Number.isFinite(place?.lng));
+        const first = ranked.find((place) => dest && String(place.address || '').includes(dest)) || ranked[0];
         if (first) job.work.bias = { lat: first.lat, lng: first.lng, radius: 50000 };
         else job.work.biasFailed = true;
       } catch (error) {

@@ -288,12 +288,19 @@ function isAdministrativePlace(place) {
   ].includes(type));
 }
 
+function nearDestination(place, destination, bias) {
+  const dest = String(destination || '').trim();
+  const haystack = `${place?.name || ''} ${place?.address || ''}`;
+  if (dest.length >= 2 && haystack.includes(dest)) return true;
+  if (bias && finiteCoordinate(bias.lat) && finiteCoordinate(bias.lng)) {
+    return haversineKm(place, bias) <= MAX_FROM_DESTINATION_KM;
+  }
+  return true;
+}
+
 function evidenceFromSearch(candidate, result, index, destination, bias) {
   const places = (result?.places || []).filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
-  const destBias = bias && finiteCoordinate(bias.lat) && finiteCoordinate(bias.lng) ? bias : null;
-  const nearby = destBias
-    ? places.filter((item) => haversineKm(item, destBias) <= MAX_FROM_DESTINATION_KM)
-    : places;
+  const nearby = places.filter((item) => nearDestination(item, destination, bias));
   const specific = nearby.find((item) => !isGenericPlaceName(item.name, destination) && !isAdministrativePlace(item));
   const named = nearby.find((item) => !isGenericPlaceName(item.name, destination));
   const place = specific || named || null;
