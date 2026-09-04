@@ -30,6 +30,7 @@ test('会话搜索只保留 model_type=note，并把 xsec_token 带到详情接�
     const notes = await searchNotes('京都 景点 旅游 景点攻略', VALID_COOKIE, 4);
     assert.equal(notes.length, 1);
     assert.equal(notes[0].xsecToken, 'fixture-token');
+    assert.match(notes[0].url, /xsec_token=fixture-token/);
     const note = await fetchSessionNote(notes[0], VALID_COOKIE);
     assert.match(note.text, /伏见稻荷/);
     assert.match(calls[0].headers['x-s'], /^XYS_/);
@@ -38,6 +39,7 @@ test('会话搜索只保留 model_type=note，并把 xsec_token 带到详情接�
     assert.match(calls[0].headers['x-b3-traceid'], /^[a-f0-9]{16}$/);
     assert.match(calls[0].headers['x-xray-traceid'], /^[a-f0-9]{32}$/);
     assert.equal(calls[0].headers.origin, 'https://www.xiaohongshu.com');
+    assert.equal(calls[0].body.page_size, 20);
     assert.equal(calls[0].body.search_id.length, 21);
     assert.equal(calls[0].body.filters.length, 5);
     assert.equal(calls[1].body.xsec_token, 'fixture-token');
@@ -62,6 +64,7 @@ test('搜索结果可从 note_card.note_id 解析，并忽略非笔记条目', (
   assert.equal(notes[0].noteId, '64f000000000000000000099');
   assert.equal(notes[0].title, '洛阳两日');
   assert.equal(notes[0].xsecToken, 'tok');
+  assert.match(notes[0].url, /xsec_token=tok/);
 });
 
 test('300011 或异常文案被识别为会话失效', async () => {
@@ -107,11 +110,12 @@ test('xhslink.cn 分享口令会抽出短链并跟随到笔记页', async () => 
         headers: { get(name) { return name === 'location' ? 'https://www.xiaohongshu.com/discovery/item/64f000000000000000000001?xsec_token=tok' : null; } },
       };
     }
-    assert.match(String(url), /discovery\/item\/64f000000000000000000001/);
+    assert.match(String(url), /explore\/64f000000000000000000001/);
+    assert.match(String(url), /xsec_token=tok/);
     return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
   };
   try {
-    const note = await fetchPublicNote('https://xhslink.cn/o/4YIkUR0MNXN', '');
+    const note = await fetchPublicNote('https://xhslink.cn/o/4YIkUR0MNXN');
     assert.equal(note.noteId, '64f000000000000000000001');
     assert.equal(note.via, 'url');
   } finally {
@@ -135,7 +139,7 @@ test('xhslink 仅跟随到允许域名并读取公开页', async () => {
     return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
   };
   try {
-    const note = await fetchPublicNote('https://xhslink.com/a/test', '');
+    const note = await fetchPublicNote('https://xhslink.com/a/test');
     assert.equal(note.noteId, '64f000000000000000000001');
     assert.equal(note.via, 'url');
   } finally {
@@ -161,9 +165,26 @@ test('xhslink 在运行时已跟随跳转时仍能读出笔记页', async () => 
     return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
   };
   try {
-    const note = await fetchPublicNote('https://xhslink.cn/o/followed', '');
+    const note = await fetchPublicNote('https://xhslink.cn/o/followed');
     assert.equal(note.noteId, '64f000000000000000000001');
     assert.equal(note.via, 'url');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('公开页读取不携带 Cookie', async () => {
+  const originalFetch = global.fetch;
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures/note.html'), 'utf8');
+  const calls = [];
+  global.fetch = async (url, init) => {
+    calls.push({ url: String(url), headers: init.headers });
+    return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
+  };
+  try {
+    await require('../server/xhs/url').fetchPublicNote('https://www.xiaohongshu.com/explore/64f000000000000000000001?xsec_token=abc%2Bdef');
+    assert.equal(calls[0].headers.cookie, undefined);
+    assert.match(calls[0].url, /xsec_token=/);
   } finally {
     global.fetch = originalFetch;
   }
@@ -177,7 +198,7 @@ test('xhslink 不跟随到 egress 外域名', async () => {
     headers: { get() { return 'https://evil.example/note'; } },
   });
   try {
-    await assert.rejects(fetchPublicNote('https://xhslink.com/a/test', ''), /left the allowed hosts/);
+    await assert.rejects(fetchPublicNote('https://xhslink.com/a/test'), /left the allowed hosts/);
   } finally {
     global.fetch = originalFetch;
   }

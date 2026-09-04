@@ -75,6 +75,36 @@ async function fetchWithTimeout(url, init = {}, timeoutMs = 15000) {
   }
 }
 
+function queryValue(url, name) {
+  const query = url.search ? url.search.slice(1) : '';
+  if (!query) return '';
+  for (const pair of query.split('&')) {
+    const separator = pair.indexOf('=');
+    const rawName = decodeURIComponent((separator < 0 ? pair : pair.slice(0, separator)).replace(/\+/g, '%20'));
+    if (rawName !== name) continue;
+    const rawValue = separator < 0 ? '' : pair.slice(separator + 1);
+    return decodeURIComponent(rawValue.replace(/\+/g, '%2B'));
+  }
+  return '';
+}
+
+function exploreNoteUrl(noteId, xsecToken = '', xsecSource = 'pc_search') {
+  const url = new URL(`https://www.xiaohongshu.com/explore/${noteId}`);
+  if (xsecToken) {
+    url.searchParams.set('xsec_token', xsecToken);
+    url.searchParams.set('xsec_source', xsecSource || 'pc_search');
+  }
+  return url.href;
+}
+
+function publicPageHeaders() {
+  return {
+    accept: 'text/html,application/xhtml+xml',
+    'accept-language': 'zh-CN,zh;q=0.9',
+    'user-agent': UA,
+  };
+}
+
 function nextRedirectUrl(current, response) {
   const location = response?.headers?.get?.('location');
   if (location) return new URL(location, current);
@@ -88,7 +118,7 @@ async function resolveNoteUrl(value) {
   for (let hop = 0; hop < 4; hop += 1) {
     if (!isAllowedHost(url.hostname)) throw new Error('Unsupported Xiaohongshu URL');
     if (isShortLinkHost(url.hostname)) {
-      const response = await fetchWithTimeout(url.href, { redirect: 'manual', headers: { 'user-agent': UA } }, 4000);
+      const response = await fetchWithTimeout(url.href, { redirect: 'manual', headers: publicPageHeaders() }, 4000);
       const next = nextRedirectUrl(url, response);
       if (!next) throw new Error('Xiaohongshu short link did not redirect');
       if (!isAllowedHost(next.hostname)) throw new Error('Xiaohongshu short link left the allowed hosts');
@@ -97,20 +127,21 @@ async function resolveNoteUrl(value) {
     }
     const noteId = noteIdFromUrl(url.href);
     if (!noteId) throw new Error('Unsupported Xiaohongshu note URL');
+    const xsecToken = queryValue(url, 'xsec_token');
+    const xsecSource = queryValue(url, 'xsec_source') || 'pc_share';
     return {
       noteId,
-      url: url.href,
-      xsecToken: url.searchParams.get('xsec_token') || '',
+      xsecToken,
+      xsecSource,
+      url: exploreNoteUrl(noteId, xsecToken, xsecSource),
     };
   }
   throw new Error('Xiaohongshu short link redirected too many times');
 }
 
-async function fetchPublicNoteFromResolved(resolved, cookie) {
-  const headers = { 'user-agent': UA };
-  if (cookie) headers.cookie = cookie;
+async function fetchPublicNoteFromResolved(resolved) {
   try {
-    const response = await fetchWithTimeout(resolved.url, { headers }, 5000);
+    const response = await fetchWithTimeout(resolved.url, { headers: publicPageHeaders() }, 5000);
     if (!response.ok) throw new Error(`Xiaohongshu page returned ${response.status}`);
     return { ...parseInitialState(await response.text(), resolved.noteId), url: resolved.url, via: 'url' };
   } catch (error) {
@@ -121,8 +152,8 @@ async function fetchPublicNoteFromResolved(resolved, cookie) {
   }
 }
 
-async function fetchPublicNote(value, cookie) {
-  return fetchPublicNoteFromResolved(await resolveNoteUrl(value), cookie);
+async function fetchPublicNote(value) {
+  return fetchPublicNoteFromResolved(await resolveNoteUrl(value));
 }
 
 module.exports = {
@@ -137,4 +168,6 @@ module.exports = {
   fetchPublicNoteFromResolved,
   fetchPublicNote,
   fetchWithTimeout,
+  exploreNoteUrl,
+  queryValue,
 };

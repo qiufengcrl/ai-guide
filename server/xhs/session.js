@@ -1,5 +1,7 @@
-const { fetchWithTimeout, fetchPublicNote } = require('./url');
+const { fetchWithTimeout, fetchPublicNote, exploreNoteUrl } = require('./url');
 const { createSearchId, createSignedPost } = require('./signature');
+
+const SEARCH_PAGE_SIZE = 20;
 
 class XhsSessionError extends Error {}
 
@@ -46,6 +48,9 @@ async function post(path, body, cookie) {
     headers: signed.headers,
     body: signed.body,
   }, 12000);
+  if (response.status === 461 || response.status === 471) {
+    throw new XhsSessionError(`Xiaohongshu requested verification (${response.status})`);
+  }
   if (!response.ok) throw new XhsSessionError(`Xiaohongshu returned ${response.status}`);
   return assertSessionResponse(await response.json());
 }
@@ -63,11 +68,12 @@ function parseSearchNotes(data, maxNotes = 4) {
     if (!noteId || seen.has(noteId)) continue;
     if (noteId.length < 16 && !/^[0-9a-f]{24}$/i.test(noteId)) continue;
     seen.add(noteId);
+    const xsecToken = String(item?.xsec_token || item?.xsecToken || card.xsec_token || '');
     notes.push({
       noteId,
-      xsecToken: String(item?.xsec_token || item?.xsecToken || card.xsec_token || ''),
+      xsecToken,
       title: String(card.display_title || card.title || item?.display_title || ''),
-      url: `https://www.xiaohongshu.com/explore/${noteId}`,
+      url: exploreNoteUrl(noteId, xsecToken, 'pc_search'),
     });
     if (notes.length >= maxNotes) break;
   }
@@ -84,7 +90,7 @@ async function searchNotesDetailed(keyword, cookie, maxNotes = 4) {
   const data = await post('/api/sns/web/v1/search/notes', {
     keyword: String(keyword || '').trim(),
     page: 1,
-    page_size: Math.min(8, Math.max(1, maxNotes)),
+    page_size: SEARCH_PAGE_SIZE,
     search_id: createSearchId(),
     sort: 'general',
     note_type: 0,
@@ -138,11 +144,12 @@ async function fetchSessionNote(item, cookie) {
   } catch {
     // Public SSR is the intentional detail fallback.
   }
-  const note = await fetchPublicNote(item.url, cookie);
+  const note = await fetchPublicNote(item.url);
   return { ...note, via: item.via || 'search' };
 }
 
 module.exports = {
+  SEARCH_PAGE_SIZE,
   XhsSessionError,
   normalizeXhsCookie,
   assertSessionResponse,

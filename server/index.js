@@ -27,7 +27,7 @@ const json = (value, fallback) => {
   try { return JSON.parse(String(value || '')); } catch { return fallback; }
 };
 const response = (status, body) => ({ status, headers: { 'content-type': 'application/json' }, body });
-const pauseForXhs = () => new Promise((resolve) => setTimeout(resolve, 300));
+const pauseForXhs = () => new Promise((resolve) => setTimeout(resolve, 800));
 
 function isTransientTickError(error) {
   if (!error) return false;
@@ -125,7 +125,7 @@ async function advance(job, ctx) {
           let note;
           try {
             await pauseForXhs();
-            note = await fetchPublicNoteFromResolved(resolved, cookie);
+            note = await fetchPublicNoteFromResolved(resolved);
           } catch (publicError) {
             const noteId = publicError.noteId || resolved.noteId || noteIdFromUrl(resolved.url || value);
             if (!cookie || !noteId) throw publicError;
