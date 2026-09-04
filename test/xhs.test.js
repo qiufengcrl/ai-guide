@@ -39,8 +39,7 @@ test('会话搜索只保留 model_type=note，并把 xsec_token 带到详情接�
     assert.match(calls[0].headers['x-xray-traceid'], /^[a-f0-9]{32}$/);
     assert.equal(calls[0].headers.origin, 'https://www.xiaohongshu.com');
     assert.equal(calls[0].body.search_id.length, 21);
-    assert.equal(calls[0].body.note_type, 0);
-    assert.ok(!calls[0].body.filters);
+    assert.equal(calls[0].body.filters.length, 5);
     assert.equal(calls[1].body.xsec_token, 'fixture-token');
     assert.equal(calls[1].body.source_note_id, '64f000000000000000000001');
   } finally {

@@ -15,7 +15,7 @@ const {
   publicDraft,
 } = require('./pipeline');
 const { fetchPublicNote, noteIdFromUrl, searchKeywordFromUrl } = require('./xhs/url');
-const { normalizeXhsCookie, searchNotes, fetchSessionNote } = require('./xhs/session');
+const { normalizeXhsCookie, searchNotes, searchNotesDetailed, fetchSessionNote } = require('./xhs/session');
 const { searchPlaces } = require('./geo/nominatim');
 
 const JOB_FIELDS = 'id, user_id, status, stage, payload_json, draft_json, work_json, error, committed_trip_id, created_at, updated_at';
@@ -132,14 +132,12 @@ async function advance(job, ctx) {
     if (!work.searchAttempted) {
       work.searchAttempted = true;
       if (limits.xhsEnabled && cookie && job.draft.intent.destination) {
-        const queries = job.draft.intent.searchQueries?.length
-          ? job.draft.intent.searchQueries
-          : [job.draft.intent.guideQuery];
+        const queries = (job.draft.intent.searchQueries || [job.draft.intent.guideQuery]).slice(0, 2);
         let lastError = null;
         for (const query of queries) {
           try {
             await pauseForXhs();
-            const automatic = await searchNotes(query, cookie, limits.maxNotes);
+            const { notes: automatic } = await searchNotesDetailed(query, cookie, limits.maxNotes);
             work.lastSearchQuery = query;
             work.lastSearchCount = automatic.length;
             if (automatic.length) {
@@ -151,6 +149,7 @@ async function advance(job, ctx) {
             }
           } catch (error) {
             lastError = error;
+            if (/461|429|频繁|风控/.test(String(error.message || ''))) break;
           }
         }
         if (!work.pendingNotes.length) {
@@ -275,12 +274,25 @@ async function advance(job, ctx) {
   }
 }
 
-async function testXhs(ctx, locale = 'en') {
+async function testXhs(ctx, locale = 'en', keyword = '旅行') {
   const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
   if (!cookie) return { ok: false, message: message(locale, '未配置小红书 Cookie', 'Xiaohongshu Cookie is not configured') };
   try {
-    await searchNotes('旅行', cookie, 1);
-    return { ok: true, message: message(locale, '小红书会话可用', 'Xiaohongshu session is available') };
+    const { notes, debug } = await searchNotesDetailed(String(keyword || '旅行').trim() || '旅行', cookie, 4);
+    if (!notes.length) {
+      return {
+        ok: false,
+        count: 0,
+        detail: debug,
+        message: message(locale, `小红书会话可用，但「${keyword}」没有搜到笔记`, `Session works, but "${keyword}" returned no notes`),
+      };
+    }
+    return {
+      ok: true,
+      count: notes.length,
+      detail: debug,
+      message: message(locale, `小红书会话可用，搜到 ${notes.length} 篇`, `Xiaohongshu session is available (${notes.length} notes)`),
+    };
   } catch (error) {
     return { ok: false, message: message(locale, `小红书会话不可用：${error.message}`, `Xiaohongshu session unavailable: ${error.message}`) };
   }
@@ -457,7 +469,7 @@ module.exports = definePlugin({
     {
       method: 'POST', path: '/xhs/test', auth: true,
       async handler(req, ctx) {
-        return response(200, await testXhs(ctx, req.body?.locale || 'en'));
+        return response(200, await testXhs(ctx, req.body?.locale || 'en', req.body?.keyword));
       },
     },
   ],

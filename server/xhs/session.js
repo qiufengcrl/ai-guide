@@ -75,18 +75,45 @@ function parseSearchNotes(data, maxNotes = 4) {
 }
 
 async function searchNotes(keyword, cookie, maxNotes = 4) {
+  const { notes } = await searchNotesDetailed(keyword, cookie, maxNotes);
+  return notes;
+}
+
+async function searchNotesDetailed(keyword, cookie, maxNotes = 4) {
   if (!cookie) throw new XhsSessionError('Xiaohongshu Cookie is empty');
   const data = await post('/api/sns/web/v1/search/notes', {
     keyword: String(keyword || '').trim(),
     page: 1,
-    page_size: Math.min(20, Math.max(1, maxNotes)),
+    page_size: Math.min(8, Math.max(1, maxNotes)),
     search_id: createSearchId(),
     sort: 'general',
     note_type: 0,
     ext_flags: [],
+    filters: [
+      { tags: ['general'], type: 'sort_type' },
+      { tags: ['不限'], type: 'filter_note_type' },
+      { tags: ['不限'], type: 'filter_note_time' },
+      { tags: ['不限'], type: 'filter_note_range' },
+      { tags: ['不限'], type: 'filter_pos_distance' },
+    ],
+    geo: '',
     image_formats: ['jpg', 'webp', 'avif'],
   }, cookie);
-  return parseSearchNotes(data, maxNotes);
+  return { notes: parseSearchNotes(data, maxNotes), debug: inspectSearchData(data) };
+}
+
+function inspectSearchData(data) {
+  const payload = data?.data && typeof data.data === 'object' ? data.data : {};
+  const items = payload.items || payload.notes;
+  return {
+    success: data?.success,
+    code: data?.code ?? null,
+    msg: String(data?.msg || '').slice(0, 120),
+    dataKeys: Object.keys(payload).slice(0, 16),
+    itemCount: Array.isArray(items) ? items.length : null,
+    firstModel: items?.[0]?.model_type || items?.[0]?.modelType || null,
+    firstKeys: items?.[0] && typeof items[0] === 'object' ? Object.keys(items[0]).slice(0, 16) : [],
+  };
 }
 
 async function fetchSessionNote(item, cookie) {
@@ -120,6 +147,7 @@ module.exports = {
   normalizeXhsCookie,
   assertSessionResponse,
   searchNotes,
+  searchNotesDetailed,
   fetchSessionNote,
   parseSearchNotes,
 };
