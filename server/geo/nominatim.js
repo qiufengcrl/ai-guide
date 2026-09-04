@@ -22,7 +22,7 @@ function parseBias(locationBias) {
   const lng = Number(locationBias.lng ?? locationBias.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const radius = Number(locationBias.radius);
-  return { lat, lng, radius: Number.isFinite(radius) && radius > 0 ? Math.min(radius, 100000) : 50000 };
+  return { lat, lng, radius: Number.isFinite(radius) && radius > 0 ? Math.min(radius, 500000) : 50000 };
 }
 
 function scoreRow(row) {
@@ -71,7 +71,7 @@ async function searchPlaces(query, options = {}) {
   const bias = parseBias(options.locationBias);
   if (bias) {
     // viewbox without bounded=1 soft-biases ranking instead of restricting it.
-    const half = Math.min(1, bias.radius / 111320);
+    const half = Math.min(5, bias.radius / 111320);
     params.set('viewbox', [bias.lng - half, bias.lat + half, bias.lng + half, bias.lat - half]
       .map((value) => value.toFixed(5)).join(','));
   }

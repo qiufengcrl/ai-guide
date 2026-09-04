@@ -9,7 +9,9 @@ const {
   extractionText,
   extractionInstruction,
   normalizeCandidates,
-  placeSearchQuery,
+  looksLikeShareCard,
+  noteDisplayTitle,
+  placeSearchNames,
   evidenceFromSearch,
   gateAndSchedule,
   publicDraft,
@@ -80,7 +82,7 @@ async function advance(job, ctx) {
   if (job.stage === 'parse_intent') {
     const intent = normalizeInput(job.payload, limits);
     job.draft = { intent, guides: [], warnings: [], days: [] };
-    if (intent.sourceText) {
+    if (intent.sourceText && !looksLikeShareCard(intent.sourceText)) {
       job.draft.guides.push({
         id: 'g_1',
         noteId: null,
@@ -136,7 +138,12 @@ async function advance(job, ctx) {
             });
             return;
           }
-          job.draft.guides.push({ ...note, id: `g_${job.draft.guides.length + 1}`, text: note.text.slice(0, 4000) });
+          job.draft.guides.push({
+            ...note,
+            id: `g_${job.draft.guides.length + 1}`,
+            title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
+            text: note.text.slice(0, 4000),
+          });
         }
       } catch (error) {
         work.resolvedNote = null;
@@ -197,7 +204,7 @@ async function advance(job, ctx) {
           ...note,
           id: `g_${job.draft.guides.length + 1}`,
           via: item.via || note.via || 'search',
-          title: String(note.title || item.title || '').trim() || message(locale, '小红书笔记', 'Xiaohongshu note'),
+          title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
           text: note.text.slice(0, 4000),
         });
       } catch {
@@ -241,7 +248,7 @@ async function advance(job, ctx) {
         const dest = String(job.draft.intent.destination || '').trim();
         const ranked = (result.places || []).filter((place) => Number.isFinite(place?.lat) && Number.isFinite(place?.lng));
         const first = ranked.find((place) => dest && String(place.address || '').includes(dest)) || ranked[0];
-        if (first) job.work.bias = { lat: first.lat, lng: first.lng, radius: 50000 };
+        if (first) job.work.bias = { lat: first.lat, lng: first.lng, radius: 400000 };
         else job.work.biasFailed = true;
       } catch (error) {
         job.work.biasFailed = true;
@@ -254,11 +261,10 @@ async function advance(job, ctx) {
     if (job.work.candidateIndex < job.work.candidates.length) {
       const index = job.work.candidateIndex;
       const candidate = job.work.candidates[index];
-      const combined = placeSearchQuery(candidate, job.draft.intent.destination);
-      const nameOnly = String(candidate.nameZh || candidate.name || '').trim();
-      const usingNameOnly = Boolean(job.work.retryNameOnly) && Boolean(nameOnly) && nameOnly !== combined;
-      const query = usingNameOnly ? nameOnly : combined;
-      job.work.retryNameOnly = false;
+      const queries = placeSearchNames(candidate, job.draft.intent.destination);
+      const queryIndex = Number(job.work.retryQueryIndex) || 0;
+      const query = queries[queryIndex] || String(candidate.name || '');
+      job.work.retryQueryIndex = 0;
       let result = null;
       try {
         result = await searchPlaces(query, { lang: locale, locationBias: job.work.bias || undefined });
@@ -273,8 +279,8 @@ async function advance(job, ctx) {
       if (evidence) {
         job.work.evidence.push(evidence);
         job.work.candidateIndex += 1;
-      } else if (!usingNameOnly && nameOnly && nameOnly !== combined) {
-        job.work.retryNameOnly = true;
+      } else if (queryIndex + 1 < queries.length) {
+        job.work.retryQueryIndex = queryIndex + 1;
       } else {
         addWarning(job, message(locale, `「${query}」无法匹配坐标，已跳过`, `"${query}" could not be matched to coordinates and was skipped`));
         job.work.candidateIndex += 1;

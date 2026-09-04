@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, destinationSeeds, evidenceFromSearch } = require('../server/pipeline');
+const { gateAndSchedule, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, destinationSeeds, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces } = require('../server/geo/nominatim');
@@ -275,6 +275,13 @@ test('分享口令里的 xhslink.cn 会被抽成笔记链接，大兴安岭有�
   );
   assert.deepEqual(intent.urls, ['https://xhslink.cn/o/4YIkUR0MNXN']);
   assert.ok(destinationSeeds('大兴安岭').includes('北极村'));
+  assert.ok(destinationSeeds('大兴安岭').includes('北红村'));
+  assert.equal(placeSearchQuery({ name: '北极村' }, '大兴安岭'), '北极镇 漠河 大兴安岭');
+  assert.deepEqual(placeSearchNames({ name: '洛古河' }, '大兴安岭')[0], '洛古河村 大兴安岭');
+  assert.equal(isGenericPlaceName('漠河市', '大兴安岭'), false);
+  assert.equal(isGenericPlaceName('河南省', '河南'), true);
+  assert.ok(looksLikeShareCard(share));
+  assert.equal(noteDisplayTitle({ title: '', text: '上海出发5天4晚，追上大兴安岭的秋\n正文' }, '小红书笔记'), '上海出发5天4晚，追上大兴安岭的秋');
   const candidates = normalizeCandidates({ candidates: [{ name: '大兴安岭' }] }, intent);
   assert.ok(!candidates.some((item) => item.name === '大兴安岭'));
   assert.ok(candidates.some((item) => item.name === '北极村'));
@@ -440,7 +447,7 @@ test('粘贴 xhslink.cn 分享口令会拆出短链并读成链接笔记', async
     return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
   };
   const { state } = await makeReady(fixture, { sourceText: share }, xhsFallback);
-  assert.ok(state.guides.some((guide) => guide.via === 'paste'));
+  assert.ok(!state.guides.some((guide) => guide.via === 'paste'));
   assert.ok(state.guides.some((guide) => guide.via === 'url' && guide.noteId === '64f000000000000000000001'));
   assert.equal(state.sourceSummary.noteCount, 1);
 });

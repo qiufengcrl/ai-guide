@@ -26,11 +26,37 @@ const DESTINATION_SEEDS = {
   张家界: ['天门山', '张家界国家森林公园', '张家界大峡谷'],
   三亚: ['亚龙湾', '天涯海角', '南山寺', '蜈支洲岛'],
   漠河: ['北极村', '洛古河', '北红村', '黑龙江第一湾'],
-  大兴安岭: ['漠河', '北极村', '洛古河', '白桦林', '九曲十八湾', '呼中国家级自然保护区', '莫尔道嘎国家森林公园', '根河'],
+  大兴安岭: ['北极村', '洛古河', '北红村', '白桦林观景台', '黑龙江第一湾', '呼中区', '漠河', '莫尔道嘎国家森林公园'],
   京都: ['伏见稻荷大社', '清水寺', '岚山', '金阁寺', '祇园'],
   大阪: ['大阪城', '道顿堀', '心斋桥', '通天阁'],
   东京: ['浅草寺', '东京塔', '明治神宫', '涩谷', '上野公园'],
 };
+
+const PLACE_SEARCH_ALIASES = {
+  北极村: '北极镇 漠河',
+  洛古河: '洛古河村',
+  白桦林: '白桦林观景台',
+  黑龙江第一湾: '龙江第一湾风景区',
+  呼中国家级自然保护区: '呼中区',
+};
+
+function looksLikeShareCard(text) {
+  const raw = String(text || '').trim();
+  if (!raw || raw.length > 500) return false;
+  return /xhslink\.(cn|com)|xiaohongshu\.com\/|进入【小红书】/.test(raw);
+}
+
+function noteDisplayTitle(note, fallback) {
+  const title = String(note?.title || '').trim();
+  if (title) return title;
+  const line = String(note?.text || '')
+    .split(/\n/)[0]
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (line.length >= 4) return line.slice(0, 40);
+  return String(fallback || '').trim();
+}
 
 const WEAK_PLACE_WORDS = new Set([
   '历史', '文化', '美食', '购物', '自然', '亲子', '小众', '网红', '景点', '旅游', '攻略',
@@ -151,8 +177,8 @@ function isGenericPlaceName(name, destination) {
   if (!raw) return true;
   const folded = foldName(raw);
   if (['中国', 'china', '中华人民共和国', 'prc'].includes(folded)) return true;
-  if (/(特别行政区|自治区|省|市|地区|盟)$/.test(raw)) return true;
-  if (/\b(province|prefecture|municipality|autonomous region|special administrative region|country|republic)\b/i.test(raw)) return true;
+  if (/(特别行政区|自治区|省)$/.test(raw)) return true;
+  if (/\b(province|country|republic|autonomous region|special administrative region)\b/i.test(raw)) return true;
   const dest = String(destination || '').trim();
   if (!dest) return false;
   const destFold = foldName(dest);
@@ -268,12 +294,27 @@ function normalizeCandidates(raw, intent) {
 }
 
 function placeSearchQuery(candidate, destination) {
-  const name = String(candidate?.nameZh || candidate?.name || '').trim();
+  const rawName = String(candidate?.nameZh || candidate?.name || '').trim();
+  const name = PLACE_SEARCH_ALIASES[rawName] || rawName;
   const dest = String(destination || '').trim();
   if (!name) return dest;
   if (!dest) return name;
   if (foldName(name).includes(foldName(dest)) || foldName(dest).includes(foldName(name))) return name;
   return `${name} ${dest}`;
+}
+
+function placeSearchNames(candidate, destination) {
+  const name = String(candidate?.nameZh || candidate?.name || '').trim();
+  const alias = PLACE_SEARCH_ALIASES[name];
+  const queries = [];
+  const add = (value) => {
+    const text = String(value || '').trim();
+    if (text && !queries.includes(text)) queries.push(text);
+  };
+  add(placeSearchQuery(candidate, destination));
+  add(alias);
+  add(name);
+  return queries;
 }
 
 function finiteCoordinate(value) {
@@ -340,11 +381,23 @@ function isoDate(startDate, offset) {
   return date.toISOString().slice(0, 10);
 }
 
-function markDistance(days) {
+function tooFarLimitKm(evidence) {
+  const items = Array.isArray(evidence) ? evidence.filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng)) : [];
+  let max = 0;
+  for (let i = 0; i < items.length; i += 1) {
+    for (let j = i + 1; j < items.length; j += 1) {
+      max = Math.max(max, haversineKm(items[i], items[j]));
+    }
+  }
+  return max > 200 ? 300 : TOO_FAR_KM;
+}
+
+function markDistance(days, limitKm = TOO_FAR_KM) {
+  const limit = Number.isFinite(limitKm) && limitKm > 0 ? limitKm : TOO_FAR_KM;
   for (const day of days) {
     day.places.forEach((place, index) => {
       const previous = day.places[index - 1];
-      const tooFar = previous ? haversineKm(previous, place) > TOO_FAR_KM : false;
+      const tooFar = previous ? haversineKm(previous, place) > limit : false;
       place.tooFar = tooFar;
       place.selected = !tooFar;
     });
@@ -407,7 +460,7 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
     });
   }
   rebalanceDays(days);
-  markDistance(days);
+  markDistance(days, tooFarLimitKm(unique));
   if (unique.length > intent.dayCount * perDay) {
     warnings.push(message(locale, '地点超过行程容量，已截断', 'Places exceeded itinerary capacity and were truncated'));
   }
@@ -448,6 +501,9 @@ module.exports = {
   MAX_FROM_DESTINATION_KM,
   EXTRACTION_SCHEMA,
   DESTINATION_SEEDS,
+  PLACE_SEARCH_ALIASES,
+  looksLikeShareCard,
+  noteDisplayTitle,
   settings,
   isZh,
   message,
@@ -460,6 +516,7 @@ module.exports = {
   destinationSeeds,
   targetPlaceCount,
   placeSearchQuery,
+  placeSearchNames,
   guideSearchQueries,
   evidenceFromSearch,
   gateAndSchedule,
