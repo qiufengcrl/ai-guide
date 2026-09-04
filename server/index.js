@@ -7,7 +7,9 @@ const {
   message,
   normalizeInput,
   extractionText,
+  extractionInstruction,
   normalizeCandidates,
+  placeSearchQuery,
   evidenceFromSearch,
   gateAndSchedule,
   publicDraft,
@@ -160,10 +162,11 @@ async function advance(job, ctx) {
   }
 
   if (job.stage === 'extract') {
+    const hasGuides = (job.draft.guides || []).some((guide) => String(guide.text || '').trim());
     const result = await ctx.ai.extract(
       extractionText(job.draft.guides, job.draft.intent),
       EXTRACTION_SCHEMA,
-      'Extract only real places named in the supplied material. Do not invent coordinates.',
+      extractionInstruction(job.draft.intent, hasGuides),
     );
     const extracted = result.results[0] || {};
     if (!job.draft.intent.destination && typeof extracted.intent?.destination === 'string') {
@@ -171,6 +174,11 @@ async function advance(job, ctx) {
       job.draft.intent.guideQuery = `${job.draft.intent.destination} ${job.draft.intent.interests.length ? job.draft.intent.interests.join(' ') : '景点'} 旅游 景点攻略`.trim();
     }
     job.work.candidates = normalizeCandidates(extracted, job.draft.intent);
+    if (!job.work.candidates.length) {
+      addWarning(job, message(locale,
+        '没有提取到具体景点。请粘贴攻略、添加链接，或换一个更具体的城市。',
+        'No specific places were extracted. Paste a note, add links, or try a more specific city.'));
+    }
     job.work.candidateIndex = 0;
     job.work.evidence = [];
     job.work.bias = null;
@@ -195,7 +203,7 @@ async function advance(job, ctx) {
     if (job.work.candidateIndex < job.work.candidates.length) {
       const index = job.work.candidateIndex++;
       const candidate = job.work.candidates[index];
-      const query = candidate.nameZh || candidate.name;
+      const query = placeSearchQuery(candidate, job.draft.intent.destination);
       let result = null;
       try {
         result = await searchPlaces(query, { lang: locale, locationBias: job.work.bias || undefined });
@@ -205,7 +213,7 @@ async function advance(job, ctx) {
           `Place search for "${query}" failed: ${error.message}`));
       }
       if (result) {
-        const evidence = evidenceFromSearch(candidate, result, index);
+        const evidence = evidenceFromSearch(candidate, result, index, job.draft.intent.destination);
         if (evidence) job.work.evidence.push(evidence);
         else addWarning(job, message(locale, `「${query}」无法匹配坐标，已跳过`, `"${query}" could not be matched to coordinates and was skipped`));
       }

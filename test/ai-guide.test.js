@@ -12,10 +12,10 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule } = require('../server/pipeline');
+const { gateAndSchedule, normalizeCandidates, extractionText, extractionInstruction, isGenericPlaceName, publicDraft, placeSearchQuery } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
-const { setGeoThrottleInterval } = require('../server/geo/nominatim');
+const { setGeoThrottleInterval, scoreRow, searchPlaces } = require('../server/geo/nominatim');
 
 setGeoThrottleInterval(0);
 
@@ -25,11 +25,23 @@ const GRANTS = [
 ];
 
 const NOMINATIM_ROWS = {
-  京都: { name: 'Kyoto', lat: 35, lng: 135 },
+  京都: { name: 'Kyoto', lat: 35, lng: 135, category: 'boundary', type: 'administrative' },
   近点A: { name: 'Near A', lat: 35, lng: 135 },
   近点B: { name: 'Near B', lat: 35.01, lng: 135.01 },
   远点: { name: 'Far', lat: 36, lng: 136 },
+  河南: { name: 'Henan', lat: 34.75, lng: 113.62, category: 'boundary', type: 'administrative' },
+  河南省: { name: 'Henan', lat: 34.75, lng: 113.62, category: 'boundary', type: 'administrative' },
+  龙门石窟: { name: 'Longmen Grottoes', lat: 34.55, lng: 112.47, category: 'tourism', type: 'attraction' },
+  少林寺: { name: 'Shaolin Temple', lat: 34.51, lng: 112.94, category: 'tourism', type: 'attraction' },
+  白马寺: { name: 'White Horse Temple', lat: 34.72, lng: 112.60, category: 'historic', type: 'temple' },
+  清明上河园: { name: 'Millennium City Park', lat: 34.81, lng: 114.35, category: 'tourism', type: 'theme_park' },
 };
+
+function lookupGeoRow(query) {
+  if (NOMINATIM_ROWS[query]) return NOMINATIM_ROWS[query];
+  const head = query.split(/\s+/).filter(Boolean)[0];
+  return (head && NOMINATIM_ROWS[head]) || null;
+}
 
 function stubGeoFetch(fallback) {
   const original = global.fetch;
@@ -39,9 +51,17 @@ function stubGeoFetch(fallback) {
     if (href.startsWith('https://nominatim.openstreetmap.org/')) {
       const query = new URL(href).searchParams.get('q') || '';
       calls.push(query);
-      const row = NOMINATIM_ROWS[query];
+      const row = lookupGeoRow(query);
       const body = row
-        ? [{ name: row.name, lat: String(row.lat), lon: String(row.lng), display_name: `${row.name}, fixture`, osm_id: 1000, category: 'tourism', type: 'attraction' }]
+        ? [{
+          name: row.name,
+          lat: String(row.lat),
+          lon: String(row.lng),
+          display_name: `${row.name}, fixture`,
+          osm_id: 1000,
+          category: row.category || 'tourism',
+          type: row.type || 'attraction',
+        }]
         : [];
       return {
         ok: true,
@@ -121,14 +141,14 @@ function memoryDb() {
   return api;
 }
 
-function buildHost() {
+function buildHost(options = {}) {
   const trips = {};
   const host = sdk.createMockHost({
     grants: GRANTS,
     actingUserId: 7,
     config: { max_days: 8, max_places_per_day: 6, max_notes: 4, xhs_enabled: false },
     userSettings: {},
-    aiResults: [{
+    aiResults: options.aiResults || [{
       intent: { destination: '京都' },
       candidates: [
         { name: 'Near A', nameZh: '近点A', dayHint: 1, durationMinutes: 60 },
@@ -202,11 +222,73 @@ test('Gate 丢弃无坐标/重复，并保留过远点且默认不选', () => {
   assert.equal(result.warnings.length, 2);
 });
 
+test('无攻略时抽取具体景点，丢掉省/市名，并把地点分到各天', () => {
+  const intent = {
+    destination: '河南',
+    dayCount: 2,
+    pace: 'relaxed',
+    interests: ['历史'],
+    mustSee: [],
+  };
+  const text = extractionText([], intent);
+  assert.match(text, /Destination: 河南/);
+  assert.match(text, /specific visitable places/);
+  assert.match(extractionInstruction(intent, false), /No notes were supplied/);
+  assert.equal(isGenericPlaceName('河南省', '河南'), true);
+  assert.equal(isGenericPlaceName('河南', '河南省'), true);
+  assert.equal(isGenericPlaceName('龙门石窟', '河南'), false);
+
+  const candidates = normalizeCandidates({ candidates: [{ name: '河南省', dayHint: 1 }] }, intent);
+  const names = candidates.map((item) => item.name);
+  assert.ok(!names.includes('河南省'));
+  assert.ok(!names.includes('历史'));
+  assert.ok(names.includes('龙门石窟'));
+  assert.ok(candidates.length >= 4);
+  assert.deepEqual([...new Set(candidates.map((item) => item.dayHint))].sort(), [1, 2]);
+  assert.equal(placeSearchQuery({ name: '龙门石窟' }, '河南'), '龙门石窟 河南');
+
+  const gated = gateAndSchedule(
+    intent,
+    [
+      { id: 'ev_1', name: '龙门石窟', lat: 34.55, lng: 112.47, dayHint: 1 },
+      { id: 'ev_2', name: '少林寺', lat: 34.51, lng: 112.94, dayHint: 1 },
+      { id: 'ev_3', name: '白马寺', lat: 34.72, lng: 112.60, dayHint: 1 },
+      { id: 'ev_4', name: '清明上河园', lat: 34.81, lng: 114.35, dayHint: 1 },
+    ],
+    { maxPlacesPerDay: 6 },
+    'zh',
+    '',
+  );
+  assert.equal(gated.days.length, 2);
+  assert.ok(gated.days[0].places.length >= 1);
+  assert.ok(gated.days[1].places.length >= 1);
+});
+
+test('公开草稿始终带上来源说明', () => {
+  const draft = publicDraft({
+    id: 'job-1',
+    status: 'ready',
+    stage: 'ready',
+    draft: {
+      intent: { destination: '河南', guideQuery: '河南 历史 旅游 景点攻略', dayCount: 2 },
+      guides: [],
+      warnings: [],
+      days: [],
+    },
+    work: {},
+  });
+  assert.equal(draft.sourceSummary.basis, 'destination');
+  assert.match(draft.sourceSummary.query, /河南/);
+  assert.deepEqual(draft.guides, []);
+});
+
 test('无 Cookie 的纯表单仍形成地图预览，并只使用 extract.results[0]', async () => {
   const fixture = buildHost();
   const { state, geoCalls } = await makeReady(fixture);
   assert.ok(state.days.flatMap((day) => day.places).length >= 3);
   assert.ok(state.warnings.some((warning) => warning.includes('Cookie')));
+  assert.equal(state.sourceSummary.basis, 'destination');
+  assert.ok(state.sourceSummary.query);
   assert.ok(fixture.host.calls.some((call) => call.method === 'ai.extract'));
   assert.ok(!geoCalls.includes('MUST NOT USE'));
   assert.ok(geoCalls.includes('京都'));
@@ -214,6 +296,28 @@ test('无 Cookie 的纯表单仍形成地图预览，并只使用 extract.result
   assert.equal(far.tooFar, true);
   assert.equal(far.selected, false);
   assert.ok(state.warnings.some((warning) => warning.includes('无坐标店')));
+});
+
+test('模型只返回省名时，仍补上具体景点、分到两天，并说明未读攻略', async () => {
+  const fixture = buildHost({
+    aiResults: [{ candidates: [{ name: '河南省', dayHint: 1 }] }],
+  });
+  const { state, geoCalls } = await makeReady(fixture, {
+    destination: '河南',
+    dayCount: 2,
+    pace: 'relaxed',
+    interests: '历史',
+  });
+  const places = state.days.flatMap((day) => day.places);
+  const names = places.map((place) => place.name);
+  assert.ok(!names.some((name) => /河南省?/.test(name)));
+  assert.ok(places.length >= 3);
+  assert.ok(state.days[0].places.length >= 1);
+  assert.ok(state.days[1].places.length >= 1);
+  assert.ok(geoCalls.some((query) => query.includes('龙门石窟')));
+  assert.equal(state.guides.length, 0);
+  assert.equal(state.sourceSummary.basis, 'destination');
+  assert.match(state.sourceSummary.query, /河南/);
 });
 
 test('公开 URL 和粘贴正文进入同一预览，公开草稿不泄露正文', async () => {
@@ -232,6 +336,7 @@ test('公开 URL 和粘贴正文进入同一预览，公开草稿不泄露正文
   }, xhsFallback);
   assert.equal(state.intent.destination, '京都');
   assert.deepEqual(state.guides.map((guide) => guide.via).sort(), ['paste', 'url']);
+  assert.equal(state.sourceSummary.basis, 'guides');
   assert.equal(JSON.stringify(state.guides).includes('第一天'), false);
 });
 
@@ -334,4 +439,27 @@ test('deleteUserData 幂等清除该用户任务，export 不含 Cookie 或正�
   await fixture.app.deleteUserData(7);
   await fixture.app.deleteUserData(7);
   assert.equal(fixture.db.jobs.size, 0);
+});
+
+test('Nominatim 优先返回景点而不是行政区', async () => {
+  assert.ok(scoreRow({ category: 'tourism', type: 'attraction', importance: 0.2 })
+    > scoreRow({ category: 'boundary', type: 'administrative', importance: 0.9 }));
+  const original = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get() { return null; } },
+    async json() {
+      return [
+        { name: 'Henan', lat: '34.75', lon: '113.62', display_name: 'Henan, China', category: 'boundary', type: 'administrative', addresstype: 'state', importance: 0.9 },
+        { name: 'Longmen Grottoes', lat: '34.55', lon: '112.47', display_name: 'Longmen Grottoes, Luoyang', category: 'tourism', type: 'attraction', importance: 0.4 },
+      ];
+    },
+  });
+  try {
+    const result = await searchPlaces('龙门石窟 河南', { lang: 'zh' });
+    assert.equal(result.places[0].name, 'Longmen Grottoes');
+  } finally {
+    global.fetch = original;
+  }
 });

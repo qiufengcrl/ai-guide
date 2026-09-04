@@ -632,6 +632,23 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .source-empty {
+      padding: 4px 9px 2px;
+    }
+    .source-empty strong {
+      display: block;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .source-empty span {
+      display: block;
+      margin-top: 6px;
+      color: var(--text-faint);
+      font-size: 11px;
+      line-height: 1.55;
+      white-space: normal;
+    }
     .days-list { display: grid; gap: 14px; }
     .day-card {
       padding: 0;
@@ -1122,7 +1139,7 @@
         <div class="preview-layout">
           <div class="itinerary-column">
             <section class="trek-card source-card" id="source-card">
-              <div class="source-head"><strong><svg class="icon icon--sm"><use href="#icon-file"></use></svg><span data-i18n="sources">Travel notes read</span></strong><span class="trek-chip" id="source-count">0</span></div>
+              <div class="source-head"><strong><svg class="icon icon--sm"><use href="#icon-file"></use></svg><span data-i18n="sources">Sources used</span></strong><span class="trek-chip" id="source-count">0</span></div>
               <div id="sources" class="source-list"></div>
             </section>
             <div id="days" class="days-list trek-stagger"></div>
@@ -1212,7 +1229,7 @@
         previewEyebrow: 'Your mapped draft',
         preview: 'Preview the journey',
         previewHint: 'Uncheck a day or place before creating your trip. Nothing is written until you confirm.',
-        sources: 'Travel notes read',
+        sources: 'Sources used',
         finalStep: 'Final check',
         selectedPlaces: 'places selected',
         selectedOf: 'of {total} places selected',
@@ -1236,7 +1253,10 @@
         searchedNote: 'Search result',
         travelNote: 'Travel note',
         untitledSource: 'Untitled travel note',
-        sourceOpen: 'Open source'
+        sourceOpen: 'Open source',
+        sourcesEmpty: 'No travel notes were read this time',
+        sourcesEmptyHint: 'Places were proposed from the destination and interests. Add Xiaohongshu Cookie, links, or pasted text to list the articles used.',
+        sourcesQuery: 'Search query'
       },
       zh: {
         eyebrow: '攻略灵感 · 地图行程',
@@ -1287,7 +1307,7 @@
         previewEyebrow: '你的地图草稿',
         preview: '预览这段旅程',
         previewHint: '创建前可以取消整天或单个地点；只有确认后才会写入 TREK。',
-        sources: '已读取的旅行攻略',
+        sources: '参考来源',
         finalStep: '最后确认',
         selectedPlaces: '个地点已选',
         selectedOf: '/ 共 {total} 个地点',
@@ -1311,7 +1331,10 @@
         searchedNote: '关键词搜索结果',
         travelNote: '旅行攻略',
         untitledSource: '未命名旅行攻略',
-        sourceOpen: '打开来源'
+        sourceOpen: '打开来源',
+        sourcesEmpty: '本次没有读取攻略文章',
+        sourcesEmptyHint: '地点依据目的地和兴趣生成。配置小红书 Cookie，或粘贴链接 / 正文后，这里会列出参考文章。',
+        sourcesQuery: '检索关键词'
       }
     };
 
@@ -1553,11 +1576,31 @@
       panel.classList.toggle('hidden', warnings.length === 0);
     }
 
-    function renderSources(guides) {
+    function renderSources(guides, summary) {
       var root = document.getElementById('sources');
       root.innerHTML = '';
       document.getElementById('source-count').textContent = String(guides.length);
-      document.getElementById('source-card').classList.toggle('hidden', guides.length === 0);
+      document.getElementById('source-card').classList.remove('hidden');
+
+      if (!guides.length) {
+        var empty = document.createElement('div');
+        empty.className = 'source-empty';
+        empty.id = 'source-empty';
+        var emptyTitle = document.createElement('strong');
+        emptyTitle.textContent = t('sourcesEmpty');
+        var emptyHint = document.createElement('span');
+        emptyHint.textContent = t('sourcesEmptyHint');
+        empty.appendChild(emptyTitle);
+        empty.appendChild(emptyHint);
+        if (summary && summary.query) {
+          var query = document.createElement('span');
+          query.id = 'source-query';
+          query.textContent = t('sourcesQuery') + '：' + summary.query;
+          empty.appendChild(query);
+        }
+        root.appendChild(empty);
+        return;
+      }
 
       guides.forEach(function (guide) {
         var row = document.createElement(guide.url ? 'button' : 'div');
@@ -1729,7 +1772,7 @@
 
     function render(data) {
       renderWarnings(data.warnings || []);
-      renderSources(data.guides || []);
+      renderSources(data.guides || [], data.sourceSummary || {});
       renderDays(data.days || []);
 
       var intent = data.intent || {};

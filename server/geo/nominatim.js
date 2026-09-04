@@ -25,6 +25,21 @@ function parseBias(locationBias) {
   return { lat, lng, radius: Number.isFinite(radius) && radius > 0 ? Math.min(radius, 100000) : 50000 };
 }
 
+function scoreRow(row) {
+  const cls = String(row?.class || row?.category || '').toLowerCase();
+  const type = String(row?.type || row?.addresstype || '').toLowerCase();
+  let score = Number(row?.importance) || 0;
+  if (['tourism', 'historic', 'leisure'].includes(cls)) score += 4;
+  if (cls === 'amenity' && ['place_of_worship', 'theatre', 'arts_centre'].includes(type)) score += 3;
+  if ([
+    'attraction', 'museum', 'gallery', 'temple', 'viewpoint', 'theme_park',
+    'artwork', 'monument', 'castle', 'ruins', 'archaeological_site', 'park', 'garden',
+  ].includes(type)) score += 3;
+  if (cls === 'boundary' || type === 'administrative') score -= 6;
+  if (['province', 'state', 'country', 'region', 'municipality', 'county', 'city'].includes(type)) score -= 5;
+  return score;
+}
+
 function toPlace(row, fallbackName) {
   const lat = Number(row?.lat);
   const lng = Number(row?.lon);
@@ -37,7 +52,7 @@ function toPlace(row, fallbackName) {
     address: displayName,
     placeId: null,
     osmId: row?.osm_id != null ? String(row.osm_id) : null,
-    types: [row?.type, row?.category].filter(Boolean).map(String),
+    types: [row?.type, row?.category, row?.class, row?.addresstype].filter(Boolean).map(String),
     source: 'nominatim',
   };
 }
@@ -78,8 +93,11 @@ async function searchPlaces(query, options = {}) {
   } catch {
     throw new GeoSearchError('Place search returned invalid JSON');
   }
-  const places = (Array.isArray(rows) ? rows : []).map((row) => toPlace(row, text)).filter(Boolean);
+  const ranked = (Array.isArray(rows) ? rows : [])
+    .slice()
+    .sort((a, b) => scoreRow(b) - scoreRow(a));
+  const places = ranked.map((row) => toPlace(row, text)).filter(Boolean);
   return { places, source: 'nominatim' };
 }
 
-module.exports = { BASE_URL, GeoSearchError, searchPlaces, setGeoThrottleInterval };
+module.exports = { BASE_URL, GeoSearchError, searchPlaces, setGeoThrottleInterval, scoreRow };

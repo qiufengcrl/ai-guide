@@ -1,5 +1,32 @@
 const TOO_FAR_KM = 40;
 
+const DESTINATION_SEEDS = {
+  北京: ['故宫', '天坛', '颐和园', '八达岭长城', '景山公园', '北海公园', '雍和宫', '南锣鼓巷'],
+  上海: ['外滩', '豫园', '南京路步行街', '田子坊', '上海博物馆', '武康路'],
+  河南: ['龙门石窟', '少林寺', '白马寺', '清明上河园', '开封府', '殷墟', '云台山'],
+  洛阳: ['龙门石窟', '白马寺', '应天门', '洛邑古城', '关林'],
+  开封: ['清明上河园', '开封府', '大相国寺', '铁塔公园'],
+  郑州: ['河南博物院', '二七纪念塔', '嵩山少林寺', '黄河风景名胜区'],
+  西安: ['兵马俑', '大雁塔', '西安城墙', '回民街', '大唐不夜城', '钟楼'],
+  成都: ['宽窄巷子', '锦里', '成都大熊猫繁育研究基地', '武侯祠', '杜甫草堂'],
+  杭州: ['西湖', '灵隐寺', '河坊街', '西溪湿地', '断桥'],
+  南京: ['中山陵', '夫子庙', '总统府', '玄武湖', '南京博物院'],
+  苏州: ['拙政园', '狮子林', '平江路', '虎丘', '寒山寺'],
+  广州: ['陈家祠', '沙面', '北京路步行街', '白云山'],
+  深圳: ['世界之窗', '莲花山公园', '大梅沙', '深圳博物馆'],
+  重庆: ['洪崖洞', '解放碑', '磁器口', '长江索道', '李子坝'],
+  厦门: ['鼓浪屿', '南普陀寺', '曾厝垵', '中山路步行街'],
+  青岛: ['栈桥', '八大关', '崂山', '天主教堂'],
+  大理: ['大理古城', '洱海', '崇圣寺三塔', '喜洲古镇'],
+  丽江: ['丽江古城', '玉龙雪山', '束河古镇', '黑龙潭'],
+  桂林: ['漓江', '象鼻山', '两江四湖', '阳朔西街'],
+  张家界: ['天门山', '张家界国家森林公园', '张家界大峡谷'],
+  三亚: ['亚龙湾', '天涯海角', '南山寺', '蜈支洲岛'],
+  京都: ['伏见稻荷大社', '清水寺', '岚山', '金阁寺', '祇园'],
+  大阪: ['大阪城', '道顿堀', '心斋桥', '通天阁'],
+  东京: ['浅草寺', '东京塔', '明治神宫', '涩谷', '上野公园'],
+};
+
 const clampInt = (value, fallback, min, max) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
@@ -82,19 +109,93 @@ const EXTRACTION_SCHEMA = {
   required: ['candidates'],
 };
 
+function foldName(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s·・,，.。'’"“”]/g, '');
+}
+
+function stripAdminTail(name) {
+  return String(name || '')
+    .trim()
+    .replace(/(特别行政区|自治区|省|市|地区|盟|州|县|旗)$/g, '')
+    .replace(/\s+(special administrative region|autonomous region|province|prefecture|municipality|county|city)$/i, '')
+    .trim();
+}
+
+function isGenericPlaceName(name, destination) {
+  const raw = String(name || '').trim();
+  if (!raw) return true;
+  const folded = foldName(raw);
+  if (['中国', 'china', '中华人民共和国', 'prc'].includes(folded)) return true;
+  if (/(特别行政区|自治区|省|市|地区|盟)$/.test(raw)) return true;
+  if (/\b(province|prefecture|municipality|autonomous region|special administrative region|country|republic)\b/i.test(raw)) return true;
+  const dest = String(destination || '').trim();
+  if (!dest) return false;
+  const destFold = foldName(dest);
+  const destCore = foldName(stripAdminTail(dest));
+  const nameCore = foldName(stripAdminTail(raw));
+  return folded === destFold || (Boolean(destCore) && nameCore === destCore);
+}
+
+function destinationSeeds(destination) {
+  const dest = String(destination || '').trim();
+  if (!dest) return [];
+  const destFold = foldName(stripAdminTail(dest)) || foldName(dest);
+  for (const [key, places] of Object.entries(DESTINATION_SEEDS)) {
+    const keyFold = foldName(stripAdminTail(key));
+    if (!destFold || !keyFold) continue;
+    if (destFold === keyFold) return places.slice();
+    if (destFold.length >= 2 && keyFold.length >= 2
+      && (destFold.startsWith(keyFold) || keyFold.startsWith(destFold) || destFold.includes(keyFold))) {
+      return places.slice();
+    }
+  }
+  return [];
+}
+
+function targetPlaceCount(intent) {
+  const perDay = intent.pace === 'relaxed' ? 2 : intent.pace === 'packed' ? 4 : 3;
+  return Math.min(Math.max(intent.dayCount, 1) * perDay, 12);
+}
+
 function extractionText(guides, intent) {
+  const target = targetPlaceCount(intent);
+  const header = [
+    `Destination: ${intent.destination || '(unknown)'}`,
+    `Days: ${intent.dayCount}`,
+    `Pace: ${intent.pace}`,
+    `Interests: ${intent.interests.join(', ') || 'sightseeing'}`,
+    intent.mustSee.length ? `Must see: ${intent.mustSee.join(', ')}` : '',
+    `Propose about ${target} specific visitable places (attractions, museums, temples, parks, historic sites, neighborhoods, food streets).`,
+    'Do not list the destination itself, a province, city, country, or administrative region as a place.',
+    `Spread places across days with dayHint from 1 to ${intent.dayCount}.`,
+  ].filter(Boolean).join('\n');
   const guideText = guides
     .map((guide) => `[${guide.id}] ${guide.title || ''}\n${String(guide.text || '').slice(0, 4000)}`)
     .join('\n\n')
     .slice(0, 12000);
-  return guideText || `Destination: ${intent.destination}; interests: ${intent.interests.join(', ') || 'sightseeing'}`;
+  if (guideText) {
+    return `${header}\n\nExtract named places from these notes first; if they are thin, supplement with well-known places in the destination.\n\n${guideText}`;
+  }
+  return `${header}\n\nNo travel notes were supplied. Propose well-known visitable places in the destination that match the interests.`;
 }
 
-function normalizeCandidates(raw, intent) {
-  const model = Array.isArray(raw?.candidates) ? raw.candidates : [];
-  const candidates = model.map((item) => ({
-    name: String(item?.name || '').trim(),
-    nameZh: String(item?.nameZh || '').trim(),
+function extractionInstruction(intent, hasGuides) {
+  const target = targetPlaceCount(intent);
+  const dest = intent.destination || 'the destination';
+  if (hasGuides) {
+    return `Extract specific visitable places from the notes. Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}. Target about ${target} places. Do not invent coordinates.`;
+  }
+  return `No notes were supplied. Propose well-known visitable places in ${dest}. Each name must be a specific attraction or neighborhood, not the destination, province, city, or country. Spread across ${intent.dayCount} days with dayHint. Target ${target} places. Do not invent coordinates.`;
+}
+
+function toCandidate(item, intent, fallbackName) {
+  const name = String(fallbackName || item?.name || '').trim();
+  return {
+    name,
+    nameZh: String(item?.nameZh || '').trim() || name,
     nameEn: String(item?.nameEn || '').trim(),
     reason: String(item?.reason || '').trim(),
     durationMinutes: clampInt(item?.durationMinutes, 90, 15, 720),
@@ -102,31 +203,65 @@ function normalizeCandidates(raw, intent) {
     reservationTips: String(item?.reservationTips || '').trim(),
     dayHint: clampInt(item?.dayHint, 1, 1, intent.dayCount),
     guideId: String(item?.guideId || '').trim(),
-  })).filter((item) => item.name);
-  if (model.length) return candidates;
-  const fallbackNames = [...intent.mustSee, ...intent.interests];
-  if (!fallbackNames.length && intent.destination) fallbackNames.push(intent.destination);
-  return fallbackNames
-    .filter(Boolean)
-    .map((name, index) => ({
-      name,
-      nameZh: name,
-      nameEn: '',
-      reason: '',
-      durationMinutes: 90,
-      reservationRequired: false,
-      reservationTips: '',
-      dayHint: (index % intent.dayCount) + 1,
-      guideId: '',
-    }));
+  };
+}
+
+function spreadDayHints(candidates, dayCount) {
+  const days = Math.max(1, dayCount || 1);
+  if (candidates.length <= 1) return candidates;
+  const sameHint = candidates.every((item) => item.dayHint === candidates[0].dayHint);
+  if (!sameHint) return candidates;
+  return candidates.map((item, index) => ({ ...item, dayHint: (index % days) + 1 }));
+}
+
+function normalizeCandidates(raw, intent) {
+  const model = Array.isArray(raw?.candidates) ? raw.candidates : [];
+  const seen = new Set();
+  const unique = [];
+  const pushUnique = (item) => {
+    if (!item?.name || isGenericPlaceName(item.name, intent.destination)) return;
+    const key = foldName(item.name);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    unique.push(item);
+  };
+  for (const item of model) pushUnique(toCandidate(item, intent));
+  const target = targetPlaceCount(intent);
+  if (unique.length < target) {
+    for (const name of [...intent.mustSee, ...destinationSeeds(intent.destination)]) {
+      pushUnique(toCandidate({}, intent, name));
+      if (unique.length >= target) break;
+    }
+  }
+  return spreadDayHints(unique, intent.dayCount);
+}
+
+function placeSearchQuery(candidate, destination) {
+  const name = String(candidate?.nameZh || candidate?.name || '').trim();
+  const dest = String(destination || '').trim();
+  if (!name) return dest;
+  if (!dest) return name;
+  if (foldName(name).includes(foldName(dest)) || foldName(dest).includes(foldName(name))) return name;
+  return `${name} ${dest}`;
 }
 
 function finiteCoordinate(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function evidenceFromSearch(candidate, result, index) {
-  const place = (result?.places || []).find((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
+function isAdministrativePlace(place) {
+  const types = (place?.types || []).map((item) => String(item).toLowerCase());
+  return types.some((type) => [
+    'boundary', 'administrative', 'province', 'state', 'country',
+    'region', 'municipality', 'county', 'city', 'town',
+  ].includes(type));
+}
+
+function evidenceFromSearch(candidate, result, index, destination) {
+  const places = (result?.places || []).filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
+  const specific = places.find((item) => !isGenericPlaceName(item.name, destination) && !isAdministrativePlace(item));
+  const named = places.find((item) => !isGenericPlaceName(item.name, destination));
+  const place = specific || named || null;
   if (!place) return null;
   return {
     id: `ev_${index + 1}`,
@@ -163,6 +298,26 @@ function isoDate(startDate, offset) {
   return date.toISOString().slice(0, 10);
 }
 
+function markDistance(days) {
+  for (const day of days) {
+    day.places.forEach((place, index) => {
+      const previous = day.places[index - 1];
+      const tooFar = previous ? haversineKm(previous, place) > TOO_FAR_KM : false;
+      place.tooFar = tooFar;
+      place.selected = !tooFar;
+    });
+  }
+}
+
+function rebalanceDays(days) {
+  for (;;) {
+    const empty = days.find((day) => day.places.length === 0);
+    const richest = days.reduce((best, day) => (day.places.length > best.places.length ? day : best), days[0]);
+    if (!empty || !richest || richest.places.length <= 1) break;
+    empty.places.push(richest.places.pop());
+  }
+}
+
 function gateAndSchedule(intent, evidence, limits, locale, copy) {
   const warnings = [];
   const unique = [];
@@ -194,8 +349,6 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
       dayIndex = days.findIndex((day) => day.places.length < perDay);
       if (dayIndex < 0) break;
     }
-    const previous = days[dayIndex].places.at(-1);
-    const tooFar = previous ? haversineKm(previous, item) > TOO_FAR_KM : false;
     days[dayIndex].places.push({
       evidenceId: item.id,
       name: item.name,
@@ -207,10 +360,12 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
       categoryHint: item.categoryHint,
       stayMinutes: item.stayHintMinutes,
       notes: item.reason || item.reservationHint || '',
-      tooFar,
-      selected: !tooFar,
+      tooFar: false,
+      selected: true,
     });
   }
+  rebalanceDays(days);
+  markDistance(days);
   if (unique.length > intent.dayCount * perDay) {
     warnings.push(message(locale, '地点超过行程容量，已截断', 'Places exceeded itinerary capacity and were truncated'));
   }
@@ -219,15 +374,22 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
 
 function publicDraft(job) {
   const draft = job.draft || {};
+  const intent = draft.intent || {};
+  const guides = draft.guides || [];
   return {
     jobId: job.id,
     status: job.status,
     stage: job.stage,
-    intent: draft.intent || null,
-    guides: (draft.guides || []).map(({ text, ...guide }) => guide),
+    intent: intent || null,
+    guides: guides.map(({ text, ...guide }) => guide),
+    sourceSummary: {
+      basis: guides.length ? 'guides' : 'destination',
+      query: intent.guideQuery || '',
+      destination: intent.destination || '',
+    },
     progress: {
-      guidesRead: (draft.guides || []).length,
-      guidesTotal: (draft.guides || []).length
+      guidesRead: guides.length,
+      guidesTotal: guides.length
         + Math.max(0, (job.work?.urls?.length || 0) - (job.work?.urlIndex || 0))
         + Math.max(0, (job.work?.pendingNotes?.length || 0) - (job.work?.noteIndex || 0)),
     },
@@ -240,12 +402,18 @@ function publicDraft(job) {
 module.exports = {
   TOO_FAR_KM,
   EXTRACTION_SCHEMA,
+  DESTINATION_SEEDS,
   settings,
   isZh,
   message,
   normalizeInput,
   extractionText,
+  extractionInstruction,
   normalizeCandidates,
+  isGenericPlaceName,
+  destinationSeeds,
+  targetPlaceCount,
+  placeSearchQuery,
   evidenceFromSearch,
   gateAndSchedule,
   publicDraft,
