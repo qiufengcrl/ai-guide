@@ -106,6 +106,10 @@ function memoryDb() {
         return rows.filter((row) => row.user_id === args[0] && ['queued', 'running'].includes(row.status))
           .sort((a, b) => b.created_at - a.created_at).slice(0, 1);
       }
+      if (sql.includes("status = 'ready'")) {
+        return rows.filter((row) => row.user_id === args[0] && row.status === 'ready')
+          .sort((a, b) => b.updated_at - a.updated_at).slice(0, 1);
+      }
       if (sql.includes('WHERE user_id = ? ORDER BY created_at')) {
         return rows.filter((row) => row.user_id === args[0]).sort((a, b) => a.created_at - b.created_at);
       }
@@ -265,21 +269,32 @@ test('零个 evidenceId 不能 commit，空 Cookie testXhs 失败', async () => 
   });
 });
 
-test('同一用户只有一个未完成任务，重新打开可用 GET /plan 续跑', async () => {
+test('再次生成会替换未完成任务，重新打开续跑最新任务', async () => {
   const fixture = buildHost();
   await fixture.app.load();
   const first = await fixture.app.route({ method: 'POST', path: '/plan' }, {
     body: { destination: '京都', locale: 'zh' },
   });
-  const duplicate = await fixture.app.route({ method: 'POST', path: '/plan' }, {
+  const replacement = await fixture.app.route({ method: 'POST', path: '/plan' }, {
     body: { destination: '大阪', locale: 'zh' },
   });
-  assert.equal(duplicate.status, 409);
-  assert.equal(duplicate.body.jobId, first.body.jobId);
+  assert.equal(replacement.status, 200);
+  assert.notEqual(replacement.body.jobId, first.body.jobId);
+  const previous = await fixture.app.route({ method: 'GET', path: '/plan' }, { query: { jobId: first.body.jobId } });
+  assert.equal(previous.body.status, 'failed');
+  assert.match(String(previous.body.error || ''), /替换/);
   const reopened = fixture.host.run(plugin);
   const resumed = await reopened.route({ method: 'GET', path: '/plan' }, { query: {} });
-  assert.equal(resumed.body.jobId, first.body.jobId);
+  assert.equal(resumed.body.jobId, replacement.body.jobId);
   assert.equal(resumed.body.status, 'running');
+});
+
+test('没有进行中的任务时，GET /plan 会恢复最近一份就绪预览', async () => {
+  const fixture = buildHost();
+  const { jobId } = await makeReady(fixture);
+  const restored = await fixture.app.route({ method: 'GET', path: '/plan' }, { query: {} });
+  assert.equal(restored.body.status, 'ready');
+  assert.equal(restored.body.jobId, jobId);
 });
 
 test('deleteUserData 幂等清除该用户任务，export 不含 Cookie 或正文', async () => {

@@ -273,17 +273,20 @@ module.exports = definePlugin({
       method: 'POST', path: '/plan', auth: true,
       async handler(req, ctx) {
         const userId = req.user.id;
+        const payload = { ...(req.body && typeof req.body === 'object' ? req.body : {}), locale: req.body?.locale || 'en' };
+        const now = Date.now();
         const active = await ctx.db.query(
           `SELECT ${JOB_FIELDS} FROM jobs WHERE user_id = ? AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1`,
           userId,
         );
-        if (active[0]) return response(409, {
-          error: message(req.body?.locale, '已有未完成的规划任务', 'An unfinished planning job already exists'),
-          jobId: active[0].id,
-        });
+        if (active[0]) {
+          const previous = rowToJob(active[0]);
+          previous.status = 'failed';
+          previous.stage = 'superseded';
+          previous.error = message(payload.locale, '已用新的规划请求替换未完成任务', 'Replaced an unfinished planning job');
+          await saveJob(ctx, previous);
+        }
         const id = crypto.randomUUID();
-        const payload = { ...(req.body && typeof req.body === 'object' ? req.body : {}), locale: req.body?.locale || 'en' };
-        const now = Date.now();
         try {
           await ctx.db.exec(
             'INSERT INTO jobs (id, user_id, status, stage, payload_json, draft_json, work_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -294,10 +297,7 @@ module.exports = definePlugin({
             `SELECT ${JOB_FIELDS} FROM jobs WHERE user_id = ? AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1`,
             userId,
           );
-          if (raced[0]) return response(409, {
-            error: message(payload.locale, '已有未完成的规划任务', 'An unfinished planning job already exists'),
-            jobId: raced[0].id,
-          });
+          if (raced[0]) return response(200, { jobId: raced[0].id, resumed: true });
           throw error;
         }
         return response(200, { jobId: id });
@@ -314,6 +314,13 @@ module.exports = definePlugin({
             req.user.id,
           );
           job = rows[0] ? rowToJob(rows[0]) : null;
+          if (!job) {
+            const ready = await ctx.db.query(
+              `SELECT ${JOB_FIELDS} FROM jobs WHERE user_id = ? AND status = 'ready' ORDER BY updated_at DESC LIMIT 1`,
+              req.user.id,
+            );
+            job = ready[0] ? rowToJob(ready[0]) : null;
+          }
           if (!job) return response(200, { status: 'idle' });
         }
         if (!job) return response(404, {

@@ -1169,6 +1169,7 @@
         guides: 'notes read',
         tooFar: 'Over 40 km · off by default',
         failed: 'Planning failed',
+        conflict: 'A plan is already running. Reconnecting…',
         noSelection: 'Select at least one place before creating the trip.',
         placesCount: '{count} places',
         minutes: '{count} min',
@@ -1242,6 +1243,7 @@
         guides: '篇攻略已读',
         tooFar: '相邻超过 40 公里 · 默认不选',
         failed: '行程规划失败',
+        conflict: '已有规划正在进行，正在接上…',
         noSelection: '请至少选择一个地点后再创建行程。',
         placesCount: '{count} 个地点',
         minutes: '{count} 分钟',
@@ -1322,8 +1324,14 @@
       refreshCommitAvailability();
     }
 
+    function invokeErrorMessage(error) {
+      var raw = error && error.message ? String(error.message) : String(error || '');
+      if (/409/.test(raw)) return t('conflict');
+      return raw || t('failed');
+    }
+
     function showError(error) {
-      var message = error && error.message ? error.message : String(error || t('failed'));
+      var message = typeof error === 'string' ? error : invokeErrorMessage(error);
       setBusy(false);
       setStatus(message || t('failed'), 'error');
       trek.notify('error', message || t('failed'));
@@ -1359,13 +1367,15 @@
     async function resume() {
       try {
         var data = await trek.invoke('/plan', { method: 'GET' });
-        if (data && data.status !== 'idle') {
+        if (data && data.status && data.status !== 'idle') {
           currentJobId = data.jobId;
           handleProgress(data);
+          return true;
         }
       } catch (_) {
         /* An empty or not-yet-initialised draft is a valid first visit. */
       }
+      return false;
     }
 
     async function poll() {
@@ -1430,6 +1440,11 @@
         currentJobId = data.jobId;
         poll();
       } catch (error) {
+        if (/409/.test(String(error && error.message || error || ''))) {
+          try {
+            if (await resume()) return;
+          } catch (_) { /* Fall through to the conflict copy. */ }
+        }
         showError(error);
       }
     });
