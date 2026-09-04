@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI Guide</title>
-  <!-- trek:ui -->
   <style>
     html, body { height: 100%; margin: 0; }
     body { background: transparent; color: var(--text-primary); }
@@ -317,7 +316,7 @@
     .field-grid--travel { grid-template-columns: repeat(6, minmax(0, 1fr)); }
     .field-grid--travel .date-field { grid-column: span 2; }
     .field-grid--travel .small-field { grid-column: span 1; }
-    .field { display: grid; gap: 8px; min-width: 0; }
+    .field { display: grid; gap: 8px; width: 100%; min-width: 0; }
     .field--full { grid-column: 1 / -1; }
     .field-label {
       display: flex;
@@ -342,8 +341,11 @@
       line-height: 1.65;
       resize: vertical;
     }
-    .source-fields { display: grid; gap: 14px; }
+    .source-fields { display: grid; gap: 14px; min-width: 0; }
     .source-field {
+      display: grid;
+      width: 100%;
+      min-width: 0;
       padding: 16px;
       border: 1px solid var(--border-primary);
       border-radius: 16px;
@@ -356,6 +358,10 @@
       box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 10%, transparent);
     }
     .source-field .trek-textarea {
+      display: block;
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
       min-height: 74px;
       padding: 10px 0 0;
       border: 0;
@@ -859,7 +865,8 @@
       .hero-note { width: 100%; }
       .hero-map { min-height: 188px; margin: 28px 0 0; transform: none; border-radius: 18px; }
       .map-place { width: 34px; height: 34px; }
-      .workspace-grid { margin-top: 14px; gap: 14px; }
+      .workspace-grid,
+      .preview-layout { margin-top: 14px; gap: 14px; grid-template-columns: minmax(0, 1fr); }
       .panel-header { display: block; padding: 23px 20px 20px; }
       .panel-header h2 { font-size: 22px; }
       .form-body { padding: 0 20px 22px; }
@@ -884,9 +891,14 @@
       .commit-card .field { margin-top: 20px; }
     }
 
-    [data-form-factor="phone"] .page { padding: 10px 12px calc(40px + var(--trek-inset-bottom, 0px)); }
+    [data-form-factor="phone"] .page { padding: 10px 12px calc(118px + var(--trek-inset-bottom, 0px)); }
     [data-form-factor="phone"] .hero { border-radius: 20px; }
     [data-form-factor="phone"] .planner-panel { border-radius: 20px; }
+    [data-form-factor="phone"] .workspace-grid,
+    [data-form-factor="phone"] .preview-layout,
+    [data-form-factor="phone"] .guide-rail { grid-template-columns: minmax(0, 1fr); }
+    [data-form-factor="phone"] .field-grid--travel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    [data-form-factor="phone"] .field-grid--travel .date-field { grid-column: 1 / -1; }
     [data-form-factor="phone"] .source-field .trek-textarea { font-size: 16px; }
     [data-form-factor="phone"] .choice { width: 22px; height: 22px; }
 
@@ -896,6 +908,41 @@
     @media (prefers-reduced-motion: reduce) {
       .route-line, .progress > i, .status-dot { animation: none !important; }
       .generate-btn .button-arrow, .source-item, .day-card, .choice, .place-copy { transition: none !important; }
+    }
+  </style>
+  <!-- trek:ui -->
+  <style id="ai-guide-overrides">
+    /* Injected kit CSS lands above this block; these rules must win in the phone iframe. */
+    .planner-panel.trek-glass,
+    [data-form-factor="phone"] .planner-panel.trek-glass { padding: 0; }
+    [data-form-factor="phone"] .workspace-grid,
+    [data-form-factor="phone"] .preview-layout,
+    [data-form-factor="phone"] .guide-rail { grid-template-columns: minmax(0, 1fr); }
+    [data-form-factor="phone"] .page { padding: 10px 12px calc(118px + var(--trek-inset-bottom, 0px)); }
+    [data-form-factor="phone"] .field-grid--travel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    [data-form-factor="phone"] .field-grid--travel .date-field { grid-column: 1 / -1; }
+    .source-field { display: grid; width: 100%; min-width: 0; }
+    .source-field .trek-textarea {
+      display: block;
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .app-shell .trek-input,
+    .app-shell .trek-textarea,
+    .app-shell .trek-select {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      min-height: 44px;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .app-shell .trek-select-trigger { display: flex; min-height: 44px; }
+    .app-shell input[type="date"].trek-input::-webkit-date-and-time-value {
+      text-align: left;
+      min-height: 1.25em;
     }
   </style>
 </head>
@@ -1015,14 +1062,14 @@
                 <div><h3 data-i18n="sourcesTitle">Bring your inspiration</h3><p data-i18n="sourcesHint">Use links, pasted notes, or both. Every source stays traceable.</p></div>
               </div>
               <div class="source-fields">
-                <label class="source-field">
-                  <span class="field-label"><span class="field-label-main"><svg class="icon icon--sm"><use href="#icon-link"></use></svg><span data-i18n="urls">Xiaohongshu links</span></span><span class="optional" data-i18n="optional">Optional</span></span>
+                <div class="source-field">
+                  <label class="field-label" for="urls"><span class="field-label-main"><svg class="icon icon--sm"><use href="#icon-link"></use></svg><span data-i18n="urls">Xiaohongshu links</span></span><span class="optional" data-i18n="optional">Optional</span></label>
                   <textarea class="trek-textarea" id="urls" rows="3" spellcheck="false" data-i18n-placeholder="urlsPlaceholder" placeholder="Paste one or more links, separated by a space"></textarea>
-                </label>
-                <label class="source-field source-field--note">
-                  <span class="field-label"><span class="field-label-main"><svg class="icon icon--sm"><use href="#icon-file"></use></svg><span data-i18n="paste">Pasted note text</span></span><span class="optional" data-i18n="optional">Optional</span></span>
+                </div>
+                <div class="source-field source-field--note">
+                  <label class="field-label" for="source-text"><span class="field-label-main"><svg class="icon icon--sm"><use href="#icon-file"></use></svg><span data-i18n="paste">Pasted note text</span></span><span class="optional" data-i18n="optional">Optional</span></label>
                   <textarea class="trek-textarea" id="source-text" rows="6" data-i18n-placeholder="pastePlaceholder" placeholder="Paste the useful parts of a travel note here…"></textarea>
-                </label>
+                </div>
               </div>
             </section>
 
@@ -1098,7 +1145,16 @@
     </main>
   </div>
   <script>
-    var locale = 'en';
+    function resolveLocale(ctxLocale) {
+      var host = String(ctxLocale || '').toLowerCase();
+      if (host.indexOf('zh') === 0) return host;
+      var nav = '';
+      try { nav = String(navigator.language || navigator.userLanguage || '').toLowerCase(); } catch (_) {}
+      if (nav.indexOf('zh') === 0) return nav;
+      return host || 'zh';
+    }
+
+    var locale = resolveLocale();
     var currentJobId = null;
     var currentDraft = null;
     var polling = false;
@@ -1352,7 +1408,7 @@
     }
 
     trek.onContext(function (ctx) {
-      locale = (ctx.locale || 'en').toLowerCase();
+      locale = resolveLocale(ctx.locale);
       translate();
       if (!resumed) {
         resumed = true;

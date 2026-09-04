@@ -63,8 +63,12 @@ test('theme, accessibility, and responsive host states are explicitly supported'
     '[data-density="compact"]',
     '[data-reduce-motion]',
     '@media (prefers-reduced-motion: reduce)',
+    '[data-form-factor="phone"] .workspace-grid',
+    'id="ai-guide-overrides"',
+    'resolveLocale',
   ]) assert.ok(html.includes(selector), selector);
 
+  assert.match(html, /<!-- trek:ui -->[\s\S]*id="ai-guide-overrides"/);
   assert.match(html, /role=["']status["'][^>]+aria-live=["']polite["']/);
   assert.match(html, /role=["']progressbar["']/);
   assert.match(html, /role=["']alert["']/);
