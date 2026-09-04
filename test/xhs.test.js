@@ -2,10 +2,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
-const { searchNotes, fetchSessionNote, XhsSessionError } = require('../server/xhs/session');
+const { searchNotes, fetchSessionNote } = require('../server/xhs/session');
+const { createSignedPost, parseCookieHeader } = require('../server/xhs/signature');
 const { fetchPublicNote } = require('../server/xhs/url');
 
 const fixture = (name) => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8'));
+const VALID_COOKIE = `a1=${'a'.repeat(52)}; web_session=fixture-session; xsecappid=xhs-pc-web`;
 
 function response(body, status = 200) {
   return {
@@ -21,15 +23,23 @@ test('会话搜索只保留 model_type=note，并把 xsec_token 带到详情接�
   const originalFetch = global.fetch;
   const calls = [];
   global.fetch = async (url, init) => {
-    calls.push({ url: String(url), body: JSON.parse(init.body) });
+    calls.push({ url: String(url), body: JSON.parse(init.body), headers: init.headers });
     return calls.length === 1 ? response(fixture('search.json')) : response(fixture('note-detail.json'));
   };
   try {
-    const notes = await searchNotes('京都 景点 旅游 景点攻略', 'sid=fixture', 4);
+    const notes = await searchNotes('京都 景点 旅游 景点攻略', VALID_COOKIE, 4);
     assert.equal(notes.length, 1);
     assert.equal(notes[0].xsecToken, 'fixture-token');
-    const note = await fetchSessionNote(notes[0], 'sid=fixture');
+    const note = await fetchSessionNote(notes[0], VALID_COOKIE);
     assert.match(note.text, /伏见稻荷/);
+    assert.match(calls[0].headers['x-s'], /^XYS_/);
+    assert.match(calls[0].headers['x-s-common'], /^[A-Za-z0-9+/=]+$/);
+    assert.match(calls[0].headers['x-t'], /^\d{13}$/);
+    assert.match(calls[0].headers['x-b3-traceid'], /^[a-f0-9]{16}$/);
+    assert.match(calls[0].headers['x-xray-traceid'], /^[a-f0-9]{32}$/);
+    assert.equal(calls[0].headers.origin, 'https://www.xiaohongshu.com');
+    assert.equal(calls[0].body.search_id.length, 21);
+    assert.equal(calls[0].body.filters.length, 5);
     assert.equal(calls[1].body.xsec_token, 'fixture-token');
     assert.equal(calls[1].body.source_note_id, '64f000000000000000000001');
   } finally {
@@ -41,10 +51,27 @@ test('300011 或异常文案被识别为会话失效', async () => {
   const originalFetch = global.fetch;
   global.fetch = async () => response({ success: false, code: 300011, msg: '账号异常' });
   try {
-    await assert.rejects(searchNotes('旅行', 'sid=fixture', 1), XhsSessionError);
+    await assert.rejects(searchNotes('旅行', VALID_COOKIE, 1), /signed session.*300011/);
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test('签名请求绑定同一 payload、时间戳和完整 Cookie', () => {
+  const timestamp = 1788490800123;
+  const payload = { keyword: '旅行', page: 1 };
+  const signed = createSignedPost('/api/sns/web/v1/search/notes', payload, VALID_COOKIE, { timestamp });
+  assert.deepEqual(JSON.parse(signed.body), payload);
+  assert.equal(signed.headers['x-t'], String(timestamp));
+  assert.match(signed.headers['x-s'], /^XYS_/);
+  assert.ok(signed.headers['x-s-common'].length > 100);
+  assert.match(signed.headers.cookie, /web_session=fixture-session/);
+  assert.deepEqual(parseCookieHeader('a=1; token=x=y=z'), { __proto__: null, a: '1', token: 'x=y=z' });
+});
+
+test('缺少 a1 或 web_session 时在发出网络请求前拒绝', async () => {
+  await assert.rejects(searchNotes('旅行', 'web_session=fixture', 1), /missing the a1 value/);
+  await assert.rejects(searchNotes('旅行', `a1=${'a'.repeat(52)}`, 1), /missing the web_session value/);
 });
 
 test('xhslink 仅跟随到允许域名并读取公开页', async () => {

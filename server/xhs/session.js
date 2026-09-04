@@ -1,4 +1,5 @@
-const { UA, fetchWithTimeout, fetchPublicNote } = require('./url');
+const { fetchWithTimeout, fetchPublicNote } = require('./url');
+const { createSearchId, createSignedPost } = require('./signature');
 
 class XhsSessionError extends Error {}
 
@@ -26,20 +27,24 @@ function normalizeXhsCookie(value) {
 function assertSessionResponse(data) {
   const code = Number(data?.code);
   const message = String(data?.msg || '');
-  if (code === 300011 || message.includes('异常')) throw new XhsSessionError('Xiaohongshu session is unavailable');
+  if (code === 300011 || message.includes('异常')) {
+    throw new XhsSessionError(`Xiaohongshu rejected the signed session (code=${code || 'unknown'}): ${message || 'account risk control'}`);
+  }
   if (data?.success === false) throw new XhsSessionError(message || `Xiaohongshu returned code ${code || 'unknown'}`);
   return data;
 }
 
 async function post(path, body, cookie) {
+  let signed;
+  try {
+    signed = createSignedPost(path, body, cookie);
+  } catch (error) {
+    throw new XhsSessionError(error instanceof Error ? error.message : 'Xiaohongshu request signing failed');
+  }
   const response = await fetchWithTimeout(`https://edith.xiaohongshu.com${path}`, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      cookie,
-      'user-agent': UA,
-    },
-    body: JSON.stringify(body),
+    headers: signed.headers,
+    body: signed.body,
   }, 12000);
   if (!response.ok) throw new XhsSessionError(`Xiaohongshu returned ${response.status}`);
   return assertSessionResponse(await response.json());
@@ -51,8 +56,18 @@ async function searchNotes(keyword, cookie, maxNotes = 4) {
     keyword,
     page: 1,
     page_size: Math.min(8, Math.max(1, maxNotes)),
+    search_id: createSearchId(),
     sort: 'general',
     note_type: 0,
+    ext_flags: [],
+    filters: [
+      { tags: ['general'], type: 'sort_type' },
+      { tags: ['不限'], type: 'filter_note_type' },
+      { tags: ['不限'], type: 'filter_note_time' },
+      { tags: ['不限'], type: 'filter_note_range' },
+      { tags: ['不限'], type: 'filter_pos_distance' },
+    ],
+    geo: '',
     image_formats: ['jpg', 'webp', 'avif'],
   }, cookie);
   return (data?.data?.items || [])

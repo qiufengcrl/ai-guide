@@ -11,7 +11,9 @@ mapped preview. Every place is resolved to WGS-84 coordinates by the plugin's
 own Nominatim client (`server/geo/nominatim.js`) — no host RPC, no map API key,
 no changes to TREK's core. After reviewing and deselecting days or places, the
 user can create a new TREK trip. Keyword search is optional and degrades to the
-form/link/paste flow when a Xiaohongshu session is unavailable.
+form/link/paste flow when a Xiaohongshu session is unavailable. Authenticated
+search signs every request with the current `x-s`, `x-t`, `x-s-common`, and
+trace headers expected by the Xiaohongshu web API.
 
 ## Screenshots
 
@@ -46,6 +48,10 @@ to TREK's core are required.
 Optional keyword search uses each user's own secret `xhs_cookie`, entered under
 Settings → Plugins. The Cookie never enters the iframe, logs, AI prompts, drafts,
 or user-data exports. URL, pasted-text, and form-only planning work without it.
+
+The signing engine is a bundled build of the MIT-licensed `xhshow-js` package.
+Its license and the bundled `crypto-js` notice are preserved in
+`server/xhs/vendor/THIRD_PARTY_NOTICES.md`.
 
 ## License
 
