@@ -143,6 +143,32 @@ test('xhslink 仅跟随到允许域名并读取公开页', async () => {
   }
 });
 
+test('xhslink 在运行时已跟随跳转时仍能读出笔记页', async () => {
+  const originalFetch = global.fetch;
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures/note.html'), 'utf8');
+  let call = 0;
+  global.fetch = async () => {
+    call += 1;
+    if (call === 1) {
+      return {
+        ok: true,
+        status: 200,
+        url: 'https://www.xiaohongshu.com/discovery/item/64f000000000000000000001?xsec_token=tok',
+        headers: { get() { return null; } },
+        async text() { return html; },
+      };
+    }
+    return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
+  };
+  try {
+    const note = await fetchPublicNote('https://xhslink.cn/o/followed', '');
+    assert.equal(note.noteId, '64f000000000000000000001');
+    assert.equal(note.via, 'url');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('xhslink 不跟随到 egress 外域名', async () => {
   const originalFetch = global.fetch;
   global.fetch = async () => ({

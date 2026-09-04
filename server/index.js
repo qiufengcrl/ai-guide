@@ -14,7 +14,7 @@ const {
   gateAndSchedule,
   publicDraft,
 } = require('./pipeline');
-const { fetchPublicNote, noteIdFromUrl, searchKeywordFromUrl } = require('./xhs/url');
+const { fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const { normalizeXhsCookie, searchNotes, searchNotesDetailed, fetchSessionNote } = require('./xhs/session');
 const { searchPlaces } = require('./geo/nominatim');
 
@@ -99,32 +99,47 @@ async function advance(job, ctx) {
     const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
     const work = job.work;
     if (work.urlIndex < work.urls.length) {
-      const value = work.urls[work.urlIndex++];
+      const value = work.urls[work.urlIndex];
+      let consumed = false;
       try {
         const keyword = searchKeywordFromUrl(value);
         if (keyword) {
+          consumed = true;
+          work.urlIndex += 1;
           if (!cookie) throw new Error(message(locale, '搜索结果链接需要用户 Cookie', 'A search-result link requires the user Cookie'));
           await pauseForXhs();
           work.pendingNotes.push(...await searchNotes(keyword, cookie, limits.maxNotes));
         } else {
+          const host = (() => { try { return new URL(value).hostname; } catch { return ''; } })();
+          if (isShortLinkHost(host) && !work.resolvedNote) {
+            await pauseForXhs();
+            work.resolvedNote = await resolveNoteUrl(value);
+            return;
+          }
+          const resolved = work.resolvedNote || await resolveNoteUrl(value);
+          work.resolvedNote = null;
+          consumed = true;
+          work.urlIndex += 1;
           let note;
           try {
             await pauseForXhs();
-            note = await fetchPublicNote(value, cookie);
+            note = await fetchPublicNoteFromResolved(resolved, cookie);
           } catch (publicError) {
-            const noteId = publicError.noteId || noteIdFromUrl(value);
+            const noteId = publicError.noteId || resolved.noteId || noteIdFromUrl(resolved.url || value);
             if (!cookie || !noteId) throw publicError;
             work.pendingNotes.push({
               noteId,
-              xsecToken: publicError.xsecToken || '',
+              xsecToken: publicError.xsecToken || resolved.xsecToken || '',
               title: '',
-              url: publicError.resolvedUrl || `https://www.xiaohongshu.com/explore/${noteId}`,
+              url: publicError.resolvedUrl || resolved.url || `https://www.xiaohongshu.com/explore/${noteId}`,
             });
             return;
           }
           job.draft.guides.push({ ...note, id: `g_${job.draft.guides.length + 1}`, text: note.text.slice(0, 4000) });
         }
       } catch (error) {
+        work.resolvedNote = null;
+        if (!consumed) work.urlIndex += 1;
         addWarning(job, message(locale, `链接读取失败：${error.message}`, `Could not read link: ${error.message}`));
       }
       return;
@@ -218,6 +233,7 @@ async function advance(job, ctx) {
         const result = await searchPlaces(job.draft.intent.destination, { lang: locale });
         const first = (result.places || []).find((place) => Number.isFinite(place?.lat) && Number.isFinite(place?.lng));
         if (first) job.work.bias = { lat: first.lat, lng: first.lng, radius: 50000 };
+        else job.work.biasFailed = true;
       } catch (error) {
         job.work.biasFailed = true;
         addWarning(job, message(locale,
@@ -227,9 +243,13 @@ async function advance(job, ctx) {
       return;
     }
     if (job.work.candidateIndex < job.work.candidates.length) {
-      const index = job.work.candidateIndex++;
+      const index = job.work.candidateIndex;
       const candidate = job.work.candidates[index];
-      const query = placeSearchQuery(candidate, job.draft.intent.destination);
+      const combined = placeSearchQuery(candidate, job.draft.intent.destination);
+      const nameOnly = String(candidate.nameZh || candidate.name || '').trim();
+      const usingNameOnly = Boolean(job.work.retryNameOnly) && Boolean(nameOnly) && nameOnly !== combined;
+      const query = usingNameOnly ? nameOnly : combined;
+      job.work.retryNameOnly = false;
       let result = null;
       try {
         result = await searchPlaces(query, { lang: locale, locationBias: job.work.bias || undefined });
@@ -238,10 +258,17 @@ async function advance(job, ctx) {
           `「${query}」地图检索失败：${error.message}`,
           `Place search for "${query}" failed: ${error.message}`));
       }
-      if (result) {
-        const evidence = evidenceFromSearch(candidate, result, index, job.draft.intent.destination);
-        if (evidence) job.work.evidence.push(evidence);
-        else addWarning(job, message(locale, `「${query}」无法匹配坐标，已跳过`, `"${query}" could not be matched to coordinates and was skipped`));
+      const evidence = result
+        ? evidenceFromSearch(candidate, result, index, job.draft.intent.destination)
+        : null;
+      if (evidence) {
+        job.work.evidence.push(evidence);
+        job.work.candidateIndex += 1;
+      } else if (!usingNameOnly && nameOnly && nameOnly !== combined) {
+        job.work.retryNameOnly = true;
+      } else {
+        addWarning(job, message(locale, `「${query}」无法匹配坐标，已跳过`, `"${query}" could not be matched to coordinates and was skipped`));
+        job.work.candidateIndex += 1;
       }
       return;
     }

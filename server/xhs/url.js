@@ -75,15 +75,22 @@ async function fetchWithTimeout(url, init = {}, timeoutMs = 15000) {
   }
 }
 
+function nextRedirectUrl(current, response) {
+  const location = response?.headers?.get?.('location');
+  if (location) return new URL(location, current);
+  const finalHref = typeof response?.url === 'string' ? response.url : '';
+  if (finalHref && finalHref !== current.href) return new URL(finalHref);
+  return null;
+}
+
 async function resolveNoteUrl(value) {
   let url = new URL(String(value).trim());
   for (let hop = 0; hop < 4; hop += 1) {
     if (!isAllowedHost(url.hostname)) throw new Error('Unsupported Xiaohongshu URL');
     if (isShortLinkHost(url.hostname)) {
-      const response = await fetchWithTimeout(url.href, { redirect: 'manual', headers: { 'user-agent': UA } }, 8000);
-      const location = response.headers.get('location');
-      if (!location) throw new Error('Xiaohongshu short link did not redirect');
-      const next = new URL(location, url);
+      const response = await fetchWithTimeout(url.href, { redirect: 'manual', headers: { 'user-agent': UA } }, 4000);
+      const next = nextRedirectUrl(url, response);
+      if (!next) throw new Error('Xiaohongshu short link did not redirect');
       if (!isAllowedHost(next.hostname)) throw new Error('Xiaohongshu short link left the allowed hosts');
       url = next;
       continue;
@@ -99,12 +106,11 @@ async function resolveNoteUrl(value) {
   throw new Error('Xiaohongshu short link redirected too many times');
 }
 
-async function fetchPublicNote(value, cookie) {
-  const resolved = await resolveNoteUrl(value);
+async function fetchPublicNoteFromResolved(resolved, cookie) {
   const headers = { 'user-agent': UA };
   if (cookie) headers.cookie = cookie;
   try {
-    const response = await fetchWithTimeout(resolved.url, { headers });
+    const response = await fetchWithTimeout(resolved.url, { headers }, 5000);
     if (!response.ok) throw new Error(`Xiaohongshu page returned ${response.status}`);
     return { ...parseInitialState(await response.text(), resolved.noteId), url: resolved.url, via: 'url' };
   } catch (error) {
@@ -113,6 +119,10 @@ async function fetchPublicNote(value, cookie) {
     error.resolvedUrl = resolved.url;
     throw error;
   }
+}
+
+async function fetchPublicNote(value, cookie) {
+  return fetchPublicNoteFromResolved(await resolveNoteUrl(value), cookie);
 }
 
 module.exports = {
@@ -124,6 +134,7 @@ module.exports = {
   searchKeywordFromUrl,
   parseInitialState,
   resolveNoteUrl,
+  fetchPublicNoteFromResolved,
   fetchPublicNote,
   fetchWithTimeout,
 };

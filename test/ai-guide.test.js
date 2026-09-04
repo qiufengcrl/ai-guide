@@ -43,7 +43,7 @@ function lookupGeoRow(query) {
   return (head && NOMINATIM_ROWS[head]) || null;
 }
 
-function stubGeoFetch(fallback) {
+function stubGeoFetch(fallback, options = {}) {
   const original = global.fetch;
   const calls = [];
   global.fetch = async (url) => {
@@ -51,7 +51,7 @@ function stubGeoFetch(fallback) {
     if (href.startsWith('https://nominatim.openstreetmap.org/')) {
       const query = new URL(href).searchParams.get('q') || '';
       calls.push(query);
-      const row = lookupGeoRow(query);
+      const row = options.exact ? NOMINATIM_ROWS[query] : lookupGeoRow(query);
       const body = row
         ? [{
           name: row.name,
@@ -173,16 +173,16 @@ function buildHost(options = {}) {
   return { host, db, trips, app: host.run(plugin) };
 }
 
-async function makeReady(fixture, input = {}, fallback) {
+async function makeReady(fixture, input = {}, fallback, geoOptions) {
   await fixture.app.load();
   const created = await fixture.app.route({ method: 'POST', path: '/plan' }, {
     body: { destination: '京都', dayCount: 2, pace: 'relaxed', locale: 'zh', ...input },
   });
   const jobId = created.body.jobId;
-  const geo = stubGeoFetch(fallback);
+  const geo = stubGeoFetch(fallback, geoOptions);
   let state;
   try {
-    for (let index = 0; index < 28; index += 1) {
+    for (let index = 0; index < 48; index += 1) {
       state = (await fixture.app.route({ method: 'GET', path: '/plan' }, { query: { jobId } })).body;
       if (state.status === 'ready' || state.status === 'failed') break;
     }
@@ -278,6 +278,24 @@ test('分享口令里的 xhslink.cn 会被抽成笔记链接，大兴安岭有�
   const candidates = normalizeCandidates({ candidates: [{ name: '大兴安岭' }] }, intent);
   assert.ok(!candidates.some((item) => item.name === '大兴安岭'));
   assert.ok(candidates.some((item) => item.name === '北极村'));
+});
+
+test('组合检索无结果时下一拍改搜景点本名', async () => {
+  NOMINATIM_ROWS['漠河'] = { name: '漠河', lat: 52.97, lng: 122.54, category: 'place', type: 'town' };
+  try {
+    const fixture = buildHost({
+      aiResults: [{ candidates: [{ name: '漠河', dayHint: 1 }] }],
+    });
+    const { state, geoCalls } = await makeReady(fixture, {
+      destination: '测试城',
+      dayCount: 1,
+    }, undefined, { exact: true });
+    assert.ok(geoCalls.includes('漠河 测试城'));
+    assert.ok(geoCalls.includes('漠河'));
+    assert.ok(state.days.flatMap((day) => day.places).some((place) => /漠河/.test(place.name)));
+  } finally {
+    delete NOMINATIM_ROWS['漠河'];
+  }
 });
 
 test('公开草稿始终带上来源说明', () => {
@@ -385,6 +403,26 @@ test('公开 URL 和粘贴正文进入同一预览，公开草稿不泄露正文
   assert.deepEqual(state.guides.map((guide) => guide.via).sort(), ['paste', 'url']);
   assert.equal(state.sourceSummary.basis, 'guides');
   assert.equal(JSON.stringify(state.guides).includes('第一天'), false);
+});
+
+test('粘贴 xhslink.cn 分享口令会拆出短链并读成链接笔记', async () => {
+  const fixture = buildHost();
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures/note.html'), 'utf8');
+  const share = '上海出发5天4晚，追上大兴安岭的秋🍂 9月下旬看了圈机... https://xhslink.cn/o/4YIkUR0MNXN 进入【小红书】发现更多内容~';
+  const xhsFallback = (url) => {
+    if (/xhslink\.cn/.test(String(url))) {
+      return {
+        ok: false,
+        status: 302,
+        headers: { get(name) { return name === 'location' ? 'https://www.xiaohongshu.com/discovery/item/64f000000000000000000001?xsec_token=tok' : null; } },
+      };
+    }
+    return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
+  };
+  const { state } = await makeReady(fixture, { sourceText: share }, xhsFallback);
+  assert.ok(state.guides.some((guide) => guide.via === 'paste'));
+  assert.ok(state.guides.some((guide) => guide.via === 'url' && guide.noteId === '64f000000000000000000001'));
+  assert.equal(state.sourceSummary.noteCount, 1);
 });
 
 test('commit 与草稿 evidenceIds 求交，只创建新行程和勾选地点', async () => {
