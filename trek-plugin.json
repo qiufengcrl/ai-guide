@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "apiVersion": 1,
   "author": "Your Name",
-  "description": "Turn Xiaohongshu travel notes into a TREK itinerary",
+  "description": "把小红书旅行攻略转换为可编辑的 TREK 地图行程",
   "type": "page",
   "trek": ">=4.0.0 <5.0.0",
   "nativeModules": false,
@@ -37,51 +37,51 @@
   "settings": [
     {
       "key": "max_days",
-      "label": "Maximum days",
+      "label": "最大行程天数",
       "input_type": "number",
       "scope": "instance",
       "placeholder": "8",
-      "hint": "Maximum 14"
+      "hint": "最多 14 天"
     },
     {
       "key": "max_places_per_day",
-      "label": "Maximum places per day",
+      "label": "每日最多地点数",
       "input_type": "number",
       "scope": "instance",
       "placeholder": "6"
     },
     {
       "key": "max_notes",
-      "label": "Maximum Xiaohongshu notes",
+      "label": "最多读取攻略数",
       "input_type": "number",
       "scope": "instance",
       "placeholder": "4",
-      "hint": "Maximum 8"
+      "hint": "最多 8 篇"
     },
     {
       "key": "xhs_enabled",
-      "label": "Try Xiaohongshu keyword search",
+      "label": "尝试小红书关键词搜索",
       "input_type": "select",
       "scope": "instance",
       "options": [
-        { "value": "true", "label": "Enabled" },
-        { "value": "false", "label": "Disabled" }
+        { "value": "true", "label": "启用" },
+        { "value": "false", "label": "停用" }
       ]
     },
     {
       "key": "xhs_cookie",
-      "label": "Your Xiaohongshu Web Cookie",
+      "label": "小红书 Web Cookie",
       "input_type": "password",
       "scope": "user",
       "secret": true,
-      "hint": "Used only by the plugin server for your requests; never sent to the iframe or AI."
+      "hint": "仅由插件服务端处理你的请求；不会发送到页面、AI 提示词、日志或草稿。"
     }
   ],
   "actions": [
     {
       "key": "testXhs",
-      "label": "Test Xiaohongshu session",
-      "hint": "Runs one minimal search using your own Cookie."
+      "label": "测试小红书会话",
+      "hint": "使用你的 Cookie 执行一次最小关键词搜索。"
     }
   ]
 }
