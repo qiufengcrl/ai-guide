@@ -143,11 +143,12 @@
       min-height: 276px;
       margin-left: 32px;
       overflow: hidden;
-      border: 1px solid color-mix(in oklch, var(--border-primary) 72%, transparent);
+      border: 1px solid color-mix(in oklch, var(--border-primary) 72%, var(--text-faint));
       border-radius: 24px;
-      background:
+      background-color: var(--bg-tertiary, var(--bg-card));
+      background-image:
         radial-gradient(circle at 67% 30%, color-mix(in oklch, var(--accent) 12%, transparent), transparent 27%),
-        linear-gradient(145deg, color-mix(in oklch, var(--bg-card) 72%, transparent), color-mix(in oklch, var(--bg-tertiary) 78%, transparent));
+        linear-gradient(145deg, color-mix(in oklch, var(--bg-card) 72%, transparent), color-mix(in oklch, var(--bg-tertiary) 78%, var(--bg-card)));
       box-shadow: var(--shadow-md), inset 0 1px 0 color-mix(in oklch, white 55%, transparent);
       transform: rotate(2deg);
     }
@@ -875,12 +876,12 @@
     @media (max-width: 720px) {
       .page { padding: 14px 14px 56px; }
       .app-shell::before { background-size: 52px 52px; }
-      .hero { display: block; min-height: auto; padding: 28px 23px 22px; border-radius: 22px; }
-      .hero h1 { font-size: clamp(43px, 14vw, 60px); }
-      .hero-subtitle { margin-top: 18px; font-size: 14px; line-height: 1.65; }
-      .hero-actions { margin-top: 22px; }
+      .hero { display: block; min-height: auto; padding: 22px 18px 18px; border-radius: 22px; }
+      .hero h1 { font-size: clamp(32px, 10vw, 42px); line-height: 1.05; }
+      .hero-subtitle { margin-top: 12px; font-size: 14px; line-height: 1.65; }
+      .hero-actions { margin-top: 16px; }
       .hero-note { width: 100%; }
-      .hero-map { min-height: 188px; margin: 28px 0 0; transform: none; border-radius: 18px; }
+      .hero-map { display: none; }
       .map-place { width: 34px; height: 34px; }
       .workspace-grid,
       .preview-layout { margin-top: 14px; gap: 14px; grid-template-columns: minmax(0, 1fr); }
@@ -909,7 +910,9 @@
     }
 
     [data-form-factor="phone"] .page { padding: 10px 12px calc(118px + var(--trek-inset-bottom, 0px)); }
-    [data-form-factor="phone"] .hero { border-radius: 20px; }
+    [data-form-factor="phone"] .hero-map { display: none; }
+    [data-form-factor="phone"] .hero { display: block; min-height: auto; padding: 18px 16px 16px; }
+    [data-form-factor="phone"] .hero h1 { font-size: 32px; line-height: 1.08; }
     [data-form-factor="phone"] .planner-panel { border-radius: 20px; }
     [data-form-factor="phone"] .workspace-grid,
     [data-form-factor="phone"] .preview-layout,
@@ -930,6 +933,13 @@
   <!-- trek:ui -->
   <style id="ai-guide-overrides">
     /* Injected kit CSS lands above this block; these rules must win in the phone iframe. */
+    [data-form-factor="phone"] .hero-map { display: none !important; }
+    [data-form-factor="phone"] .hero { display: block; min-height: auto; padding: 18px 16px 16px; }
+    [data-form-factor="phone"] .hero h1 { font-size: 32px; line-height: 1.08; }
+    @media (max-width: 720px) {
+      .hero-map { display: none !important; }
+      .hero h1 { font-size: clamp(32px, 10vw, 42px); line-height: 1.05; }
+    }
     .planner-panel.trek-glass,
     [data-form-factor="phone"] .planner-panel.trek-glass { padding: 0; }
     [data-form-factor="phone"] .workspace-grid,

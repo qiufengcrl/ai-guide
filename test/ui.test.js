@@ -65,6 +65,8 @@ test('theme, accessibility, and responsive host states are explicitly supported'
     '[data-density="compact"]',
     '[data-reduce-motion]',
     '@media (prefers-reduced-motion: reduce)',
+    '[data-form-factor="phone"] .hero-map',
+    '[data-form-factor="phone"] .hero h1',
     '[data-form-factor="phone"] .workspace-grid',
     'id="ai-guide-overrides"',
     'resolveLocale',
