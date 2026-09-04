@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, destinationSeeds } = require('../server/pipeline');
+const { gateAndSchedule, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, destinationSeeds, evidenceFromSearch } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces } = require('../server/geo/nominatim');
@@ -278,6 +278,20 @@ test('分享口令里的 xhslink.cn 会被抽成笔记链接，大兴安岭有�
   const candidates = normalizeCandidates({ candidates: [{ name: '大兴安岭' }] }, intent);
   assert.ok(!candidates.some((item) => item.name === '大兴安岭'));
   assert.ok(candidates.some((item) => item.name === '北极村'));
+});
+
+test('地图证据会丢掉远离目的地的误匹配', () => {
+  const candidate = { name: '洛古河', durationMinutes: 90, dayHint: 1 };
+  const bias = { lat: 52.3, lng: 124.7 };
+  assert.equal(evidenceFromSearch(candidate, {
+    source: 'nominatim',
+    places: [{ name: '古塔', lat: 48.95, lng: 27.05, types: ['tourism'] }],
+  }, 0, '大兴安岭', bias), null);
+  const near = evidenceFromSearch(candidate, {
+    source: 'nominatim',
+    places: [{ name: '洛古河村', lat: 53.3, lng: 122.35, types: ['village'] }],
+  }, 0, '大兴安岭', bias);
+  assert.equal(near.name, '洛古河村');
 });
 
 test('组合检索无结果时下一拍改搜景点本名', async () => {

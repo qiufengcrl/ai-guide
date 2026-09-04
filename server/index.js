@@ -266,7 +266,7 @@ async function advance(job, ctx) {
           `Place search for "${query}" failed: ${error.message}`));
       }
       const evidence = result
-        ? evidenceFromSearch(candidate, result, index, job.draft.intent.destination)
+        ? evidenceFromSearch(candidate, result, index, job.draft.intent.destination, job.work.bias)
         : null;
       if (evidence) {
         job.work.evidence.push(evidence);

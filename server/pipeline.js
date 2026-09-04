@@ -1,6 +1,7 @@
 const { extractXhsUrls } = require('./xhs/url');
 
 const TOO_FAR_KM = 40;
+const MAX_FROM_DESTINATION_KM = 500;
 
 const DESTINATION_SEEDS = {
   北京: ['故宫', '天坛', '颐和园', '八达岭长城', '景山公园', '北海公园', '雍和宫', '南锣鼓巷'],
@@ -287,10 +288,14 @@ function isAdministrativePlace(place) {
   ].includes(type));
 }
 
-function evidenceFromSearch(candidate, result, index, destination) {
+function evidenceFromSearch(candidate, result, index, destination, bias) {
   const places = (result?.places || []).filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
-  const specific = places.find((item) => !isGenericPlaceName(item.name, destination) && !isAdministrativePlace(item));
-  const named = places.find((item) => !isGenericPlaceName(item.name, destination));
+  const destBias = bias && finiteCoordinate(bias.lat) && finiteCoordinate(bias.lng) ? bias : null;
+  const nearby = destBias
+    ? places.filter((item) => haversineKm(item, destBias) <= MAX_FROM_DESTINATION_KM)
+    : places;
+  const specific = nearby.find((item) => !isGenericPlaceName(item.name, destination) && !isAdministrativePlace(item));
+  const named = nearby.find((item) => !isGenericPlaceName(item.name, destination));
   const place = specific || named || null;
   if (!place) return null;
   return {
@@ -433,6 +438,7 @@ function publicDraft(job) {
 
 module.exports = {
   TOO_FAR_KM,
+  MAX_FROM_DESTINATION_KM,
   EXTRACTION_SCHEMA,
   DESTINATION_SEEDS,
   settings,
