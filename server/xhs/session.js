@@ -129,17 +129,17 @@ async function fetchSessionNote(item, cookie) {
     if (note && (note.desc || note.display_title)) {
       return {
         noteId: item.noteId,
-        title: String(note.display_title || item.title || ''),
+        title: String(note.display_title || item.title || '').trim(),
         text: String(note.desc || ''),
         url: item.url,
-        via: 'search',
+        via: item.via || 'search',
       };
     }
   } catch {
     // Public SSR is the intentional detail fallback.
   }
   const note = await fetchPublicNote(item.url, cookie);
-  return { ...note, via: 'search' };
+  return { ...note, via: item.via || 'search' };
 }
 
 module.exports = {

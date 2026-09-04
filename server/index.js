@@ -132,6 +132,7 @@ async function advance(job, ctx) {
               xsecToken: publicError.xsecToken || resolved.xsecToken || '',
               title: '',
               url: publicError.resolvedUrl || resolved.url || `https://www.xiaohongshu.com/explore/${noteId}`,
+              via: 'url',
             });
             return;
           }
@@ -192,7 +193,13 @@ async function advance(job, ctx) {
       try {
         await pauseForXhs();
         const note = await fetchSessionNote(item, cookie);
-        job.draft.guides.push({ ...note, id: `g_${job.draft.guides.length + 1}`, text: note.text.slice(0, 4000) });
+        job.draft.guides.push({
+          ...note,
+          id: `g_${job.draft.guides.length + 1}`,
+          via: item.via || note.via || 'search',
+          title: String(note.title || item.title || '').trim() || message(locale, '小红书笔记', 'Xiaohongshu note'),
+          text: note.text.slice(0, 4000),
+        });
       } catch {
         addWarning(job, message(locale, `「${item.title || item.noteId}」正文读取失败`, `Could not read "${item.title || item.noteId}"`));
       }
@@ -283,12 +290,10 @@ async function advance(job, ctx) {
   }
 
   if (job.stage === 'write_copy') {
-    const names = job.work.evidence.map((item) => item.name).join(', ');
-    const copy = await ctx.ai.complete(
-      `Write one short itinerary note in ${String(locale).startsWith('zh') ? 'Chinese' : 'English'} using only these place names: ${names}`,
-      'Do not invent prices, opening hours, transport times, or places.',
-    );
-    job.work.copy = String(copy.text || '').trim();
+    const names = job.work.evidence.map((item) => item.name).filter(Boolean);
+    job.work.copy = message(locale,
+      `按 ${job.draft.intent.dayCount} 天安排：${names.join('、')}。`,
+      `${job.draft.intent.dayCount}-day outline: ${names.join(', ')}.`);
     job.stage = 'gate';
     return;
   }

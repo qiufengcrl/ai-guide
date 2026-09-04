@@ -326,6 +326,7 @@ test('无 Cookie 的纯表单仍形成地图预览，并只使用 extract.result
   assert.ok(fixture.host.calls.some((call) => call.method === 'ai.extract'));
   assert.ok(!geoCalls.includes('MUST NOT USE'));
   assert.ok(geoCalls.includes('京都'));
+  assert.match(state.days[0].notes || '', /Near A/);
   const far = state.days.flatMap((day) => day.places).find((place) => place.name === 'Far');
   assert.equal(far.tooFar, true);
   assert.equal(far.selected, false);
