@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, normalizeCandidates, extractionText, extractionInstruction, isGenericPlaceName, publicDraft, placeSearchQuery } = require('../server/pipeline');
+const { gateAndSchedule, normalizeCandidates, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces } = require('../server/geo/nominatim');
@@ -146,8 +146,8 @@ function buildHost(options = {}) {
   const host = sdk.createMockHost({
     grants: GRANTS,
     actingUserId: 7,
-    config: { max_days: 8, max_places_per_day: 6, max_notes: 4, xhs_enabled: false },
-    userSettings: {},
+    config: { max_days: 8, max_places_per_day: 6, max_notes: 4, xhs_enabled: false, ...options.config },
+    userSettings: options.userSettings || {},
     aiResults: options.aiResults || [{
       intent: { destination: '京都' },
       candidates: [
@@ -237,6 +237,8 @@ test('无攻略时抽取具体景点，丢掉省/市名，并把地点分到各�
   assert.equal(isGenericPlaceName('河南省', '河南'), true);
   assert.equal(isGenericPlaceName('河南', '河南省'), true);
   assert.equal(isGenericPlaceName('龙门石窟', '河南'), false);
+  assert.equal(isWeakPlaceName('历史', intent), true);
+  assert.equal(isWeakPlaceName('龙门石窟', intent), false);
 
   const candidates = normalizeCandidates({ candidates: [{ name: '河南省', dayHint: 1 }] }, intent);
   const names = candidates.map((item) => item.name);
@@ -318,6 +320,37 @@ test('模型只返回省名时，仍补上具体景点、分到两天，并说�
   assert.equal(state.guides.length, 0);
   assert.equal(state.sourceSummary.basis, 'destination');
   assert.match(state.sourceSummary.query, /河南/);
+});
+
+test('Cookie 搜索为空时给出说明，并仍生成具体景点而不是兴趣词', async () => {
+  const fixture = buildHost({
+    config: { xhs_enabled: true },
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+    aiResults: [{ candidates: [{ name: '历史', dayHint: 1 }] }],
+  });
+  const xhsFallback = async (url) => {
+    const href = String(url);
+    if (href.includes('edith.xiaohongshu.com')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() { return { success: true, data: { items: [] } }; },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${href}`);
+  };
+  const { state } = await makeReady(fixture, {
+    destination: '河南',
+    dayCount: 2,
+    pace: 'relaxed',
+    interests: '历史',
+  }, xhsFallback);
+  assert.ok(state.warnings.some((warning) => /没有返回笔记/.test(warning)));
+  const names = state.days.flatMap((day) => day.places).map((place) => place.name);
+  assert.ok(!names.includes('历史'));
+  assert.ok(!names.includes('历市镇'));
+  assert.ok(state.days.flatMap((day) => day.places).length >= 3);
 });
 
 test('公开 URL 和粘贴正文进入同一预览，公开草稿不泄露正文', async () => {

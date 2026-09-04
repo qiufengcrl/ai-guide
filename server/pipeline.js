@@ -27,6 +27,11 @@ const DESTINATION_SEEDS = {
   东京: ['浅草寺', '东京塔', '明治神宫', '涩谷', '上野公园'],
 };
 
+const WEAK_PLACE_WORDS = new Set([
+  '历史', '文化', '美食', '购物', '自然', '亲子', '小众', '网红', '景点', '旅游', '攻略',
+  'citywalk', 'history', 'culture', 'food', 'shopping', 'nature', 'sightseeing', 'travel',
+]);
+
 const clampInt = (value, fallback, min, max) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
@@ -80,7 +85,19 @@ function normalizeInput(body, limits) {
     sourceText: sourceText || null,
     urls,
     guideQuery: `${destination} ${interests.length ? interests.join(' ') : '景点'} 旅游 景点攻略`.trim(),
+    searchQueries: guideSearchQueries(destination, interests),
   };
+}
+
+function guideSearchQueries(destination, interests) {
+  const dest = String(destination || '').trim();
+  const interest = (interests || []).map(String).map((item) => item.trim()).filter(Boolean)[0] || '';
+  const queries = [];
+  if (dest && interest) queries.push(`${dest}${interest}攻略`);
+  if (dest) queries.push(`${dest}旅游攻略`);
+  if (dest) queries.push(`${dest}必去景点`);
+  if (dest && interest) queries.push(`${dest} ${interest} 旅游 景点攻略`);
+  return [...new Set(queries.filter(Boolean))];
 }
 
 const EXTRACTION_SCHEMA = {
@@ -137,6 +154,15 @@ function isGenericPlaceName(name, destination) {
   const destCore = foldName(stripAdminTail(dest));
   const nameCore = foldName(stripAdminTail(raw));
   return folded === destFold || (Boolean(destCore) && nameCore === destCore);
+}
+
+function isWeakPlaceName(name, intent) {
+  const raw = String(name || '').trim();
+  if (!raw) return true;
+  if (isGenericPlaceName(raw, intent?.destination)) return true;
+  const folded = foldName(raw);
+  if (WEAK_PLACE_WORDS.has(folded)) return true;
+  return (intent?.interests || []).some((item) => foldName(item) === folded);
 }
 
 function destinationSeeds(destination) {
@@ -219,7 +245,7 @@ function normalizeCandidates(raw, intent) {
   const seen = new Set();
   const unique = [];
   const pushUnique = (item) => {
-    if (!item?.name || isGenericPlaceName(item.name, intent.destination)) return;
+    if (!item?.name || isWeakPlaceName(item.name, intent)) return;
     const key = foldName(item.name);
     if (!key || seen.has(key)) return;
     seen.add(key);
@@ -386,6 +412,8 @@ function publicDraft(job) {
       basis: guides.length ? 'guides' : 'destination',
       query: intent.guideQuery || '',
       destination: intent.destination || '',
+      searchQuery: job.work?.lastSearchQuery || intent.searchQueries?.[0] || intent.guideQuery || '',
+      noteCount: guides.filter((guide) => guide.via === 'search' || guide.via === 'url').length,
     },
     progress: {
       guidesRead: guides.length,
@@ -411,9 +439,11 @@ module.exports = {
   extractionInstruction,
   normalizeCandidates,
   isGenericPlaceName,
+  isWeakPlaceName,
   destinationSeeds,
   targetPlaceCount,
   placeSearchQuery,
+  guideSearchQueries,
   evidenceFromSearch,
   gateAndSchedule,
   publicDraft,

@@ -50,35 +50,43 @@ async function post(path, body, cookie) {
   return assertSessionResponse(await response.json());
 }
 
+function parseSearchNotes(data, maxNotes = 4) {
+  const items = data?.data?.items || data?.data?.notes || [];
+  if (!Array.isArray(items)) return [];
+  const notes = [];
+  const seen = new Set();
+  for (const item of items) {
+    const card = item?.note_card || item?.note || {};
+    const model = String(item?.model_type || item?.modelType || '').toLowerCase();
+    if (model && model !== 'note') continue;
+    const noteId = String(item?.id || card.note_id || card.id || '').trim();
+    if (!noteId || seen.has(noteId)) continue;
+    if (noteId.length < 16 && !/^[0-9a-f]{24}$/i.test(noteId)) continue;
+    seen.add(noteId);
+    notes.push({
+      noteId,
+      xsecToken: String(item?.xsec_token || item?.xsecToken || card.xsec_token || ''),
+      title: String(card.display_title || card.title || item?.display_title || ''),
+      url: `https://www.xiaohongshu.com/explore/${noteId}`,
+    });
+    if (notes.length >= maxNotes) break;
+  }
+  return notes;
+}
+
 async function searchNotes(keyword, cookie, maxNotes = 4) {
   if (!cookie) throw new XhsSessionError('Xiaohongshu Cookie is empty');
   const data = await post('/api/sns/web/v1/search/notes', {
-    keyword,
+    keyword: String(keyword || '').trim(),
     page: 1,
-    page_size: Math.min(8, Math.max(1, maxNotes)),
+    page_size: Math.min(20, Math.max(1, maxNotes)),
     search_id: createSearchId(),
     sort: 'general',
     note_type: 0,
     ext_flags: [],
-    filters: [
-      { tags: ['general'], type: 'sort_type' },
-      { tags: ['不限'], type: 'filter_note_type' },
-      { tags: ['不限'], type: 'filter_note_time' },
-      { tags: ['不限'], type: 'filter_note_range' },
-      { tags: ['不限'], type: 'filter_pos_distance' },
-    ],
-    geo: '',
     image_formats: ['jpg', 'webp', 'avif'],
   }, cookie);
-  return (data?.data?.items || [])
-    .filter((item) => item?.model_type === 'note' && item.id)
-    .slice(0, maxNotes)
-    .map((item) => ({
-      noteId: String(item.id),
-      xsecToken: String(item.xsec_token || ''),
-      title: String(item.note_card?.display_title || ''),
-      url: `https://www.xiaohongshu.com/explore/${item.id}`,
-    }));
+  return parseSearchNotes(data, maxNotes);
 }
 
 async function fetchSessionNote(item, cookie) {
@@ -113,4 +121,5 @@ module.exports = {
   assertSessionResponse,
   searchNotes,
   fetchSessionNote,
+  parseSearchNotes,
 };

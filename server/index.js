@@ -132,14 +132,37 @@ async function advance(job, ctx) {
     if (!work.searchAttempted) {
       work.searchAttempted = true;
       if (limits.xhsEnabled && cookie && job.draft.intent.destination) {
-        try {
-          await pauseForXhs();
-          const automatic = await searchNotes(job.draft.intent.guideQuery, cookie, limits.maxNotes);
-          const seen = new Set(work.pendingNotes.map((item) => item.noteId));
-          work.pendingNotes.push(...automatic.filter((item) => !seen.has(item.noteId)));
-          work.pendingNotes = work.pendingNotes.slice(0, limits.maxNotes);
-        } catch {
-          addWarning(job, message(locale, '小红书会话不可用，已跳过自动搜索', 'Xiaohongshu session unavailable; automatic search was skipped'));
+        const queries = job.draft.intent.searchQueries?.length
+          ? job.draft.intent.searchQueries
+          : [job.draft.intent.guideQuery];
+        let lastError = null;
+        for (const query of queries) {
+          try {
+            await pauseForXhs();
+            const automatic = await searchNotes(query, cookie, limits.maxNotes);
+            work.lastSearchQuery = query;
+            work.lastSearchCount = automatic.length;
+            if (automatic.length) {
+              const seen = new Set(work.pendingNotes.map((item) => item.noteId));
+              work.pendingNotes.push(...automatic.filter((item) => !seen.has(item.noteId)));
+              work.pendingNotes = work.pendingNotes.slice(0, limits.maxNotes);
+              lastError = null;
+              break;
+            }
+          } catch (error) {
+            lastError = error;
+          }
+        }
+        if (!work.pendingNotes.length) {
+          if (lastError) {
+            addWarning(job, message(locale,
+              `小红书搜索失败：${lastError.message}`,
+              `Xiaohongshu search failed: ${lastError.message}`));
+          } else {
+            addWarning(job, message(locale,
+              `小红书搜索没有返回笔记（关键词：${work.lastSearchQuery || job.draft.intent.guideQuery}）。已按目的地生成具体景点。`,
+              `Xiaohongshu search returned no notes (query: ${work.lastSearchQuery || job.draft.intent.guideQuery}). Places were proposed from the destination.`));
+          }
         }
       } else if (!cookie) {
         addWarning(job, message(locale, '未配置小红书 Cookie；已继续使用表单、链接或粘贴内容', 'No Xiaohongshu Cookie is configured; continuing with form, links, or pasted text'));
