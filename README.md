@@ -7,10 +7,11 @@ Turn Xiaohongshu travel notes into a TREK itinerary
 ## What it does
 
 AI Guide turns a destination, Xiaohongshu note URL, or pasted travel note into a
-mapped preview. Every place is resolved to WGS-84 coordinates by the plugin's
-own Nominatim client (`server/geo/nominatim.js`) — no host RPC, no map API key,
-no changes to TREK's core. After reviewing and deselecting days or places, the
-user can create a new TREK trip. Keyword search is optional and degrades to the
+mapped preview. Each place is resolved to WGS-84 coordinates via the plugin's
+Places API bridge (when `places_api_base` / `places_api_key` are configured, same
+as TREK's `PLACES_API_BASE`) or, if those are empty, via its own Nominatim client
+(`server/geo/nominatim.js`) — no host RPC, no changes to TREK's core. After
+reviewing and deselecting days or places, the user can create a new TREK trip. Keyword search is optional and degrades to the
 form/link/paste flow when a Xiaohongshu session is unavailable. Authenticated
 search signs every request with the current `x-s`, `x-t`, `x-s-common`, and
 trace headers expected by the Xiaohongshu web API.

@@ -74,6 +74,17 @@ function settings(config) {
     maxPlacesPerDay: clampInt(config.max_places_per_day, 6, 1, 12),
     maxNotes: clampInt(config.max_notes, 4, 1, 8),
     xhsEnabled: config.xhs_enabled !== false && String(config.xhs_enabled ?? 'true') !== 'false',
+    placesApiBase: String(config.places_api_base || '').trim(),
+    placesApiKey: String(config.places_api_key || '').trim(),
+  };
+}
+
+function geoSearchOptions(config, extra = {}) {
+  const limits = settings(config);
+  return {
+    ...extra,
+    placesApiBase: limits.placesApiBase,
+    placesApiKey: limits.placesApiKey,
   };
 }
 
@@ -505,6 +516,7 @@ module.exports = {
   looksLikeShareCard,
   noteDisplayTitle,
   settings,
+  geoSearchOptions,
   isZh,
   message,
   normalizeInput,

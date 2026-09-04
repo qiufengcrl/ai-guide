@@ -15,6 +15,7 @@ const {
   evidenceFromSearch,
   gateAndSchedule,
   publicDraft,
+  geoSearchOptions,
 } = require('./pipeline');
 const { fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const { normalizeXhsCookie, searchNotes, searchNotesDetailed, fetchSessionNote } = require('./xhs/session');
@@ -244,7 +245,7 @@ async function advance(job, ctx) {
   if (job.stage === 'gather_evidence') {
     if (!job.work.bias && !job.work.biasFailed && job.draft.intent.destination) {
       try {
-        const result = await searchPlaces(job.draft.intent.destination, { lang: locale });
+        const result = await searchPlaces(job.draft.intent.destination, geoSearchOptions(ctx.config, { lang: locale }));
         const dest = String(job.draft.intent.destination || '').trim();
         const ranked = (result.places || []).filter((place) => Number.isFinite(place?.lat) && Number.isFinite(place?.lng));
         const first = ranked.find((place) => dest && String(place.address || '').includes(dest)) || ranked[0];
@@ -267,7 +268,7 @@ async function advance(job, ctx) {
       job.work.retryQueryIndex = 0;
       let result = null;
       try {
-        result = await searchPlaces(query, { lang: locale, locationBias: job.work.bias || undefined });
+        result = await searchPlaces(query, geoSearchOptions(ctx.config, { lang: locale, locationBias: job.work.bias || undefined }));
       } catch (error) {
         addWarning(job, message(locale,
           `「${query}」地图检索失败：${error.message}`,

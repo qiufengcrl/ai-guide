@@ -83,10 +83,11 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.equal(manifest.icon, 'Sparkles');
   assert.deepEqual(manifest.requiredAddons, ['llm_parsing']);
   assert.equal(manifest.nativeModules, false);
-  assert.deepEqual(manifest.egress, ['www.xiaohongshu.com', 'edith.xiaohongshu.com', 'xhslink.com', 'xhslink.cn', 'nominatim.openstreetmap.org']);
+  assert.deepEqual(manifest.egress, ['www.xiaohongshu.com', 'edith.xiaohongshu.com', 'xhslink.com', 'xhslink.cn', 'nominatim.openstreetmap.org', 'trek-amap-bridge']);
   assert.ok(manifest.permissions.includes('http:outbound:xhslink.cn'));
   assert.ok(!manifest.permissions.includes('maps:read'));
   assert.ok(manifest.permissions.includes('http:outbound:nominatim.openstreetmap.org'));
+  assert.ok(manifest.permissions.includes('http:outbound:trek-amap-bridge'));
   const cookieFields = manifest.settings.filter((field) => field.key === 'xhs_cookie');
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
 });
@@ -571,6 +572,44 @@ test('Nominatim 优先返回景点而不是行政区', async () => {
   try {
     const result = await searchPlaces('龙门石窟 河南', { lang: 'zh' });
     assert.equal(result.places[0].name, 'Longmen Grottoes');
+  } finally {
+    global.fetch = original;
+  }
+});
+
+test('Places API bridge 会映射 Google 兼容响应为 WGS-84 坐标', async () => {
+  const original = global.fetch;
+  global.fetch = async (url, init) => {
+    assert.equal(String(url), 'http://trek-amap-bridge:8080/v1/places:searchText');
+    assert.equal(init.method, 'POST');
+    assert.equal(init.headers['x-goog-api-key'], 'amap-bridge');
+    return {
+      ok: true,
+      status: 200,
+      headers: { get() { return null; } },
+      async json() {
+        return {
+          places: [{
+            id: 'amap_test',
+            displayName: { text: '故宫博物院' },
+            formattedAddress: '景山前街4号, 北京市, 东城区',
+            location: { latitude: 39.916435, longitude: 116.390784 },
+            types: ['风景名胜'],
+            businessStatus: 'OPERATIONAL',
+          }],
+        };
+      },
+    };
+  };
+  try {
+    const result = await searchPlaces('故宫 北京', {
+      lang: 'zh',
+      placesApiBase: 'http://trek-amap-bridge:8080',
+      placesApiKey: 'amap-bridge',
+    });
+    assert.equal(result.source, 'places');
+    assert.equal(result.places[0].name, '故宫博物院');
+    assert.ok(Math.abs(result.places[0].lat - 39.916435) < 0.001);
   } finally {
     global.fetch = original;
   }
