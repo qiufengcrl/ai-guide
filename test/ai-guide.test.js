@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, normalizeCandidates, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery } = require('../server/pipeline');
+const { gateAndSchedule, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, destinationSeeds } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces } = require('../server/geo/nominatim');
@@ -83,7 +83,8 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.equal(manifest.icon, 'Sparkles');
   assert.deepEqual(manifest.requiredAddons, ['llm_parsing']);
   assert.equal(manifest.nativeModules, false);
-  assert.deepEqual(manifest.egress, ['www.xiaohongshu.com', 'edith.xiaohongshu.com', 'xhslink.com', 'nominatim.openstreetmap.org']);
+  assert.deepEqual(manifest.egress, ['www.xiaohongshu.com', 'edith.xiaohongshu.com', 'xhslink.com', 'xhslink.cn', 'nominatim.openstreetmap.org']);
+  assert.ok(manifest.permissions.includes('http:outbound:xhslink.cn'));
   assert.ok(!manifest.permissions.includes('maps:read'));
   assert.ok(manifest.permissions.includes('http:outbound:nominatim.openstreetmap.org'));
   const cookieFields = manifest.settings.filter((field) => field.key === 'xhs_cookie');
@@ -264,6 +265,19 @@ test('无攻略时抽取具体景点，丢掉省/市名，并把地点分到各�
   assert.equal(gated.days.length, 2);
   assert.ok(gated.days[0].places.length >= 1);
   assert.ok(gated.days[1].places.length >= 1);
+});
+
+test('分享口令里的 xhslink.cn 会被抽成笔记链接，大兴安岭有具体景点', () => {
+  const share = '上海出发5天4晚，追上大兴安岭的秋🍂 9月下旬看了圈机... https://xhslink.cn/o/4YIkUR0MNXN 进入【小红书】发现更多内容~';
+  const intent = normalizeInput(
+    { destination: '大兴安岭', sourceText: share, dayCount: 5, pace: 'relaxed' },
+    { maxDays: 14, maxPlacesPerDay: 6, maxNotes: 4 },
+  );
+  assert.deepEqual(intent.urls, ['https://xhslink.cn/o/4YIkUR0MNXN']);
+  assert.ok(destinationSeeds('大兴安岭').includes('北极村'));
+  const candidates = normalizeCandidates({ candidates: [{ name: '大兴安岭' }] }, intent);
+  assert.ok(!candidates.some((item) => item.name === '大兴安岭'));
+  assert.ok(candidates.some((item) => item.name === '北极村'));
 });
 
 test('公开草稿始终带上来源说明', () => {

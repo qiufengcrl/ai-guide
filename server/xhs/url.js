@@ -1,11 +1,24 @@
 const NOTE_ID = /^[a-f0-9]{24}$/i;
-const ALLOWED_HOSTS = new Set(['www.xiaohongshu.com', 'xiaohongshu.com', 'xhslink.com']);
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+function canonicalHost(hostname) {
+  return String(hostname || '').toLowerCase().replace(/^www\./, '');
+}
+
+function isAllowedHost(hostname) {
+  const host = canonicalHost(hostname);
+  return host === 'xiaohongshu.com' || host === 'xhslink.com' || host === 'xhslink.cn';
+}
+
+function isShortLinkHost(hostname) {
+  const host = canonicalHost(hostname);
+  return host === 'xhslink.com' || host === 'xhslink.cn';
+}
 
 function noteIdFromUrl(value) {
   try {
     const url = new URL(String(value).trim());
-    if (!ALLOWED_HOSTS.has(url.hostname.toLowerCase())) return null;
+    if (!isAllowedHost(url.hostname) || isShortLinkHost(url.hostname)) return null;
     const match = url.pathname.match(/\/(?:explore|discovery\/item)\/([a-f0-9]{24})(?:\/|$)/i);
     return match && NOTE_ID.test(match[1]) ? match[1].toLowerCase() : null;
   } catch {
@@ -16,11 +29,29 @@ function noteIdFromUrl(value) {
 function searchKeywordFromUrl(value) {
   try {
     const url = new URL(String(value).trim());
-    if (!ALLOWED_HOSTS.has(url.hostname.toLowerCase()) || !url.pathname.includes('/search_result')) return null;
+    if (!isAllowedHost(url.hostname) || !url.pathname.includes('/search_result')) return null;
     return String(url.searchParams.get('keyword') || '').trim() || null;
   } catch {
     return null;
   }
+}
+
+function extractXhsUrls(...blobs) {
+  const found = [];
+  const seen = new Set();
+  for (const blob of blobs) {
+    const matches = String(blob || '').match(/https?:\/\/[^\s<>"'）)】]+/gi) || [];
+    for (let raw of matches) {
+      raw = raw.replace(/[.,;:!?，。！？~～]+$/g, '');
+      let url;
+      try { url = new URL(raw); } catch { continue; }
+      if (!isAllowedHost(url.hostname)) continue;
+      if (seen.has(url.href)) continue;
+      seen.add(url.href);
+      found.push(url.href);
+    }
+  }
+  return found;
 }
 
 function parseInitialState(html, noteId) {
@@ -46,26 +77,53 @@ async function fetchWithTimeout(url, init = {}, timeoutMs = 15000) {
 
 async function resolveNoteUrl(value) {
   let url = new URL(String(value).trim());
-  if (!ALLOWED_HOSTS.has(url.hostname.toLowerCase())) throw new Error('Unsupported Xiaohongshu URL');
-  if (url.hostname.toLowerCase() === 'xhslink.com') {
-    const response = await fetchWithTimeout(url.href, { redirect: 'manual', headers: { 'user-agent': UA } }, 8000);
-    const location = response.headers.get('location');
-    if (!location) throw new Error('Xiaohongshu short link did not redirect');
-    url = new URL(location, url);
-    if (!ALLOWED_HOSTS.has(url.hostname.toLowerCase())) throw new Error('Xiaohongshu short link left the allowed hosts');
+  for (let hop = 0; hop < 4; hop += 1) {
+    if (!isAllowedHost(url.hostname)) throw new Error('Unsupported Xiaohongshu URL');
+    if (isShortLinkHost(url.hostname)) {
+      const response = await fetchWithTimeout(url.href, { redirect: 'manual', headers: { 'user-agent': UA } }, 8000);
+      const location = response.headers.get('location');
+      if (!location) throw new Error('Xiaohongshu short link did not redirect');
+      const next = new URL(location, url);
+      if (!isAllowedHost(next.hostname)) throw new Error('Xiaohongshu short link left the allowed hosts');
+      url = next;
+      continue;
+    }
+    const noteId = noteIdFromUrl(url.href);
+    if (!noteId) throw new Error('Unsupported Xiaohongshu note URL');
+    return {
+      noteId,
+      url: url.href,
+      xsecToken: url.searchParams.get('xsec_token') || '',
+    };
   }
-  const noteId = noteIdFromUrl(url.href);
-  if (!noteId) throw new Error('Unsupported Xiaohongshu note URL');
-  return { noteId, url: `https://www.xiaohongshu.com/explore/${noteId}` };
+  throw new Error('Xiaohongshu short link redirected too many times');
 }
 
 async function fetchPublicNote(value, cookie) {
   const resolved = await resolveNoteUrl(value);
   const headers = { 'user-agent': UA };
   if (cookie) headers.cookie = cookie;
-  const response = await fetchWithTimeout(resolved.url, { headers });
-  if (!response.ok) throw new Error(`Xiaohongshu page returned ${response.status}`);
-  return { ...parseInitialState(await response.text(), resolved.noteId), url: resolved.url, via: 'url' };
+  try {
+    const response = await fetchWithTimeout(resolved.url, { headers });
+    if (!response.ok) throw new Error(`Xiaohongshu page returned ${response.status}`);
+    return { ...parseInitialState(await response.text(), resolved.noteId), url: resolved.url, via: 'url' };
+  } catch (error) {
+    error.noteId = resolved.noteId;
+    error.xsecToken = resolved.xsecToken || '';
+    error.resolvedUrl = resolved.url;
+    throw error;
+  }
 }
 
-module.exports = { UA, noteIdFromUrl, searchKeywordFromUrl, parseInitialState, resolveNoteUrl, fetchPublicNote, fetchWithTimeout };
+module.exports = {
+  UA,
+  isAllowedHost,
+  isShortLinkHost,
+  extractXhsUrls,
+  noteIdFromUrl,
+  searchKeywordFromUrl,
+  parseInitialState,
+  resolveNoteUrl,
+  fetchPublicNote,
+  fetchWithTimeout,
+};

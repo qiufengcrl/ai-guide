@@ -1,3 +1,5 @@
+const { extractXhsUrls } = require('./xhs/url');
+
 const TOO_FAR_KM = 40;
 
 const DESTINATION_SEEDS = {
@@ -22,6 +24,8 @@ const DESTINATION_SEEDS = {
   桂林: ['漓江', '象鼻山', '两江四湖', '阳朔西街'],
   张家界: ['天门山', '张家界国家森林公园', '张家界大峡谷'],
   三亚: ['亚龙湾', '天涯海角', '南山寺', '蜈支洲岛'],
+  漠河: ['北极村', '洛古河', '北红村', '黑龙江第一湾'],
+  大兴安岭: ['漠河', '北极村', '洛古河', '白桦林', '九曲十八湾', '呼中国家级自然保护区', '莫尔道嘎国家森林公园', '根河'],
   京都: ['伏见稻荷大社', '清水寺', '岚山', '金阁寺', '祇园'],
   大阪: ['大阪城', '道顿堀', '心斋桥', '通天阁'],
   东京: ['浅草寺', '东京塔', '明治神宫', '涩谷', '上野公园'],
@@ -72,7 +76,7 @@ function normalizeInput(body, limits) {
   const dayCount = Math.min(limits.maxDays, Math.max(1, datedDays));
   const pace = ['relaxed', 'balanced', 'packed'].includes(input.pace) ? input.pace : 'balanced';
   const sourceText = String(input.sourceText || '').trim().slice(0, 12000);
-  const urls = String(input.urls || '').split(/\s+/).filter(Boolean).slice(0, limits.maxNotes);
+  const urls = extractXhsUrls(input.urls, sourceText).slice(0, limits.maxNotes);
   return {
     destination,
     startDate,

@@ -1,7 +1,7 @@
 {
   "id": "ai-guide",
   "name": "AI 攻略",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "apiVersion": 1,
   "author": "Your Name",
   "description": "把小红书旅行攻略转换为可编辑的 TREK 地图行程",
@@ -21,6 +21,7 @@
     "http:outbound:www.xiaohongshu.com",
     "http:outbound:edith.xiaohongshu.com",
     "http:outbound:xhslink.com",
+    "http:outbound:xhslink.cn",
     "http:outbound:nominatim.openstreetmap.org"
   ],
   "requiredAddons": [
@@ -32,6 +33,7 @@
     "www.xiaohongshu.com",
     "edith.xiaohongshu.com",
     "xhslink.com",
+    "xhslink.cn",
     "nominatim.openstreetmap.org"
   ],
   "settings": [

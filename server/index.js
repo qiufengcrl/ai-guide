@@ -112,13 +112,13 @@ async function advance(job, ctx) {
             await pauseForXhs();
             note = await fetchPublicNote(value, cookie);
           } catch (publicError) {
-            const noteId = noteIdFromUrl(value);
+            const noteId = publicError.noteId || noteIdFromUrl(value);
             if (!cookie || !noteId) throw publicError;
             work.pendingNotes.push({
               noteId,
-              xsecToken: '',
+              xsecToken: publicError.xsecToken || '',
               title: '',
-              url: `https://www.xiaohongshu.com/explore/${noteId}`,
+              url: publicError.resolvedUrl || `https://www.xiaohongshu.com/explore/${noteId}`,
             });
             return;
           }
@@ -131,6 +131,10 @@ async function advance(job, ctx) {
     }
     if (!work.searchAttempted) {
       work.searchAttempted = true;
+      const hasUserSources = (job.draft.guides || []).length > 0
+        || (work.pendingNotes || []).length > 0
+        || (work.urls || []).length > 0;
+      if (hasUserSources) return;
       if (limits.xhsEnabled && cookie && job.draft.intent.destination) {
         const queries = (job.draft.intent.searchQueries || [job.draft.intent.guideQuery]).slice(0, 2);
         let lastError = null;

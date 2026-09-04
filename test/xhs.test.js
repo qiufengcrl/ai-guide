@@ -4,7 +4,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 const { searchNotes, fetchSessionNote } = require('../server/xhs/session');
 const { createSignedPost, parseCookieHeader } = require('../server/xhs/signature');
-const { fetchPublicNote } = require('../server/xhs/url');
+const { extractXhsUrls, fetchPublicNote } = require('../server/xhs/url');
 
 const fixture = (name) => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8'));
 const VALID_COOKIE = `a1=${'a'.repeat(52)}; web_session=fixture-session; xsecappid=xhs-pc-web`;
@@ -89,6 +89,34 @@ test('签名请求绑定同一 payload、时间戳和完整 Cookie', () => {
 test('缺少 a1 或 web_session 时在发出网络请求前拒绝', async () => {
   await assert.rejects(searchNotes('旅行', 'web_session=fixture', 1), /missing the a1 value/);
   await assert.rejects(searchNotes('旅行', `a1=${'a'.repeat(52)}`, 1), /missing the web_session value/);
+});
+
+test('xhslink.cn 分享口令会抽出短链并跟随到笔记页', async () => {
+  const share = '上海出发5天4晚，追上大兴安岭的秋🍂 9月下旬看了圈机... https://xhslink.cn/o/4YIkUR0MNXN 进入【小红书】发现更多内容~';
+  assert.deepEqual(extractXhsUrls('', share), ['https://xhslink.cn/o/4YIkUR0MNXN']);
+  const originalFetch = global.fetch;
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures/note.html'), 'utf8');
+  let call = 0;
+  global.fetch = async (url) => {
+    call += 1;
+    if (call === 1) {
+      assert.match(String(url), /xhslink\.cn/);
+      return {
+        ok: false,
+        status: 302,
+        headers: { get(name) { return name === 'location' ? 'https://www.xiaohongshu.com/discovery/item/64f000000000000000000001?xsec_token=tok' : null; } },
+      };
+    }
+    assert.match(String(url), /discovery\/item\/64f000000000000000000001/);
+    return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
+  };
+  try {
+    const note = await fetchPublicNote('https://xhslink.cn/o/4YIkUR0MNXN', '');
+    assert.equal(note.noteId, '64f000000000000000000001');
+    assert.equal(note.via, 'url');
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 test('xhslink 仅跟随到允许域名并读取公开页', async () => {

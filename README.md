@@ -37,6 +37,7 @@ looks best (the card crops the edges).
 | `http:outbound:www.xiaohongshu.com` | Read public Xiaohongshu note pages. |
 | `http:outbound:edith.xiaohongshu.com` | Try user-authorized session search and note details. |
 | `http:outbound:xhslink.com` | Resolve Xiaohongshu short links without following outside the allowed hosts. |
+| `http:outbound:xhslink.cn` | Resolve `xhslink.cn` share-card short links. |
 | `http:outbound:nominatim.openstreetmap.org` | Resolve every candidate to WGS-84 coordinates via the plugin's own Nominatim client. |
 
 ## Setup
