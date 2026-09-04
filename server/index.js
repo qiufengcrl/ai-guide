@@ -12,7 +12,7 @@ const {
   gateAndSchedule,
   publicDraft,
 } = require('./pipeline');
-const { fetchPublicNote, noteIdFromUrl, searchKeywordFromUrl } = require('./xhs/url');
+const { fetchPublicNote, noteIdFromUrl, searchKeywordFromUrl, xsecFromUrl, exploreNoteUrl } = require('./xhs/url');
 const { normalizeXhsCookie, searchNotes, fetchSessionNote } = require('./xhs/session');
 const { searchPlaces } = require('./geo/nominatim');
 
@@ -22,8 +22,6 @@ const json = (value, fallback) => {
   try { return JSON.parse(String(value || '')); } catch { return fallback; }
 };
 const response = (status, body) => ({ status, headers: { 'content-type': 'application/json' }, body });
-const pauseForXhs = () => new Promise((resolve) => setTimeout(resolve, 300));
-
 function rowToJob(row) {
   return {
     id: String(row.id),
@@ -95,21 +93,25 @@ async function advance(job, ctx) {
         const keyword = searchKeywordFromUrl(value);
         if (keyword) {
           if (!cookie) throw new Error(message(locale, '搜索结果链接需要用户 Cookie', 'A search-result link requires the user Cookie'));
-          await pauseForXhs();
-          work.pendingNotes.push(...await searchNotes(keyword, cookie, limits.maxNotes));
+          const found = await searchNotes(keyword, cookie, limits.maxNotes);
+          if (!found.length) {
+            addWarning(job, message(locale, `「${keyword}」没有搜到笔记`, `No notes were found for "${keyword}"`));
+          }
+          work.pendingNotes.push(...found);
         } else {
           let note;
           try {
-            await pauseForXhs();
-            note = await fetchPublicNote(value, cookie);
+            note = await fetchPublicNote(value);
           } catch (publicError) {
             const noteId = noteIdFromUrl(value);
             if (!cookie || !noteId) throw publicError;
+            const xsec = xsecFromUrl(value);
             work.pendingNotes.push({
               noteId,
-              xsecToken: '',
+              xsecToken: xsec.xsecToken,
+              xsecSource: xsec.xsecSource || 'pc_share',
               title: '',
-              url: `https://www.xiaohongshu.com/explore/${noteId}`,
+              url: exploreNoteUrl(noteId, xsec.xsecToken, xsec.xsecSource || 'pc_share'),
             });
             return;
           }
@@ -124,13 +126,15 @@ async function advance(job, ctx) {
       work.searchAttempted = true;
       if (limits.xhsEnabled && cookie && job.draft.intent.destination) {
         try {
-          await pauseForXhs();
           const automatic = await searchNotes(job.draft.intent.guideQuery, cookie, limits.maxNotes);
+          if (!automatic.length) {
+            addWarning(job, message(locale, '小红书搜索没有返回笔记', 'Xiaohongshu search returned no notes'));
+          }
           const seen = new Set(work.pendingNotes.map((item) => item.noteId));
           work.pendingNotes.push(...automatic.filter((item) => !seen.has(item.noteId)));
           work.pendingNotes = work.pendingNotes.slice(0, limits.maxNotes);
-        } catch {
-          addWarning(job, message(locale, '小红书会话不可用，已跳过自动搜索', 'Xiaohongshu session unavailable; automatic search was skipped'));
+        } catch (error) {
+          addWarning(job, message(locale, `小红书会话不可用：${error.message}`, `Xiaohongshu session unavailable: ${error.message}`));
         }
       } else if (!cookie) {
         addWarning(job, message(locale, '未配置小红书 Cookie；已继续使用表单、链接或粘贴内容', 'No Xiaohongshu Cookie is configured; continuing with form, links, or pasted text'));
@@ -140,7 +144,6 @@ async function advance(job, ctx) {
     if (work.noteIndex < work.pendingNotes.length) {
       const item = work.pendingNotes[work.noteIndex++];
       try {
-        await pauseForXhs();
         const note = await fetchSessionNote(item, cookie);
         job.draft.guides.push({ ...note, id: `g_${job.draft.guides.length + 1}`, text: note.text.slice(0, 4000) });
       } catch {
@@ -241,7 +244,10 @@ async function testXhs(ctx, locale = 'en') {
   const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
   if (!cookie) return { ok: false, message: message(locale, '未配置小红书 Cookie', 'Xiaohongshu Cookie is not configured') };
   try {
-    await searchNotes('旅行', cookie, 1);
+    const notes = await searchNotes('旅行', cookie, 1);
+    if (!notes.length) {
+      return { ok: false, message: message(locale, '小红书搜索没有返回笔记，Cookie 可能已被风控或字段不完整', 'Xiaohongshu search returned no notes; the Cookie may be blocked or incomplete') };
+    }
     return { ok: true, message: message(locale, '小红书会话可用', 'Xiaohongshu session is available') };
   } catch (error) {
     return { ok: false, message: message(locale, `小红书会话不可用：${error.message}`, `Xiaohongshu session unavailable: ${error.message}`) };

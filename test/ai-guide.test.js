@@ -1,22 +1,16 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const Module = require('node:module');
 const { test } = require('node:test');
-
-const sdk = require('../../plugin-sdk/dist/cjs/index.js');
-const originalLoad = Module._load;
-Module._load = function (request, parent, isMain) {
-  return request === 'trek-plugin-sdk' ? sdk : originalLoad.call(this, request, parent, isMain);
-};
+const sdk = require('trek-plugin-sdk');
 const plugin = require('../server/index');
-Module._load = originalLoad;
 const { gateAndSchedule } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
-const { parseInitialState } = require('../server/xhs/url');
+const { parseInitialState, setXhsThrottleInterval } = require('../server/xhs/url');
 const { setGeoThrottleInterval } = require('../server/geo/nominatim');
 
 setGeoThrottleInterval(0);
+setXhsThrottleInterval(0);
 
 const GRANTS = [
   'ai:invoke', 'db:own', 'db:create:trips', 'db:read:trips',
@@ -175,6 +169,7 @@ test('公开页夹具解析 undefined，并规范化 Cookie', () => {
   assert.equal(normalizeXhsCookie('"sid=abc; a=1"'), 'sid=abc; a=1');
   assert.equal(normalizeXhsCookie('[{"name":"sid","value":"abc"},{"name":"a","value":"1"}]'), 'sid=abc; a=1');
   assert.equal(normalizeXhsCookie('{"name":"sid","value":"abc"}'), 'sid=abc');
+  assert.equal(normalizeXhsCookie('[{"name":"a1","value":"x"},{"name":"web_session","value":"y"}]'), 'a1=x; web_session=y');
 });
 
 test('Gate 丢弃无坐标/重复，并保留过远点且默认不选', () => {

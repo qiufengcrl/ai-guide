@@ -74,7 +74,7 @@
       "input_type": "password",
       "scope": "user",
       "secret": true,
-      "hint": "Used only by the plugin server for your requests; never sent to the iframe or AI."
+      "hint": "Paste the full www.xiaohongshu.com Cookie after login. It must include a1 and web_session. Used only by the plugin server; never sent to the iframe or AI."
     }
   ],
   "actions": [

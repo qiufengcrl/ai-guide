@@ -44,8 +44,14 @@ resolves places with its own Nominatim client — no map API key and no changes
 to TREK's core are required.
 
 Optional keyword search uses each user's own secret `xhs_cookie`, entered under
-Settings → Plugins. The Cookie never enters the iframe, logs, AI prompts, drafts,
-or user-data exports. URL, pasted-text, and form-only planning work without it.
+Settings → Plugins. Paste the full web Cookie from `www.xiaohongshu.com` after
+login; it must include `a1` and `web_session`. The Cookie never enters the iframe,
+logs, AI prompts, drafts, or user-data exports. Public note URLs are read without
+the Cookie. URL, pasted-text, and form-only planning work without it.
+
+See [docs/xhs-open-source-review.md](./docs/xhs-open-source-review.md) for why
+raw Cookie POSTs to `edith.xiaohongshu.com` are rate-limited, and which
+open-source behaviours this plugin now follows.
 
 ## License
 
