@@ -1220,6 +1220,7 @@
         commit: 'Create new trip',
         commitHint: 'Only the checked places will be added to a new TREK trip.',
         working: 'Building map evidence…',
+        stillWorking: 'The model or map search is still running. Waiting…',
         creating: 'Creating your TREK trip…',
         ready: 'Preview ready',
         guides: 'notes read',
@@ -1294,6 +1295,7 @@
         commit: '创建新行程',
         commitHint: '只有勾选的地点会被添加到新的 TREK 行程。',
         working: '正在构建地图证据…',
+        stillWorking: '模型或地图还在处理，继续等待…',
         creating: '正在创建 TREK 行程…',
         ready: '行程预览已就绪',
         guides: '篇攻略已读',
@@ -1383,7 +1385,13 @@
     function invokeErrorMessage(error) {
       var raw = error && error.message ? String(error.message) : String(error || '');
       if (/409/.test(raw)) return t('conflict');
+      if (isTransientInvokeError(error)) return t('stillWorking');
       return raw || t('failed');
+    }
+
+    function isTransientInvokeError(error) {
+      var raw = String(error && error.message || error || '');
+      return /timeout of \d+ms|timed?\s*out|network error|502|503|504|aborted/i.test(raw);
     }
 
     function showError(error) {
@@ -1443,6 +1451,12 @@
         handleProgress(data);
       } catch (error) {
         polling = false;
+        if (currentJobId && isTransientInvokeError(error)) {
+          setBusy(true);
+          setStatus(t('stillWorking'), 'working');
+          window.setTimeout(poll, 800);
+          return;
+        }
         showError(error);
       }
     }

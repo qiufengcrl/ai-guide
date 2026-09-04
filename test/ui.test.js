@@ -28,7 +28,7 @@ test('redesign covers the complete planning and preview workflow', () => {
     "trek.onContext", "trek.invoke('/plan'", "trek.invoke('/commit'",
     "trek.navigate('/settings?tab=plugins')", "trek.openExternal",
     'renderWarnings', 'renderSources', 'renderDays', 'syncDayState',
-    'invokeErrorMessage', 'conflict',
+    'invokeErrorMessage', 'conflict', 'isTransientInvokeError', 'stillWorking',
   ]) assert.ok(appScript.includes(hook), hook);
 });
 

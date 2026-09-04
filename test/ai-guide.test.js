@@ -161,7 +161,7 @@ async function makeReady(fixture, input = {}, fallback) {
   const geo = stubGeoFetch(fallback);
   let state;
   try {
-    for (let index = 0; index < 20; index += 1) {
+    for (let index = 0; index < 28; index += 1) {
       state = (await fixture.app.route({ method: 'GET', path: '/plan' }, { query: { jobId } })).body;
       if (state.status === 'ready' || state.status === 'failed') break;
     }
@@ -287,6 +287,34 @@ test('再次生成会替换未完成任务，重新打开续跑最新任务', as
   const resumed = await reopened.route({ method: 'GET', path: '/plan' }, { query: {} });
   assert.equal(resumed.body.jobId, replacement.body.jobId);
   assert.equal(resumed.body.status, 'running');
+});
+
+test('同一规划步骤进行中时，第二次 GET /plan 不会重入', async () => {
+  const fixture = buildHost();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const original = fixture.host.ctx.ai.extract.bind(fixture.host.ctx.ai);
+  let extractCalls = 0;
+  fixture.host.ctx.ai.extract = async (...args) => {
+    extractCalls += 1;
+    await gate;
+    return original(...args);
+  };
+  await fixture.app.load();
+  await fixture.app.route({ method: 'POST', path: '/plan' }, { body: { destination: '京都', locale: 'zh' } });
+  for (let index = 0; index < 6; index += 1) {
+    const state = (await fixture.app.route({ method: 'GET', path: '/plan' }, { query: {} })).body;
+    if (state.stage === 'extract') break;
+  }
+  const first = fixture.app.route({ method: 'GET', path: '/plan' }, { query: {} });
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  const second = await fixture.app.route({ method: 'GET', path: '/plan' }, { query: {} });
+  assert.equal(second.body.stage, 'extract');
+  assert.equal(extractCalls, 1);
+  release();
+  const finished = await first;
+  assert.equal(finished.body.stage, 'gather_evidence');
+  assert.equal(extractCalls, 1);
 });
 
 test('没有进行中的任务时，GET /plan 会恢复最近一份就绪预览', async () => {

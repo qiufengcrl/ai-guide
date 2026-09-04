@@ -3,7 +3,7 @@ const { fetchWithTimeout } = require('../xhs/url');
 const BASE_URL = 'https://nominatim.openstreetmap.org/search';
 const PLUGIN_UA = 'trek-ai-guide/1.0.0 (self-hosted TREK plugin; itinerary POI search)';
 const DEFAULT_LIMIT = 5;
-const SEARCH_TIMEOUT_MS = 8000;
+const SEARCH_TIMEOUT_MS = 4000;
 const MIN_INTERVAL_MS = 1100;
 
 let lastCallAt = 0;

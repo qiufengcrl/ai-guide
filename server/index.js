@@ -17,12 +17,19 @@ const { normalizeXhsCookie, searchNotes, fetchSessionNote } = require('./xhs/ses
 const { searchPlaces } = require('./geo/nominatim');
 
 const JOB_FIELDS = 'id, user_id, status, stage, payload_json, draft_json, work_json, error, committed_trip_id, created_at, updated_at';
+const ticks = new Map();
 
 const json = (value, fallback) => {
   try { return JSON.parse(String(value || '')); } catch { return fallback; }
 };
 const response = (status, body) => ({ status, headers: { 'content-type': 'application/json' }, body });
 const pauseForXhs = () => new Promise((resolve) => setTimeout(resolve, 300));
+
+function isTransientTickError(error) {
+  if (!error) return false;
+  if (error.name === 'AbortError') return true;
+  return /aborted|abort|timeout of \d+ms|timed?\s*out|ETIMEDOUT|ECONNRESET/i.test(String(error.message || error));
+}
 
 function rowToJob(row) {
   return {
@@ -172,7 +179,6 @@ async function advance(job, ctx) {
   }
 
   if (job.stage === 'gather_evidence') {
-    let calls = 0;
     if (!job.work.bias && !job.work.biasFailed && job.draft.intent.destination) {
       try {
         const result = await searchPlaces(job.draft.intent.destination, { lang: locale });
@@ -184,9 +190,9 @@ async function advance(job, ctx) {
           `目的地定位失败（${error.message}），已继续逐点检索`,
           `Destination lookup failed (${error.message}); continuing per-place search`));
       }
-      calls += 1;
+      return;
     }
-    while (calls < 3 && job.work.candidateIndex < job.work.candidates.length) {
+    if (job.work.candidateIndex < job.work.candidates.length) {
       const index = job.work.candidateIndex++;
       const candidate = job.work.candidates[index];
       const query = candidate.nameZh || candidate.name;
@@ -198,13 +204,14 @@ async function advance(job, ctx) {
           `「${query}」地图检索失败：${error.message}`,
           `Place search for "${query}" failed: ${error.message}`));
       }
-      calls += 1;
-      if (!result) continue;
-      const evidence = evidenceFromSearch(candidate, result, index);
-      if (evidence) job.work.evidence.push(evidence);
-      else addWarning(job, message(locale, `「${query}」无法匹配坐标，已跳过`, `"${query}" could not be matched to coordinates and was skipped`));
+      if (result) {
+        const evidence = evidenceFromSearch(candidate, result, index);
+        if (evidence) job.work.evidence.push(evidence);
+        else addWarning(job, message(locale, `「${query}」无法匹配坐标，已跳过`, `"${query}" could not be matched to coordinates and was skipped`));
+      }
+      return;
     }
-    if (job.work.candidateIndex >= job.work.candidates.length) job.stage = 'schedule';
+    job.stage = 'schedule';
     return;
   }
 
@@ -327,17 +334,25 @@ module.exports = definePlugin({
           error: message(req.query?.locale, '未找到规划任务', 'Planning job not found'),
         });
         if (job.status === 'ready' || job.status === 'failed') return response(200, publicDraft(job));
-        try {
-          await advance(job, ctx);
-        } catch (error) {
-          job.status = 'failed';
-          job.stage = 'failed';
-          const detail = error instanceof Error ? error.message : 'Planning failed';
-          job.error = detail.includes('daily AI budget exhausted')
-            ? message(job.payload.locale, 'AI 日额度已用完（UTC 零点重置）', 'Daily AI quota exhausted (resets at UTC midnight)')
-            : detail;
-        }
-        await saveJob(ctx, job);
+        if (ticks.has(job.id)) return response(200, publicDraft(job));
+        const pending = (async () => {
+          try {
+            await advance(job, ctx);
+          } catch (error) {
+            if (isTransientTickError(error)) return;
+            job.status = 'failed';
+            job.stage = 'failed';
+            const detail = error instanceof Error ? error.message : 'Planning failed';
+            job.error = detail.includes('daily AI budget exhausted')
+              ? message(job.payload.locale, 'AI 日额度已用完（UTC 零点重置）', 'Daily AI quota exhausted (resets at UTC midnight)')
+              : detail;
+          }
+          await saveJob(ctx, job);
+        })().finally(() => {
+          if (ticks.get(job.id) === pending) ticks.delete(job.id);
+        });
+        ticks.set(job.id, pending);
+        await pending;
         return response(200, publicDraft(job));
       },
     },
