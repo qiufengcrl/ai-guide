@@ -409,7 +409,7 @@ module.exports = definePlugin({
     },
   ],
   actions: {
-    testXhs: (ctx) => testXhs(ctx, String(ctx.config.locale || 'en')),
+    testXhs: (ctx) => testXhs(ctx, 'zh'),
   },
   async deleteUserData({ userId }, ctx) {
     await ctx.db.exec('DELETE FROM jobs WHERE user_id = ?', userId);

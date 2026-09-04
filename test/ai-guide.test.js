@@ -261,7 +261,7 @@ test('零个 evidenceId 不能 commit，空 Cookie testXhs 失败', async () => 
   assert.equal(committed.status, 400);
   assert.deepEqual(await fixture.app.action('testXhs'), {
     ok: false,
-    message: 'Xiaohongshu Cookie is not configured',
+    message: '未配置小红书 Cookie',
   });
 });
 
