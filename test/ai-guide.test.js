@@ -4,7 +4,8 @@ const path = require('node:path');
 const Module = require('node:module');
 const { test } = require('node:test');
 
-const sdk = require('../../plugin-sdk/dist/cjs/index.js');
+const workspaceSdk = path.resolve(__dirname, '../../plugin-sdk/dist/cjs/index.js');
+const sdk = require(fs.existsSync(workspaceSdk) ? workspaceSdk : 'trek-plugin-sdk');
 const originalLoad = Module._load;
 Module._load = function (request, parent, isMain) {
   return request === 'trek-plugin-sdk' ? sdk : originalLoad.call(this, request, parent, isMain);
