@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, destinationSeeds, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob } = require('../server/pipeline');
+const { gateAndSchedule, splitRegions, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, destinationSeeds, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces } = require('../server/geo/nominatim');
@@ -255,14 +255,22 @@ test('无攻略时抽取具体景点，丢掉省/市名，并把地点分到各�
   assert.deepEqual([...new Set(candidates.map((item) => item.dayHint))].sort(), [1, 2]);
   assert.equal(placeSearchQuery({ name: '龙门石窟' }, '河南'), '龙门石窟 河南');
 
+  const evidence = [
+    { id: 'ev_1', name: '龙门石窟', lat: 34.55, lng: 112.47, dayHint: 1, address: '河南省洛阳市洛龙区' },
+    { id: 'ev_2', name: '少林寺', lat: 34.51, lng: 112.94, dayHint: 1, address: '河南省郑州市登封市' },
+    { id: 'ev_3', name: '白马寺', lat: 34.72, lng: 112.60, dayHint: 1, address: '河南省洛阳市瀍河回族区' },
+    { id: 'ev_4', name: '清明上河园', lat: 34.81, lng: 114.35, dayHint: 1, address: '河南省开封市龙亭区' },
+  ];
+  const split = splitRegions(intent, evidence, 'zh');
+  assert.equal(split.regions.length, 2);
+  assert.ok(split.regions.some((region) => /洛阳/.test(region.name)));
+  assert.ok(split.regions.some((region) => /开封/.test(region.name)));
+  assert.deepEqual([...new Set(evidence.filter((item) => item.id !== 'ev_4').map((item) => item.dayHint))], [1]);
+  assert.equal(evidence.find((item) => item.id === 'ev_4').dayHint, 2);
+
   const gated = gateAndSchedule(
     intent,
-    [
-      { id: 'ev_1', name: '龙门石窟', lat: 34.55, lng: 112.47, dayHint: 1 },
-      { id: 'ev_2', name: '少林寺', lat: 34.51, lng: 112.94, dayHint: 1 },
-      { id: 'ev_3', name: '白马寺', lat: 34.72, lng: 112.60, dayHint: 1 },
-      { id: 'ev_4', name: '清明上河园', lat: 34.81, lng: 114.35, dayHint: 1 },
-    ],
+    evidence,
     { maxPlacesPerDay: 6 },
     'zh',
     '',
@@ -270,6 +278,19 @@ test('无攻略时抽取具体景点，丢掉省/市名，并把地点分到各�
   assert.equal(gated.days.length, 2);
   assert.ok(gated.days[0].places.length >= 1);
   assert.ok(gated.days[1].places.length >= 1);
+  assert.match(gated.days[0].title, /洛阳/);
+  assert.match(gated.days[1].title, /开封/);
+});
+
+test('小范围景点不会被拆成多个区域', () => {
+  const intent = { destination: '京都', dayCount: 2, pace: 'balanced' };
+  const evidence = [
+    { id: 'ev_1', name: 'Near A', lat: 35, lng: 135, dayHint: 1 },
+    { id: 'ev_2', name: 'Near B', lat: 35.01, lng: 135.01, dayHint: 1 },
+  ];
+  const split = splitRegions(intent, evidence, 'zh');
+  assert.equal(split.regions.length, 0);
+  assert.equal(evidence[0].regionName, undefined);
 });
 
 test('分享口令里的 xhslink.cn 会被抽成笔记链接，大兴安岭有具体景点', () => {

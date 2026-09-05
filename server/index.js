@@ -12,6 +12,7 @@ const {
   looksLikeShareCard,
   noteDisplayTitle,
   gateAndSchedule,
+  splitRegions,
   publicDraft,
   geoSearchOptions,
   resolveXhsKeywordSearch,
@@ -354,6 +355,9 @@ async function advance(job, ctx) {
 
   if (job.stage === 'schedule') {
     if (!job.work.evidence.length) throw new Error(message(locale, '没有可发布的地图证据', 'No publishable map evidence was found'));
+    const split = splitRegions(job.draft.intent, job.work.evidence, locale);
+    job.work.evidence = split.evidence;
+    job.work.regions = split.regions;
     job.stage = 'write_copy';
     return;
   }

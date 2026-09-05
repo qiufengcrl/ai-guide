@@ -2,6 +2,8 @@ const { extractXhsUrls } = require('./xhs/url');
 
 const TOO_FAR_KM = 40;
 const MAX_FROM_DESTINATION_KM = 500;
+const REGION_CLUSTER_KM = 80;
+const REGION_SPLIT_MIN_SPAN_KM = 80;
 
 const DESTINATION_SEEDS = {
   北京: ['故宫', '天坛', '颐和园', '八达岭长城', '景山公园', '北海公园', '雍和宫', '南锣鼓巷'],
@@ -526,6 +528,155 @@ function isoDate(startDate, offset) {
   return date.toISOString().slice(0, 10);
 }
 
+function clusterCentroid(items) {
+  const coords = items.filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
+  if (!coords.length) return null;
+  const sum = coords.reduce((acc, item) => ({ lat: acc.lat + item.lat, lng: acc.lng + item.lng }), { lat: 0, lng: 0 });
+  return { lat: sum.lat / coords.length, lng: sum.lng / coords.length };
+}
+
+function maxSpanKm(items) {
+  let max = 0;
+  for (let i = 0; i < items.length; i += 1) {
+    for (let j = i + 1; j < items.length; j += 1) {
+      max = Math.max(max, haversineKm(items[i], items[j]));
+    }
+  }
+  return max;
+}
+
+function clusterEvidence(items, linkKm) {
+  const parent = items.map((_, index) => index);
+  const find = (index) => {
+    if (parent[index] !== index) parent[index] = find(parent[index]);
+    return parent[index];
+  };
+  const unite = (left, right) => {
+    parent[find(left)] = find(right);
+  };
+  for (let i = 0; i < items.length; i += 1) {
+    for (let j = i + 1; j < items.length; j += 1) {
+      if (haversineKm(items[i], items[j]) <= linkKm) unite(i, j);
+    }
+  }
+  const groups = new Map();
+  for (let index = 0; index < items.length; index += 1) {
+    const root = find(index);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(items[index]);
+  }
+  return [...groups.values()];
+}
+
+function adminUnitFromAddress(address) {
+  const parts = String(address || '').split(/[,，]/).map((part) => part.trim()).filter(Boolean);
+  for (const part of parts) {
+    const match = part.match(/^(.+?)(市|县|州|盟|地区)$/);
+    if (match && match[1].length >= 2) {
+      const name = stripAdminTail(part);
+      if (name.length >= 2) return name;
+    }
+  }
+  return null;
+}
+
+function cityFromDestinationSeeds(placeName, destination) {
+  const folded = foldName(placeName);
+  const dest = stripAdminTail(String(destination || ''));
+  let best = null;
+  for (const [city, seeds] of Object.entries(DESTINATION_SEEDS)) {
+    if (!city || city === dest || isGenericPlaceName(city, destination)) continue;
+    if (seeds.some((seed) => {
+      const seedFold = foldName(seed);
+      return seedFold === folded || folded.includes(seedFold) || seedFold.includes(folded);
+    })) {
+      if (!best || city.length <= best.length) best = city;
+    }
+  }
+  return best;
+}
+
+function inferRegionName(items, destination, locale) {
+  const counts = new Map();
+  for (const item of items) {
+    const fromAddress = adminUnitFromAddress(item.address);
+    if (fromAddress) counts.set(fromAddress, (counts.get(fromAddress) || 0) + 2);
+    const fromSeed = cityFromDestinationSeeds(item.name, destination);
+    if (fromSeed) counts.set(fromSeed, (counts.get(fromSeed) || 0) + 1);
+  }
+  if (counts.size) {
+    return [...counts.entries()].sort((left, right) => right[1] - left[1])[0][0];
+  }
+  return message(locale, '子区域', 'Area');
+}
+
+function allocateRegionDays(totalDays, sizes) {
+  const regionCount = sizes.length;
+  if (regionCount <= 0) return [];
+  if (regionCount === 1) return [totalDays];
+  const slots = sizes.map(() => 1);
+  let remaining = Math.max(0, totalDays - regionCount);
+  const totalSize = sizes.reduce((sum, size) => sum + size, 0) || regionCount;
+  const extras = sizes.map((size) => Math.floor(remaining * size / totalSize));
+  for (let index = 0; index < regionCount; index += 1) slots[index] += extras[index];
+  let used = slots.reduce((sum, size) => sum + size, 0);
+  let cursor = 0;
+  while (used < totalDays) {
+    slots[cursor % regionCount] += 1;
+    used += 1;
+    cursor += 1;
+  }
+  while (used > totalDays) {
+    const index = slots.findIndex((size) => size > 1);
+    if (index < 0) break;
+    slots[index] -= 1;
+    used -= 1;
+  }
+  return slots;
+}
+
+function isMultiCityDestination(destination) {
+  const dest = String(destination || '').trim();
+  if (!dest) return false;
+  if (/(省|自治区|地区|盟)$/.test(dest)) return true;
+  const core = stripAdminTail(dest);
+  return /^(河南|河北|山西|山东|陕西|甘肃|青海|四川|云南|贵州|湖南|湖北|江西|安徽|江苏|浙江|福建|广东|海南|辽宁|吉林|黑龙江|内蒙古|广西|宁夏|新疆|西藏|大兴安岭|呼伦贝尔|漠河)$/.test(core);
+}
+
+function splitRegions(intent, evidence, locale) {
+  const items = (Array.isArray(evidence) ? evidence : []).filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
+  if (!isMultiCityDestination(intent?.destination)
+    || items.length <= 1
+    || maxSpanKm(items) <= REGION_SPLIT_MIN_SPAN_KM) {
+    return { evidence, regions: [] };
+  }
+  const clusters = clusterEvidence(items, REGION_CLUSTER_KM);
+  if (clusters.length <= 1) {
+    return { evidence, regions: [] };
+  }
+  clusters.sort((left, right) => {
+    const leftCenter = clusterCentroid(left);
+    const rightCenter = clusterCentroid(right);
+    return (leftCenter?.lng || 0) - (rightCenter?.lng || 0);
+  });
+  const daySlots = allocateRegionDays(intent.dayCount, clusters.map((cluster) => cluster.length));
+  const regions = [];
+  let dayStart = 1;
+  for (let index = 0; index < clusters.length; index += 1) {
+    const cluster = clusters[index];
+    const span = daySlots[index] || 1;
+    const dayEnd = dayStart + span - 1;
+    const name = inferRegionName(cluster, intent.destination, locale);
+    regions.push({ name, dayStart, dayEnd, placeCount: cluster.length });
+    cluster.forEach((item, placeIndex) => {
+      item.regionName = name;
+      item.dayHint = dayStart + (placeIndex % span);
+    });
+    dayStart = dayEnd + 1;
+  }
+  return { evidence, regions };
+}
+
 function tooFarLimitKm(evidence) {
   const items = Array.isArray(evidence) ? evidence.filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng)) : [];
   let max = 0;
@@ -583,11 +734,15 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
     selected: true,
     places: [],
   }));
+  const dayRegionNames = new Map();
   for (const item of unique.slice(0, intent.dayCount * perDay)) {
     let dayIndex = Math.max(0, Math.min(days.length - 1, Number(item.dayHint || 1) - 1));
     if (days[dayIndex].places.length >= perDay) {
       dayIndex = days.findIndex((day) => day.places.length < perDay);
       if (dayIndex < 0) break;
+    }
+    if (item.regionName && !dayRegionNames.has(dayIndex)) {
+      dayRegionNames.set(dayIndex, item.regionName);
     }
     days[dayIndex].places.push({
       evidenceId: item.id,
@@ -604,6 +759,9 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
       tooFar: false,
       selected: true,
     });
+  }
+  for (const [dayIndex, regionName] of dayRegionNames.entries()) {
+    days[dayIndex].title = message(locale, `第 ${dayIndex + 1} 天 · ${regionName}`, `Day ${dayIndex + 1} · ${regionName}`);
   }
   rebalanceDays(days);
   markDistance(days, tooFarLimitKm(unique));
@@ -673,6 +831,10 @@ module.exports = {
   guideSearchQueries,
   evidenceFromSearch,
   gateAndSchedule,
+  splitRegions,
   publicDraft,
   haversineKm,
+  isMultiCityDestination,
+  REGION_CLUSTER_KM,
+  REGION_SPLIT_MIN_SPAN_KM,
 };
