@@ -89,7 +89,8 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.ok(manifest.permissions.includes('http:outbound:nominatim.openstreetmap.org'));
   assert.ok(manifest.permissions.includes('http:outbound:trek-amap-bridge'));
   const xhsEnabled = manifest.settings.find((field) => field.key === 'xhs_enabled');
-  assert.equal(xhsEnabled.default, 'false');
+  assert.equal(xhsEnabled.input_type, 'checkbox');
+  assert.equal(xhsEnabled.default, false);
   assert.ok(!manifest.settings.some((field) => field.key === 'xhs_keyword_search'));
   const cookieFields = manifest.settings.filter((field) => field.key === 'xhs_cookie');
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
