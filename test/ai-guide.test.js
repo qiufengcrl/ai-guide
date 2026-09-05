@@ -573,7 +573,7 @@ test('再次生成会替换未完成任务，重新打开续跑最新任务', as
   const reopened = fixture.host.run(plugin);
   const resumed = await reopened.route({ method: 'GET', path: '/plan' }, { query: {} });
   assert.equal(resumed.body.jobId, replacement.body.jobId);
-  assert.equal(resumed.body.status, 'running');
+  assert.ok(['queued', 'running'].includes(resumed.body.status));
 });
 
 test('同一规划步骤进行中时，第二次 GET /plan 不会重入', async () => {
@@ -921,4 +921,125 @@ test('地图检索限流错误可被识别', () => {
   assert.equal(isRateLimitError(new Error('CUQPS has exceeded the limit')), true);
   assert.ok(scoreRow({ name: '停车场', category: 'amenity', type: 'parking' })
     < scoreRow({ name: '船山书院', category: 'tourism', type: 'attraction' }));
+});
+
+test('攻略正文含预约提示会标记 reservationRequired', () => {
+  const guides = [{
+    id: 'g_1',
+    title: '北京攻略',
+    text: '▪️故宫博物院\n需要提前预约，周末约满较快',
+  }];
+  const parsed = candidatesFromGuideText(guides, {
+    destination: '北京',
+    dayCount: 1,
+    pace: 'balanced',
+    interests: [],
+    mustSee: [],
+  });
+  const palace = parsed.find((item) => /故宫/.test(item.name));
+  assert.ok(palace);
+  assert.equal(palace.reservationRequired, true);
+  assert.match(palace.reservationTips, /预约/);
+});
+
+test('mergeGuideTexts 会按 url 去重', () => {
+  const merged = mergeGuideTexts([
+    { id: 'g_1', url: 'https://www.xiaohongshu.com/explore/abc', title: 'A', text: 'one' },
+    { id: 'g_2', url: 'https://www.xiaohongshu.com/explore/abc', title: 'B', text: 'two' },
+  ]);
+  assert.equal(merged.length, 1);
+});
+
+test('splitRegions 聚类数超过天数时会合并', () => {
+  const intent = { destination: '河南', dayCount: 2, pace: 'balanced' };
+  const evidence = [
+    { id: 'ev_1', name: '洛阳A', lat: 34.55, lng: 112.47, dayHint: 1, address: '河南省洛阳市' },
+    { id: 'ev_2', name: '洛阳B', lat: 34.56, lng: 112.48, dayHint: 1, address: '河南省洛阳市' },
+    { id: 'ev_3', name: '开封A', lat: 34.81, lng: 114.35, dayHint: 1, address: '河南省开封市' },
+    { id: 'ev_4', name: '郑州A', lat: 34.75, lng: 113.62, dayHint: 1, address: '河南省郑州市' },
+  ];
+  const split = splitRegions(intent, evidence, 'zh');
+  assert.ok(split.regions.length <= intent.dayCount);
+});
+
+test('Places API 会优先景点而不是停车场', async () => {
+  const original = global.fetch;
+  global.fetch = async (url, init) => {
+    const href = String(url);
+    if (href.includes('/v1/places:searchText')) {
+      assert.equal(init.method, 'POST');
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() {
+          return {
+            places: [
+              {
+                id: 'parking',
+                displayName: { text: '船山书院停车场' },
+                formattedAddress: '衡阳市',
+                location: { latitude: 26.89, longitude: 112.61 },
+                types: ['parking'],
+                businessStatus: 'OPERATIONAL',
+              },
+              {
+                id: 'sight',
+                displayName: { text: '船山书院' },
+                formattedAddress: '衡阳市珠晖区东洲岛',
+                location: { latitude: 26.894, longitude: 112.615 },
+                types: ['风景名胜', 'tourist_attraction'],
+                businessStatus: 'OPERATIONAL',
+              },
+            ],
+          };
+        },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${href}`);
+  };
+  try {
+    const result = await searchPlaces('船山书院 衡阳', {
+      lang: 'zh',
+      placesApiBase: 'http://trek-amap-bridge:8080',
+      placesApiKey: 'amap-bridge',
+    });
+    assert.equal(result.places[0].name, '船山书院');
+  } finally {
+    global.fetch = original;
+  }
+});
+
+test('commit 中途失败会回滚已写入地点', async () => {
+  const fixture = buildHost();
+  const { jobId, state } = await makeReady(fixture);
+  const evidenceIds = state.days.flatMap((day) => day.places.map((place) => place.evidenceId));
+  const deleted = [];
+  const originalCreate = fixture.host.ctx.places.create.bind(fixture.host.ctx.places);
+  let calls = 0;
+  fixture.host.ctx.places.create = async (tripId, input) => {
+    calls += 1;
+    if (calls >= 2) throw new Error('write failed');
+    return originalCreate(tripId, input);
+  };
+  fixture.host.ctx.places.delete = async (tripId, placeId) => {
+    deleted.push(placeId);
+    return { deleted: true };
+  };
+  const response = await fixture.app.route({ method: 'POST', path: '/commit' }, {
+    body: { jobId, evidenceIds, locale: 'zh' },
+  });
+  assert.equal(response.status, 500);
+  assert.equal(deleted.length, 1);
+});
+
+test('GET /plan 等待 tick 后会从数据库返回最新阶段', async () => {
+  const fixture = buildHost();
+  await fixture.app.load();
+  const created = await fixture.app.route({ method: 'POST', path: '/plan' }, {
+    body: { destination: '京都', locale: 'zh' },
+  });
+  const first = await fixture.app.route({ method: 'GET', path: '/plan' }, { query: { jobId: created.body.jobId } });
+  const second = await fixture.app.route({ method: 'GET', path: '/plan' }, { query: { jobId: created.body.jobId } });
+  assert.notEqual(first.body.stage, second.body.stage);
 });

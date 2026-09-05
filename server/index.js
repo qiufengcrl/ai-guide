@@ -8,8 +8,6 @@ const {
   normalizeInput,
   extractionText,
   extractionInstruction,
-  normalizeCandidates,
-  candidatesFromGuideText,
   resolveExtractCandidates,
   inferDestinationFromGuides,
   mergeGuideTexts,
@@ -43,6 +41,7 @@ const { searchPlaces } = require('./geo/nominatim');
 
 const JOB_FIELDS = 'id, user_id, status, stage, payload_json, draft_json, work_json, error, committed_trip_id, created_at, updated_at';
 const ticks = new Map();
+const JOB_STALE_MS = 30 * 60 * 1000;
 
 const json = (value, fallback) => {
   try { return JSON.parse(String(value || '')); } catch { return fallback; }
@@ -67,6 +66,7 @@ function rowToJob(row) {
     work: json(row.work_json, {}),
     error: row.error ? String(row.error) : null,
     committedTripId: row.committed_trip_id == null ? null : Number(row.committed_trip_id),
+    updatedAt: Number(row.updated_at) || 0,
   };
 }
 
@@ -88,6 +88,25 @@ async function saveJob(ctx, job) {
     job.id,
     job.userId,
   );
+}
+
+function reviveStaleJob(job, locale) {
+  if (!job || job.status !== 'running' || !job.updatedAt) return job;
+  if (Date.now() - job.updatedAt < JOB_STALE_MS) return job;
+  job.status = 'failed';
+  job.stage = 'failed';
+  job.error = message(locale, '规划任务超时，请重新生成', 'Planning timed out; please start again');
+  return job;
+}
+
+async function rollbackCreatedPlaces(ctx, tripId, placeIds) {
+  for (const placeId of placeIds) {
+    try {
+      await ctx.places.delete(tripId, placeId);
+    } catch {
+      // Best-effort cleanup after a partial commit failure.
+    }
+  }
 }
 
 function addWarning(job, text) {
@@ -200,7 +219,13 @@ async function advance(job, ctx) {
           work.urlIndex += 1;
           if (!cookie) throw new Error(message(locale, '搜索结果链接需要用户 Cookie', 'A search-result link requires the user Cookie'));
           await pauseForXhs();
-          work.pendingNotes.push(...await searchNotes(keyword, cookie, limits.maxNotes));
+          const remaining = remainingXhsNoteSlots(job.draft.guides, work.pendingNotes, limits.maxNotes);
+          const seen = collectXhsNoteIds(job.draft.guides, work.pendingNotes);
+          for (const item of await searchNotes(keyword, cookie, remaining || limits.maxNotes)) {
+            if (seen.has(item.noteId) || seen.size >= limits.maxNotes) continue;
+            seen.add(item.noteId);
+            work.pendingNotes.push(item);
+          }
         } else {
           const host = (() => { try { return new URL(value).hostname; } catch { return ''; } })();
           if (isShortLinkHost(host) && !work.resolvedNote) {
@@ -226,7 +251,6 @@ async function advance(job, ctx) {
               url: publicError.resolvedUrl || resolved.url || `https://www.xiaohongshu.com/explore/${noteId}`,
               via: 'url',
             });
-            work.urlIndex += 1;
             return;
           }
           job.draft.guides.push({
@@ -568,15 +592,29 @@ module.exports = definePlugin({
           error: message(req.query?.locale, '未找到规划任务', 'Planning job not found'),
         });
         if (job.status === 'ready' || job.status === 'failed') return response(200, publicDraft(job));
-        if (ticks.has(job.id)) {
-          await ticks.get(job.id);
+        job = reviveStaleJob(job, job.payload?.locale || req.query?.locale || 'en');
+        if (job.status === 'failed') {
+          await saveJob(ctx, job);
           return response(200, publicDraft(job));
         }
-        const pending = (async () => {
+        if (ticks.has(job.id)) {
+          await ticks.get(job.id);
+          job = await findJob(ctx, req.user.id, job.id);
+          if (!job) return response(404, {
+            error: message(req.query?.locale, '未找到规划任务', 'Planning job not found'),
+          });
+          return response(200, publicDraft(job));
+        }
+        const pending = Promise.resolve().then(async () => {
           try {
             await advance(job, ctx);
           } catch (error) {
-            if (isTransientTickError(error)) return;
+            if (isTransientTickError(error)) {
+              addWarning(job, message(job.payload.locale,
+                '网络或地图服务暂时不可用，将自动重试…',
+                'Network or map service timed out; retrying…'));
+              return;
+            }
             job.status = 'failed';
             job.stage = 'failed';
             const detail = error instanceof Error ? error.message : 'Planning failed';
@@ -585,7 +623,7 @@ module.exports = definePlugin({
               : detail;
           }
           await saveJob(ctx, job);
-        })().finally(() => {
+        }).finally(() => {
           if (ticks.get(job.id) === pending) ticks.delete(job.id);
         });
         ticks.set(job.id, pending);
@@ -647,6 +685,7 @@ module.exports = definePlugin({
           await saveJob(ctx, job);
           return response(200, { tripId });
         } catch (error) {
+          await rollbackCreatedPlaces(ctx, tripId, createdPlaceIds);
           return response(500, {
             error: message(
               job.payload.locale,

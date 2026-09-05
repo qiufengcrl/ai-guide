@@ -94,6 +94,15 @@ function toNominatimPlace(row, fallbackName) {
   };
 }
 
+function scorePlacesApiRow(row) {
+  const name = String(row?.displayName?.text || '');
+  const types = (Array.isArray(row?.types) ? row.types : []).map((item) => String(item).toLowerCase());
+  let score = types.reduce((best, type) => Math.max(best, scoreRow({ name, category: type, type })), 0);
+  if (types.some((type) => LOW_QUALITY_TYPES.has(type))) score -= 8;
+  if (/停车场|公交站|地铁站|停车楼|parking|bus stop|transit/i.test(name)) score -= 10;
+  return score;
+}
+
 function toPlacesApiPlace(row, fallbackName) {
   const lat = Number(row?.location?.latitude);
   const lng = Number(row?.location?.longitude);
@@ -199,6 +208,8 @@ async function searchPlacesViaPlacesApi(query, options = {}, config) {
   }
   const places = (Array.isArray(data?.places) ? data.places : [])
     .filter((row) => row?.businessStatus !== 'CLOSED_PERMANENTLY')
+    .slice()
+    .sort((left, right) => scorePlacesApiRow(right) - scorePlacesApiRow(left))
     .slice(0, limit)
     .map((row) => toPlacesApiPlace(row, text))
     .filter(Boolean);
