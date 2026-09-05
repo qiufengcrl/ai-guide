@@ -1433,6 +1433,7 @@
         ready: 'Preview ready',
         guides: 'notes read',
         tooFar: 'Over 40 km · off by default',
+        reservationRequired: 'Reservation may be required',
         failed: 'Planning failed',
         conflict: 'A plan is already running. Reconnecting…',
         noSelection: 'Select at least one place before creating the trip.',
@@ -1513,6 +1514,7 @@
         ready: '行程预览已就绪',
         guides: '篇攻略已读',
         tooFar: '相邻超过 40 公里 · 默认不选',
+        reservationRequired: '可能需要预约',
         failed: '行程规划失败',
         conflict: '已有规划正在进行，正在接上…',
         noSelection: '请至少选择一个地点后再创建行程。',
@@ -1740,7 +1742,7 @@
 
       setBusy(true);
       setStatus(detail, 'working');
-      window.setTimeout(poll, 350);
+      window.setTimeout(poll, 500);
     }
 
     document.getElementById('plan-form').addEventListener('submit', async function (event) {
@@ -1800,17 +1802,27 @@
       }
     }
 
-    function renderWarnings(warnings) {
+    function renderWarnings(warnings, extractMeta) {
       var panel = document.getElementById('warnings');
       var list = document.getElementById('warning-list');
       list.innerHTML = '';
-      warnings.forEach(function (message) {
+      var messages = (warnings || []).slice();
+      if (extractMeta && extractMeta.source === 'guide_text') {
+        messages.unshift(locale.indexOf('zh') === 0
+          ? '已从攻略正文按规则提取景点（模型未返回候选）。'
+          : 'Places were parsed from guide text (model returned no candidates).');
+      } else if (extractMeta && extractMeta.llmCandidateCount === 0 && !extractMeta.llmError) {
+        messages.unshift(locale.indexOf('zh') === 0
+          ? '模型抽取返回 0 个景点，请检查 llm_parsing 模型配置。'
+          : 'Model extraction returned 0 places; check llm_parsing model settings.');
+      }
+      messages.forEach(function (message) {
         var item = document.createElement('li');
         item.textContent = message;
         list.appendChild(item);
       });
-      document.getElementById('warning-count').textContent = String(warnings.length);
-      panel.classList.toggle('hidden', warnings.length === 0);
+      document.getElementById('warning-count').textContent = String(messages.length);
+      panel.classList.toggle('hidden', messages.length === 0);
     }
 
     function renderSources(guides, summary) {
@@ -1977,6 +1989,12 @@
             badge.textContent = t('tooFar');
             meta.appendChild(badge);
           }
+          if (place.reservationRequired) {
+            var reserve = document.createElement('span');
+            reserve.className = 'trek-chip trek-chip--info';
+            reserve.textContent = place.reservationTips || t('reservationRequired');
+            meta.appendChild(reserve);
+          }
 
           row.appendChild(placeCopy);
           row.appendChild(meta);
@@ -2011,7 +2029,7 @@
     }
 
     function render(data) {
-      renderWarnings(data.warnings || []);
+      renderWarnings(data.warnings || [], data.extractMeta || null);
       renderSources(data.guides || [], data.sourceSummary || {});
       renderDays(data.days || []);
 

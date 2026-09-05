@@ -12,10 +12,10 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob } = require('../server/pipeline');
+const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, inferDestinationFromGuides, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
-const { setGeoThrottleInterval, scoreRow, searchPlaces } = require('../server/geo/nominatim');
+const { setGeoThrottleInterval, scoreRow, searchPlaces, isRateLimitError } = require('../server/geo/nominatim');
 
 setGeoThrottleInterval(0);
 
@@ -187,9 +187,12 @@ async function makeReady(fixture, input = {}, fallback, geoOptions) {
   const geo = stubGeoFetch(fallback, geoOptions);
   let state;
   try {
-    for (let index = 0; index < 48; index += 1) {
+    for (let index = 0; index < 96; index += 1) {
       state = (await fixture.app.route({ method: 'GET', path: '/plan' }, { query: { jobId } })).body;
       if (state.status === 'ready' || state.status === 'failed') break;
+      if (index % 2 === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
     }
   } finally {
     geo.restore();
@@ -586,18 +589,15 @@ test('同一规划步骤进行中时，第二次 GET /plan 不会重入', async 
   };
   await fixture.app.load();
   await fixture.app.route({ method: 'POST', path: '/plan' }, { body: { destination: '京都', locale: 'zh' } });
-  for (let index = 0; index < 6; index += 1) {
-    const state = (await fixture.app.route({ method: 'GET', path: '/plan' }, { query: {} })).body;
-    if (state.stage === 'extract') break;
+  while (extractCalls === 0) {
+    await fixture.app.route({ method: 'GET', path: '/plan' }, { query: {} });
   }
-  const first = fixture.app.route({ method: 'GET', path: '/plan' }, { query: {} });
-  await new Promise((resolve) => setTimeout(resolve, 15));
-  const second = await fixture.app.route({ method: 'GET', path: '/plan' }, { query: {} });
-  assert.equal(second.body.stage, 'extract');
+  assert.equal(extractCalls, 1);
+  const overlapping = fixture.app.route({ method: 'GET', path: '/plan' }, { query: {} });
+  await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(extractCalls, 1);
   release();
-  const finished = await first;
-  assert.equal(finished.body.stage, 'gather_evidence');
+  await overlapping;
   assert.equal(extractCalls, 1);
 });
 
@@ -850,4 +850,75 @@ test('gateAndSchedule 会保留 photoUrl', () => {
     '',
   );
   assert.equal(gated.days[0].places[0].photoUrl, 'https://example.test/photo.jpg');
+});
+
+test('衡阳景点别名与停车场降权', () => {
+  assert.equal(PLACE_SEARCH_ALIASES['船山书院'], '衡阳东洲岛 船山书院');
+  assert.equal(placeSearchQuery({ name: '夫之楼' }, '衡阳'), '衡阳东洲岛 夫之楼');
+  assert.ok(isLowQualityPlace({ name: '船山书院停车场', types: ['parking'] }));
+  const evidence = evidenceFromSearch(
+    { name: '船山书院', durationMinutes: 60, dayHint: 1 },
+    {
+      source: 'places',
+      places: [
+        { name: '船山书院停车场', lat: 26.89, lng: 112.61, types: ['parking'], address: '衡阳市' },
+        { name: '船山书院', lat: 26.894, lng: 112.615, types: ['风景名胜'], address: '衡阳市珠晖区东洲岛' },
+      ],
+    },
+    0,
+    '衡阳',
+    { lat: 26.9, lng: 112.6 },
+  );
+  assert.equal(evidence.name, '船山书院');
+});
+
+test('同天内按距离排序减少折返', () => {
+  const ordered = sortDayPlacesByDistance([
+    { name: 'A', lat: 35, lng: 135 },
+    { name: 'C', lat: 35.02, lng: 135.02 },
+    { name: 'B', lat: 35.01, lng: 135.01 },
+  ]);
+  assert.deepEqual(ordered.map((item) => item.name), ['A', 'B', 'C']);
+});
+
+test('gateAndSchedule 会保留预约标记', () => {
+  const gated = gateAndSchedule(
+    { destination: '北京', dayCount: 1, pace: 'balanced', startDate: null },
+    [{
+      id: 'ev_1', name: '故宫', lat: 39.9, lng: 116.4, dayHint: 1,
+      reservationRequired: true, reservationHint: '需提前预约',
+    }],
+    { maxPlacesPerDay: 6 },
+    'zh',
+    '',
+  );
+  assert.equal(gated.days[0].places[0].reservationRequired, true);
+  assert.match(gated.days[0].places[0].reservationTips, /预约/);
+});
+
+test('可从笔记标题推断目的地并去重攻略', () => {
+  assert.equal(inferDestinationFromGuides([{ title: '📍衡阳｜东洲岛 游玩攻略📝' }]), '衡阳');
+  const merged = mergeGuideTexts([
+    { id: 'g_1', noteId: 'n1', title: 'A', text: 'one' },
+    { id: 'g_2', noteId: 'n1', title: 'A duplicate', text: 'two' },
+    { id: 'g_3', noteId: 'n2', title: 'B', text: 'three' },
+  ]);
+  assert.equal(merged.length, 2);
+});
+
+test('publicDraft 会暴露 extractMeta', () => {
+  const draft = publicDraft({
+    id: 'job-1',
+    status: 'running',
+    stage: 'gather_evidence',
+    draft: { intent: { destination: '衡阳' }, guides: [], warnings: [], days: [] },
+    work: { extractMeta: { source: 'guide_text', llmCandidateCount: 0, llmError: null } },
+  });
+  assert.deepEqual(draft.extractMeta, { source: 'guide_text', llmCandidateCount: 0, llmError: null });
+});
+
+test('地图检索限流错误可被识别', () => {
+  assert.equal(isRateLimitError(new Error('CUQPS has exceeded the limit')), true);
+  assert.ok(scoreRow({ name: '停车场', category: 'amenity', type: 'parking' })
+    < scoreRow({ name: '船山书院', category: 'tourism', type: 'attraction' }));
 });

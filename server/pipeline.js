@@ -144,8 +144,42 @@ const PLACE_SEARCH_ALIASES = {
   白桦林: '白桦林观景台',
   黑龙江第一湾: '龙江第一湾风景区',
   呼中国家级自然保护区: '呼中区',
+  东洲岛: '衡阳东洲岛',
+  船山书院: '衡阳东洲岛 船山书院',
+  夫之楼: '衡阳东洲岛 夫之楼',
+  罗汉寺: '衡阳东洲岛 罗汉寺',
 };
 
+function inferDestinationFromGuides(guides) {
+  for (const guide of guides || []) {
+    const title = stripInvisible(guide?.title || '');
+    if (!title) continue;
+    const pipe = title.match(/📍\s*([^｜|]+?)[｜|]/);
+    if (pipe) {
+      const dest = stripAdminTail(pipe[1].trim());
+      if (dest.length >= 2) return dest;
+    }
+    const suffix = title.match(/^(.{2,12}?)(?:\s*[｜|]|\s+游玩攻略|\s+攻略)/u);
+    if (suffix) {
+      const dest = stripAdminTail(suffix[1].trim());
+      if (dest.length >= 2 && !/(攻略|游记|笔记)/.test(dest)) return dest;
+    }
+  }
+  return '';
+}
+
+function mergeGuideTexts(guides) {
+  const seen = new Set();
+  const merged = [];
+  for (const guide of guides || []) {
+    const noteId = String(guide?.noteId || guide?.id || '').trim();
+    const key = noteId || foldName(`${guide?.title || ''}|${String(guide?.text || '').slice(0, 80)}`);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    merged.push(guide);
+  }
+  return merged;
+}
 function looksLikeShareCard(text) {
   const raw = String(text || '').trim();
   if (!raw || raw.length > 500) return false;
@@ -418,19 +452,30 @@ async function mapConcurrent(items, limit, worker) {
   return results;
 }
 
+const { scoreRow: geoScoreRow } = require('./geo/nominatim');
+
 async function resolveCandidateEvidence(candidate, index, intent, searchPlacesFn, options, bias) {
   const destination = intent.destination;
   const queries = placeSearchNames(candidate, destination);
   let lastError = null;
   for (const query of queries) {
-    try {
-      const result = await searchPlacesFn(query, options);
-      const evidence = result
-        ? evidenceFromSearch(candidate, result, index, destination, bias)
-        : null;
-      if (evidence) return { evidence, query };
-    } catch (error) {
-      lastError = error;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const result = await searchPlacesFn(query, options);
+        const evidence = result
+          ? evidenceFromSearch(candidate, result, index, destination, bias)
+          : null;
+        if (evidence) return { evidence, query };
+        break;
+      } catch (error) {
+        lastError = error;
+        const text = String(error?.message || error || '');
+        if (/429|461|cuqps|限流|频繁|too many requests|rate limit/i.test(text) && attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 600 * (2 ** attempt)));
+          continue;
+        }
+        break;
+      }
     }
   }
   return {
@@ -555,6 +600,30 @@ function finiteCoordinate(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function isLowQualityPlace(place) {
+  const types = (place?.types || []).map((item) => String(item).toLowerCase());
+  if (types.some((type) => [
+    'parking', 'parking_lot', 'parking_space', 'bus_stop', 'bus_station',
+    'transit_station', 'subway_station', 'train_station', 'tram_stop',
+  ].includes(type))) return true;
+  const label = `${place?.name || ''} ${place?.address || ''}`;
+  return /停车场|公交站|地铁站|停车楼|换乘站|parking lot|bus stop|transit station/i.test(label);
+}
+
+function scoreSearchPlace(place, destination) {
+  let score = geoScoreRow({
+    category: place?.types?.[0],
+    type: place?.types?.[1] || place?.types?.[0],
+    name: place?.name,
+    importance: 0.2,
+  });
+  if (isGenericPlaceName(place.name, destination)) score -= 10;
+  if (isAdministrativePlace(place)) score -= 8;
+  if (isLowQualityPlace(place)) score -= 12;
+  const dest = String(destination || '').trim();
+  if (dest.length >= 2 && `${place?.name || ''} ${place?.address || ''}`.includes(dest)) score += 1;
+  return score;
+}
 function isAdministrativePlace(place) {
   const types = (place?.types || []).map((item) => String(item).toLowerCase());
   return types.some((type) => [
@@ -576,10 +645,15 @@ function nearDestination(place, destination, bias) {
 function evidenceFromSearch(candidate, result, index, destination, bias) {
   const places = (result?.places || []).filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
   const nearby = places.filter((item) => nearDestination(item, destination, bias));
-  const specific = nearby.find((item) => !isGenericPlaceName(item.name, destination) && !isAdministrativePlace(item));
-  const named = nearby.find((item) => !isGenericPlaceName(item.name, destination));
-  const place = specific || named || null;
-  if (!place) return null;
+  const ranked = nearby
+    .filter((item) => !isLowQualityPlace(item))
+    .slice()
+    .sort((left, right) => scoreSearchPlace(right, destination) - scoreSearchPlace(left, destination));
+  const place = ranked.find((item) => !isGenericPlaceName(item.name, destination) && !isAdministrativePlace(item))
+    || ranked.find((item) => !isGenericPlaceName(item.name, destination))
+    || ranked[0]
+    || null;
+  if (!place || isLowQualityPlace(place)) return null;
   return {
     id: `ev_${index + 1}`,
     name: String(place.name || candidate.name),
@@ -593,6 +667,7 @@ function evidenceFromSearch(candidate, result, index, destination, bias) {
     source: 'poi_search',
     fromGuideIds: candidate.guideId ? [candidate.guideId] : [],
     stayHintMinutes: candidate.durationMinutes,
+    reservationRequired: candidate.reservationRequired === true,
     reservationHint: candidate.reservationTips || (candidate.reservationRequired ? 'Reservation may be required' : ''),
     reason: candidate.reason,
     dayHint: candidate.dayHint,
@@ -776,6 +851,27 @@ function markDistance(days, limitKm = TOO_FAR_KM) {
   }
 }
 
+function sortDayPlacesByDistance(places) {
+  const list = Array.isArray(places) ? places.slice() : [];
+  if (list.length <= 2) return list;
+  const remaining = list.slice();
+  const ordered = [remaining.shift()];
+  while (remaining.length) {
+    const anchor = ordered[ordered.length - 1];
+    let bestIndex = 0;
+    let bestDistance = Infinity;
+    for (let index = 0; index < remaining.length; index += 1) {
+      const distance = haversineKm(anchor, remaining[index]);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    }
+    ordered.push(remaining.splice(bestIndex, 1)[0]);
+  }
+  return ordered;
+}
+
 function rebalanceDays(days) {
   for (;;) {
     const empty = days.find((day) => day.places.length === 0);
@@ -831,10 +927,15 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
       categoryHint: item.categoryHint,
       stayMinutes: item.stayHintMinutes,
       notes: item.reason || item.reservationHint || '',
+      reservationRequired: item.reservationRequired === true,
+      reservationTips: item.reservationHint || '',
       photoUrl: item.photoUrl || '',
       tooFar: false,
       selected: true,
     });
+  }
+  for (const day of days) {
+    day.places = sortDayPlacesByDistance(day.places);
   }
   for (const [dayIndex, regionName] of dayRegionNames.entries()) {
     days[dayIndex].title = message(locale, `第 ${dayIndex + 1} 天 · ${regionName}`, `Day ${dayIndex + 1} · ${regionName}`);
@@ -870,6 +971,7 @@ function publicDraft(job) {
     },
     warnings: draft.warnings || [],
     days: draft.days || [],
+    extractMeta: job.work?.extractMeta || null,
     ...(job.error ? { error: job.error } : {}),
   };
 }
@@ -897,6 +999,11 @@ module.exports = {
   extractionText,
   extractionInstruction,
   normalizeCandidates,
+  inferDestinationFromGuides,
+  mergeGuideTexts,
+  isLowQualityPlace,
+  scoreSearchPlace,
+  sortDayPlacesByDistance,
   candidatesFromGuideText,
   resolveExtractCandidates,
   guideTextForExtractRetry,

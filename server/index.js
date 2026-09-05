@@ -11,6 +11,8 @@ const {
   normalizeCandidates,
   candidatesFromGuideText,
   resolveExtractCandidates,
+  inferDestinationFromGuides,
+  mergeGuideTexts,
   guideTextForExtractRetry,
   extractRetryInstruction,
   looksLikeShareCard,
@@ -272,6 +274,17 @@ async function advance(job, ctx) {
   }
 
   if (job.stage === 'extract') {
+    job.draft.guides = mergeGuideTexts(job.draft.guides);
+    if (!job.draft.intent.destination) {
+      const inferred = inferDestinationFromGuides(job.draft.guides);
+      if (inferred) {
+        job.draft.intent.destination = inferred;
+        job.draft.intent.guideQuery = `${inferred} ${job.draft.intent.interests.length ? job.draft.intent.interests.join(' ') : '景点'} 旅游 景点攻略`.trim();
+        addWarning(job, message(locale,
+          `未填写目的地，已从笔记标题推断为「${inferred}」。`,
+          `Destination was empty; inferred "${inferred}" from note titles.`));
+      }
+    }
     const hasGuides = (job.draft.guides || []).some((guide) => String(guide.text || '').trim());
     let extracted = {};
     let llmError = null;
@@ -324,9 +337,21 @@ async function advance(job, ctx) {
         '模型未能识别景点，已从攻略正文按规则提取。',
         'The model did not extract places; names were parsed from guide text.'));
     } else if (!resolved.candidates.length) {
-      addWarning(job, message(locale,
-        '没有提取到具体景点。请粘贴攻略、添加链接，或换一个更具体的城市。',
-        'No specific places were extracted. Paste a note, add links, or try a more specific city.'));
+      const hints = [];
+      if (resolved.llmCandidateCount === 0 && !llmError) {
+        hints.push(message(locale,
+          '模型返回了 0 个景点，请检查 llm_parsing 插件是否配置了可用模型（如 deepseek-v4-flash）。',
+          'The model returned 0 places; check that llm_parsing has a working model (e.g. deepseek-v4-flash).'));
+      }
+      if (llmError) {
+        hints.push(message(locale,
+          `模型调用失败：${llmError}`,
+          `Model call failed: ${llmError}`));
+      }
+      hints.push(message(locale,
+        '没有提取到具体景点。请粘贴攻略正文、填写必去景点，或换一个更具体的城市。',
+        'No specific places were extracted. Paste guide text, add must-see places, or try a more specific city.'));
+      for (const hint of hints) addWarning(job, hint);
     }
     job.work.candidateIndex = 0;
     job.work.evidence = [];
@@ -357,7 +382,7 @@ async function advance(job, ctx) {
     if (!job.work.geocodeDone) {
       const candidates = job.work.candidates || [];
       const geoOpts = geoSearchOptions(ctx.config, { lang: locale, locationBias: job.work.bias || undefined });
-      const resolved = await mapConcurrent(candidates, 5, (candidate, index) =>
+      const resolved = await mapConcurrent(candidates, 3, (candidate, index) =>
         resolveCandidateEvidence(candidate, index, job.draft.intent, searchPlaces, geoOpts, job.work.bias));
       job.work.evidence = [];
       for (const item of resolved) {
@@ -543,7 +568,10 @@ module.exports = definePlugin({
           error: message(req.query?.locale, '未找到规划任务', 'Planning job not found'),
         });
         if (job.status === 'ready' || job.status === 'failed') return response(200, publicDraft(job));
-        if (ticks.has(job.id)) return response(200, publicDraft(job));
+        if (ticks.has(job.id)) {
+          await ticks.get(job.id);
+          return response(200, publicDraft(job));
+        }
         const pending = (async () => {
           try {
             await advance(job, ctx);
@@ -561,7 +589,6 @@ module.exports = definePlugin({
           if (ticks.get(job.id) === pending) ticks.delete(job.id);
         });
         ticks.set(job.id, pending);
-        await pending;
         return response(200, publicDraft(job));
       },
     },
