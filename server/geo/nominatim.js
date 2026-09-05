@@ -41,9 +41,15 @@ function resolvePlacesApi(options = {}) {
   return { base, key };
 }
 
+const LOW_QUALITY_TYPES = new Set([
+  'parking', 'parking_lot', 'parking_space', 'bus_stop', 'bus_station',
+  'transit_station', 'subway_station', 'train_station', 'tram_stop',
+]);
+
 function scoreRow(row) {
   const cls = String(row?.class || row?.category || '').toLowerCase();
   const type = String(row?.type || row?.addresstype || '').toLowerCase();
+  const name = String(row?.name || row?.displayName?.text || '').toLowerCase();
   let score = Number(row?.importance) || 0;
   if (['tourism', 'historic', 'leisure'].includes(cls)) score += 4;
   if (cls === 'amenity' && ['place_of_worship', 'theatre', 'arts_centre'].includes(type)) score += 3;
@@ -52,8 +58,23 @@ function scoreRow(row) {
     'artwork', 'monument', 'castle', 'ruins', 'archaeological_site', 'park', 'garden',
   ].includes(type)) score += 3;
   if (cls === 'boundary' || type === 'administrative') score -= 6;
-  if (['province', 'state', 'country', 'region', 'municipality', 'county', 'city'].includes(type)) score -= 5;
+  if (['province', 'state', 'country', 'region', 'municipality', 'county', 'city', 'town'].includes(type)) score -= 5;
+  if (LOW_QUALITY_TYPES.has(type) || cls === 'highway' && type === 'bus_stop') score -= 8;
+  if (/停车场|公交站|地铁站|停车楼|parking|bus stop|transit/i.test(name)) score -= 6;
   return score;
+}
+
+function isRateLimitError(error) {
+  const text = String(error?.message || error || '');
+  return /429|461|cuqps|限流|频繁|too many requests|rate limit/i.test(text);
+}
+
+function backoffDelayMs(attempt) {
+  return Math.min(8000, 600 * (2 ** Math.max(0, attempt)));
+}
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function toNominatimPlace(row, fallbackName) {
@@ -71,6 +92,15 @@ function toNominatimPlace(row, fallbackName) {
     types: [row?.type, row?.category, row?.class, row?.addresstype].filter(Boolean).map(String),
     source: 'nominatim',
   };
+}
+
+function scorePlacesApiRow(row) {
+  const name = String(row?.displayName?.text || '');
+  const types = (Array.isArray(row?.types) ? row.types : []).map((item) => String(item).toLowerCase());
+  let score = types.reduce((best, type) => Math.max(best, scoreRow({ name, category: type, type })), 0);
+  if (types.some((type) => LOW_QUALITY_TYPES.has(type))) score -= 8;
+  if (/停车场|公交站|地铁站|停车楼|parking|bus stop|transit/i.test(name)) score -= 10;
+  return score;
 }
 
 function toPlacesApiPlace(row, fallbackName) {
@@ -178,6 +208,8 @@ async function searchPlacesViaPlacesApi(query, options = {}, config) {
   }
   const places = (Array.isArray(data?.places) ? data.places : [])
     .filter((row) => row?.businessStatus !== 'CLOSED_PERMANENTLY')
+    .slice()
+    .sort((left, right) => scorePlacesApiRow(right) - scorePlacesApiRow(left))
     .slice(0, limit)
     .map((row) => toPlacesApiPlace(row, text))
     .filter(Boolean);
@@ -186,8 +218,19 @@ async function searchPlacesViaPlacesApi(query, options = {}, config) {
 
 async function searchPlaces(query, options = {}) {
   const placesApi = resolvePlacesApi(options);
-  if (placesApi) return searchPlacesViaPlacesApi(query, options, placesApi);
-  return searchPlacesViaNominatim(query, options);
+  const maxAttempts = Math.max(1, Number(options.maxAttempts) || 3);
+  let lastError = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      if (placesApi) return await searchPlacesViaPlacesApi(query, options, placesApi);
+      return await searchPlacesViaNominatim(query, options);
+    } catch (error) {
+      lastError = error;
+      if (!isRateLimitError(error) || attempt >= maxAttempts - 1) throw error;
+      await sleep(backoffDelayMs(attempt));
+    }
+  }
+  throw lastError || new GeoSearchError('Place search failed');
 }
 
 module.exports = {
@@ -196,4 +239,6 @@ module.exports = {
   searchPlaces,
   setGeoThrottleInterval,
   scoreRow,
+  isRateLimitError,
+  backoffDelayMs,
 };

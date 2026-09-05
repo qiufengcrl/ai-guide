@@ -1,10 +1,12 @@
 const { extractXhsUrls } = require('./xhs/url');
+const { scoreRow: geoScoreRow } = require('./geo/nominatim');
 
 const TOO_FAR_KM = 40;
 const MAX_FROM_DESTINATION_KM = 500;
 const REGION_CLUSTER_KM = 80;
 const REGION_SPLIT_MIN_SPAN_KM = 80;
 
+const GUIDE_RESERVATION_HINT = /预约|抢票|提前预约|约满|需预约|需提前/;
 const GUIDE_SECTION_SKIP = /^(🍜|💡|#|美食推荐|避坑|小贴士)/;
 const GUIDE_ROUTE_SKIP = /^(廊桥|登岛|欣赏|观看|拍照|散步|环岛(?!步道)|灯光|喷泉|夜景灯光)/;
 const GUIDE_NAME_SUFFIX = /(登顶|数字展馆.*|与夜景.*|灯光.*|\/喷泉)$/u;
@@ -35,11 +37,24 @@ function guidePlaceNamesFromSegment(segment, intent) {
   return cleaned.split(/[/／、|｜]/).map(cleanGuidePlaceName).filter((item) => item.length >= 2);
 }
 
+function reservationHintsFromLine(line) {
+  const text = String(line || '').trim();
+  if (!text || !GUIDE_RESERVATION_HINT.test(text)) {
+    return { reservationRequired: false, reservationTips: '' };
+  }
+  const match = text.match(/(?:需?提前预约|预约[^，。；\n]{0,24}|抢票[^，。；\n]{0,24}|约满[^，。；\n]{0,16})/);
+  return {
+    reservationRequired: true,
+    reservationTips: String(match?.[0] || '可能需要预约').trim(),
+  };
+}
+
 function candidatesFromGuideText(guides, intent) {
   const target = targetPlaceCount(intent);
   const seen = new Set();
   const results = [];
-  const push = (rawName, guideId, reason) => {
+  const push = (rawName, guideId, reason, lineContext) => {
+    const reservation = reservationHintsFromLine(lineContext || reason);
     for (const name of guidePlaceNamesFromSegment(rawName, intent)) {
       if (isWeakPlaceName(name, intent) || isGenericPlaceName(name, intent.destination)) continue;
       const key = foldName(name);
@@ -51,6 +66,8 @@ function candidatesFromGuideText(guides, intent) {
         reason: String(reason || '').trim(),
         guideId,
         dayHint: 1,
+        reservationRequired: reservation.reservationRequired,
+        reservationTips: reservation.reservationTips,
       }, intent));
       if (results.length >= target) return true;
     }
@@ -62,8 +79,9 @@ function candidatesFromGuideText(guides, intent) {
     if (!text.trim()) continue;
     const guideId = String(guide.id || '').trim();
     let inFoodSection = false;
-    for (const line of text.split(/\n/)) {
-      const trimmed = stripInvisible(line);
+    const lines = text.split(/\n/);
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const trimmed = stripInvisible(lines[lineIndex]);
       if (!trimmed) continue;
       if (/^🍜|^美食推荐/.test(trimmed)) {
         inFoodSection = true;
@@ -75,28 +93,31 @@ function candidatesFromGuideText(guides, intent) {
       }
       if (inFoodSection || /^#/.test(trimmed)) continue;
 
+      const nextLine = stripInvisible(lines[lineIndex + 1] || '');
+      const lineContext = [trimmed, nextLine].filter(Boolean).join('\n');
+
       const bullet = trimmed.match(/^[▪️•·]\s*(.+)$/);
-      if (bullet && push(bullet[1], guideId, '')) return results;
+      if (bullet && push(bullet[1], guideId, trimmed, lineContext)) return results;
 
       if (/推荐路线|路线[:：]|→/.test(trimmed)) {
         const routePart = trimmed.replace(/^.*?(?:推荐路线|路线)[:：]?\s*/u, '');
         for (const segment of routePart.split(/\s*(?:→|->|➡|—>)\s*/)) {
-          if (push(segment, guideId, '')) return results;
+          if (push(segment, guideId, trimmed, lineContext)) return results;
         }
         continue;
       }
 
       const quoted = trimmed.match(/[“"]([^”"]{2,24})[”"]/);
-      if (quoted && /(停车场|站|导航)/.test(trimmed) && push(quoted[1], guideId, '')) return results;
+      if (quoted && /(停车场|站|导航)/.test(trimmed) && push(quoted[1], guideId, trimmed, lineContext)) return results;
 
       const nearby = trimmed.match(/去(?:旁边|附近)的?\s*(.{2,16})/);
-      if (nearby && push(nearby[1], guideId, '')) return results;
+      if (nearby && push(nearby[1], guideId, trimmed, lineContext)) return results;
     }
 
     const title = stripInvisible(guide.title || '');
     const titleMatch = title.match(/[｜|]\s*([^｜|]+?)(?:\s*游玩攻略|\s*攻略)?\s*📝?\s*$/u)
       || title.match(/📍\s*[^｜|]+[｜|]\s*([^｜|]+?)(?:\s*游玩攻略|\s*攻略)?/u);
-    if (titleMatch && push(titleMatch[1], guideId, '')) return results;
+    if (titleMatch && push(titleMatch[1], guideId, title, title)) return results;
   }
 
   return results;
@@ -144,8 +165,45 @@ const PLACE_SEARCH_ALIASES = {
   白桦林: '白桦林观景台',
   黑龙江第一湾: '龙江第一湾风景区',
   呼中国家级自然保护区: '呼中区',
+  东洲岛: '衡阳东洲岛',
+  船山书院: '衡阳东洲岛 船山书院',
+  夫之楼: '衡阳东洲岛 夫之楼',
+  罗汉寺: '衡阳东洲岛 罗汉寺',
 };
 
+function inferDestinationFromGuides(guides) {
+  for (const guide of guides || []) {
+    const title = stripInvisible(guide?.title || '');
+    if (!title) continue;
+    const pipe = title.match(/📍\s*([^｜|]+?)[｜|]/);
+    if (pipe) {
+      const dest = stripAdminTail(pipe[1].trim());
+      if (dest.length >= 2) return dest;
+    }
+    const suffix = title.match(/^(.{2,12}?)(?:\s*[｜|]|\s+游玩攻略|\s+攻略)/u);
+    if (suffix) {
+      const dest = stripAdminTail(suffix[1].trim());
+      if (dest.length >= 2 && !/(攻略|游记|笔记)/.test(dest)) return dest;
+    }
+  }
+  return '';
+}
+
+function mergeGuideTexts(guides) {
+  const seen = new Set();
+  const merged = [];
+  for (const guide of guides || []) {
+    const noteId = String(guide?.noteId || '').trim();
+    const url = String(guide?.url || '').trim();
+    const key = noteId
+      || (url ? `url:${url}` : '')
+      || foldName(`${guide?.title || ''}|${String(guide?.text || '').slice(0, 200)}`);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    merged.push(guide);
+  }
+  return merged;
+}
 function looksLikeShareCard(text) {
   const raw = String(text || '').trim();
   if (!raw || raw.length > 500) return false;
@@ -423,14 +481,23 @@ async function resolveCandidateEvidence(candidate, index, intent, searchPlacesFn
   const queries = placeSearchNames(candidate, destination);
   let lastError = null;
   for (const query of queries) {
-    try {
-      const result = await searchPlacesFn(query, options);
-      const evidence = result
-        ? evidenceFromSearch(candidate, result, index, destination, bias)
-        : null;
-      if (evidence) return { evidence, query };
-    } catch (error) {
-      lastError = error;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const result = await searchPlacesFn(query, options);
+        const evidence = result
+          ? evidenceFromSearch(candidate, result, index, destination, bias)
+          : null;
+        if (evidence) return { evidence, query };
+        break;
+      } catch (error) {
+        lastError = error;
+        const text = String(error?.message || error || '');
+        if (/429|461|cuqps|限流|频繁|too many requests|rate limit/i.test(text) && attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 600 * (2 ** attempt)));
+          continue;
+        }
+        break;
+      }
     }
   }
   return {
@@ -555,6 +622,30 @@ function finiteCoordinate(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function isLowQualityPlace(place) {
+  const types = (place?.types || []).map((item) => String(item).toLowerCase());
+  if (types.some((type) => [
+    'parking', 'parking_lot', 'parking_space', 'bus_stop', 'bus_station',
+    'transit_station', 'subway_station', 'train_station', 'tram_stop',
+  ].includes(type))) return true;
+  const label = `${place?.name || ''} ${place?.address || ''}`;
+  return /停车场|公交站|地铁站|停车楼|换乘站|parking lot|bus stop|transit station/i.test(label);
+}
+
+function scoreSearchPlace(place, destination) {
+  let score = geoScoreRow({
+    category: place?.types?.[0],
+    type: place?.types?.[1] || place?.types?.[0],
+    name: place?.name,
+    importance: 0.2,
+  });
+  if (isGenericPlaceName(place.name, destination)) score -= 10;
+  if (isAdministrativePlace(place)) score -= 8;
+  if (isLowQualityPlace(place)) score -= 12;
+  const dest = String(destination || '').trim();
+  if (dest.length >= 2 && `${place?.name || ''} ${place?.address || ''}`.includes(dest)) score += 1;
+  return score;
+}
 function isAdministrativePlace(place) {
   const types = (place?.types || []).map((item) => String(item).toLowerCase());
   return types.some((type) => [
@@ -576,10 +667,15 @@ function nearDestination(place, destination, bias) {
 function evidenceFromSearch(candidate, result, index, destination, bias) {
   const places = (result?.places || []).filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
   const nearby = places.filter((item) => nearDestination(item, destination, bias));
-  const specific = nearby.find((item) => !isGenericPlaceName(item.name, destination) && !isAdministrativePlace(item));
-  const named = nearby.find((item) => !isGenericPlaceName(item.name, destination));
-  const place = specific || named || null;
-  if (!place) return null;
+  const ranked = nearby
+    .filter((item) => !isLowQualityPlace(item))
+    .slice()
+    .sort((left, right) => scoreSearchPlace(right, destination) - scoreSearchPlace(left, destination));
+  const place = ranked.find((item) => !isGenericPlaceName(item.name, destination) && !isAdministrativePlace(item))
+    || ranked.find((item) => !isGenericPlaceName(item.name, destination))
+    || ranked[0]
+    || null;
+  if (!place || isLowQualityPlace(place)) return null;
   return {
     id: `ev_${index + 1}`,
     name: String(place.name || candidate.name),
@@ -593,6 +689,7 @@ function evidenceFromSearch(candidate, result, index, destination, bias) {
     source: 'poi_search',
     fromGuideIds: candidate.guideId ? [candidate.guideId] : [],
     stayHintMinutes: candidate.durationMinutes,
+    reservationRequired: candidate.reservationRequired === true,
     reservationHint: candidate.reservationTips || (candidate.reservationRequired ? 'Reservation may be required' : ''),
     reason: candidate.reason,
     dayHint: candidate.dayHint,
@@ -690,6 +787,17 @@ function allocateRegionDays(totalDays, sizes) {
   const regionCount = sizes.length;
   if (regionCount <= 0) return [];
   if (regionCount === 1) return [totalDays];
+  if (regionCount > totalDays) {
+    const slots = sizes.map((_, index) => (index < totalDays ? 1 : 0));
+    let used = slots.reduce((sum, size) => sum + size, 0);
+    while (used < totalDays) {
+      const index = slots.findIndex((size) => size === 0);
+      if (index < 0) break;
+      slots[index] = 1;
+      used += 1;
+    }
+    return slots;
+  }
   const slots = sizes.map(() => 1);
   let remaining = Math.max(0, totalDays - regionCount);
   const totalSize = sizes.reduce((sum, size) => sum + size, 0) || regionCount;
@@ -729,6 +837,15 @@ function splitRegions(intent, evidence, locale) {
   const clusters = clusterEvidence(items, REGION_CLUSTER_KM);
   if (clusters.length <= 1) {
     return { evidence, regions: [] };
+  }
+  while (clusters.length > intent.dayCount) {
+    let minIndex = 0;
+    for (let index = 1; index < clusters.length; index += 1) {
+      if (clusters[index].length < clusters[minIndex].length) minIndex = index;
+    }
+    const mergeInto = minIndex > 0 ? minIndex - 1 : 1;
+    clusters[mergeInto].push(...clusters[minIndex]);
+    clusters.splice(minIndex, 1);
   }
   clusters.sort((left, right) => {
     const leftCenter = clusterCentroid(left);
@@ -774,6 +891,27 @@ function markDistance(days, limitKm = TOO_FAR_KM) {
       place.selected = !tooFar;
     });
   }
+}
+
+function sortDayPlacesByDistance(places) {
+  const list = Array.isArray(places) ? places.slice() : [];
+  if (list.length <= 2) return list;
+  const remaining = list.slice();
+  const ordered = [remaining.shift()];
+  while (remaining.length) {
+    const anchor = ordered[ordered.length - 1];
+    let bestIndex = 0;
+    let bestDistance = Infinity;
+    for (let index = 0; index < remaining.length; index += 1) {
+      const distance = haversineKm(anchor, remaining[index]);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    }
+    ordered.push(remaining.splice(bestIndex, 1)[0]);
+  }
+  return ordered;
 }
 
 function rebalanceDays(days) {
@@ -831,10 +969,15 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
       categoryHint: item.categoryHint,
       stayMinutes: item.stayHintMinutes,
       notes: item.reason || item.reservationHint || '',
+      reservationRequired: item.reservationRequired === true,
+      reservationTips: item.reservationHint || '',
       photoUrl: item.photoUrl || '',
       tooFar: false,
       selected: true,
     });
+  }
+  for (const day of days) {
+    day.places = sortDayPlacesByDistance(day.places);
   }
   for (const [dayIndex, regionName] of dayRegionNames.entries()) {
     days[dayIndex].title = message(locale, `第 ${dayIndex + 1} 天 · ${regionName}`, `Day ${dayIndex + 1} · ${regionName}`);
@@ -870,6 +1013,7 @@ function publicDraft(job) {
     },
     warnings: draft.warnings || [],
     days: draft.days || [],
+    extractMeta: job.work?.extractMeta || null,
     ...(job.error ? { error: job.error } : {}),
   };
 }
@@ -897,6 +1041,12 @@ module.exports = {
   extractionText,
   extractionInstruction,
   normalizeCandidates,
+  inferDestinationFromGuides,
+  mergeGuideTexts,
+  isLowQualityPlace,
+  scoreSearchPlace,
+  sortDayPlacesByDistance,
+  reservationHintsFromLine,
   candidatesFromGuideText,
   resolveExtractCandidates,
   guideTextForExtractRetry,

@@ -1205,6 +1205,10 @@
                   <span class="field-label"><span class="field-label-main"><svg class="icon icon--sm"><use href="#icon-sparkles"></use></svg><span data-i18n="interests">Interests</span></span><span class="optional" data-i18n="optional">Optional</span></span>
                   <input class="trek-input" id="interests" autocomplete="off" data-i18n-placeholder="interestsPlaceholder" placeholder="Temples, coffee, quiet streets" />
                 </label>
+                <label class="field">
+                  <span class="field-label"><span class="field-label-main"><svg class="icon icon--sm"><use href="#icon-pin"></use></svg><span data-i18n="mustSee">Must-see places</span></span><span class="optional" data-i18n="optional">Optional</span></span>
+                  <input class="trek-input" id="must-see" autocomplete="off" data-i18n-placeholder="mustSeePlaceholder" placeholder="One per line or comma-separated" />
+                </label>
               </div>
             </section>
 
@@ -1386,6 +1390,8 @@
         destinationPlaceholder: 'Kyoto',
         interests: 'Interests',
         interestsPlaceholder: 'Temples, coffee, quiet streets',
+        mustSee: 'Must-see places',
+        mustSeePlaceholder: 'One per line or comma-separated',
         optional: 'Optional',
         timingTitle: 'Timing & pace',
         timingHint: 'Dates are optional; choose a pace that feels like you.',
@@ -1433,6 +1439,7 @@
         ready: 'Preview ready',
         guides: 'notes read',
         tooFar: 'Over 40 km · off by default',
+        reservationRequired: 'Reservation may be required',
         failed: 'Planning failed',
         conflict: 'A plan is already running. Reconnecting…',
         noSelection: 'Select at least one place before creating the trip.',
@@ -1466,6 +1473,8 @@
         destinationPlaceholder: '例如：京都',
         interests: '旅行兴趣',
         interestsPlaceholder: '寺庙、咖啡、安静街巷',
+        mustSee: '必去景点',
+        mustSeePlaceholder: '每行一个，或用逗号分隔',
         optional: '选填',
         timingTitle: '日期与节奏',
         timingHint: '日期可以留空，再选一个舒服的旅行节奏。',
@@ -1513,6 +1522,7 @@
         ready: '行程预览已就绪',
         guides: '篇攻略已读',
         tooFar: '相邻超过 40 公里 · 默认不选',
+        reservationRequired: '可能需要预约',
         failed: '行程规划失败',
         conflict: '已有规划正在进行，正在接上…',
         noSelection: '请至少选择一个地点后再创建行程。',
@@ -1740,7 +1750,7 @@
 
       setBusy(true);
       setStatus(detail, 'working');
-      window.setTimeout(poll, 350);
+      window.setTimeout(poll, 500);
     }
 
     document.getElementById('plan-form').addEventListener('submit', async function (event) {
@@ -1757,6 +1767,7 @@
           body: {
             destination: document.getElementById('destination').value,
             interests: document.getElementById('interests').value,
+            mustSee: document.getElementById('must-see').value,
             startDate: document.getElementById('start-date').value,
             endDate: document.getElementById('end-date').value,
             dayCount: Number(document.getElementById('day-count').value),
@@ -1800,17 +1811,25 @@
       }
     }
 
+    function safePhotoUrl(value) {
+      try {
+        var url = new URL(String(value || '').trim());
+        if (url.protocol === 'https:') return url.href;
+      } catch (_) {}
+      return '';
+    }
+
     function renderWarnings(warnings) {
       var panel = document.getElementById('warnings');
       var list = document.getElementById('warning-list');
       list.innerHTML = '';
-      warnings.forEach(function (message) {
+      (warnings || []).forEach(function (message) {
         var item = document.createElement('li');
         item.textContent = message;
         list.appendChild(item);
       });
-      document.getElementById('warning-count').textContent = String(warnings.length);
-      panel.classList.toggle('hidden', warnings.length === 0);
+      document.getElementById('warning-count').textContent = String((warnings || []).length);
+      panel.classList.toggle('hidden', !(warnings || []).length);
     }
 
     function renderSources(guides, summary) {
@@ -1935,13 +1954,23 @@
           if (place.photoUrl) {
             var photo = document.createElement('img');
             photo.className = 'place-photo';
-            photo.src = place.photoUrl;
-            photo.alt = place.name || '';
-            photo.loading = 'lazy';
-            photo.referrerPolicy = 'no-referrer';
-            row.appendChild(check);
-            row.appendChild(marker);
-            row.appendChild(photo);
+            var safePhoto = safePhotoUrl(place.photoUrl);
+            if (safePhoto) {
+              photo.src = safePhoto;
+              photo.alt = place.name || '';
+              photo.loading = 'lazy';
+              photo.referrerPolicy = 'no-referrer';
+              row.appendChild(check);
+              row.appendChild(marker);
+              row.appendChild(photo);
+            } else {
+              var photoSpacer = document.createElement('span');
+              photoSpacer.className = 'place-photo place-photo--empty';
+              photoSpacer.setAttribute('aria-hidden', 'true');
+              row.appendChild(check);
+              row.appendChild(marker);
+              row.appendChild(photoSpacer);
+            }
           } else {
             var photoSpacer = document.createElement('span');
             photoSpacer.className = 'place-photo place-photo--empty';
@@ -1976,6 +2005,12 @@
             badge.className = 'trek-chip trek-chip--warning distance-warning';
             badge.textContent = t('tooFar');
             meta.appendChild(badge);
+          }
+          if (place.reservationRequired) {
+            var reserve = document.createElement('span');
+            reserve.className = 'trek-chip trek-chip--info';
+            reserve.textContent = place.reservationTips || t('reservationRequired');
+            meta.appendChild(reserve);
           }
 
           row.appendChild(placeCopy);
