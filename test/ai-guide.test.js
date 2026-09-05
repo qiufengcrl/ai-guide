@@ -107,7 +107,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.31');
+  assert.equal(manifest.version, '1.1.32');
 });
 
 function memoryDb() {
@@ -1401,6 +1401,35 @@ test('设置页 testXhs 在无 userId 时不写无主 clock', async () => {
     assert.equal(result.ok, false);
     assert.equal(fixture.db.userMeta.size, 0);
     assert.equal(fixture.db.cookieClock.size, 0);
+  } finally {
+    global.fetch = original;
+  }
+});
+
+test('设置页 testXhs 遇限流不重试，避免超过 TREK 15s action 超时', async () => {
+  const fixture = buildHost({
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+  });
+  await fixture.app.load();
+  const original = global.fetch;
+  let fetchCount = 0;
+  global.fetch = async (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      fetchCount += 1;
+      return {
+        ok: false,
+        status: 429,
+        headers: { get() { return null; } },
+        async json() { return {}; },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  try {
+    const result = await fixture.app.action('testXhs');
+    assert.equal(fetchCount, 1);
+    assert.equal(result.ok, false);
+    assert.match(result.message, /请求过快/);
   } finally {
     global.fetch = original;
   }

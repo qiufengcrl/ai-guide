@@ -95,7 +95,7 @@ function assertSessionResponse(data) {
   return data;
 }
 
-async function post(path, body, cookie) {
+async function post(path, body, cookie, options = {}) {
   let signed;
   try {
     signed = createSignedPost(path, body, cookie);
@@ -104,13 +104,14 @@ async function post(path, body, cookie) {
     const code = /missing the a1|missing the web_session|cookie is empty/i.test(detail) ? 'auth' : 'fetch';
     throw new XhsSessionError(detail, code);
   }
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 12000;
   let response;
   try {
     response = await fetchWithTimeout(`https://edith.xiaohongshu.com${path}`, {
       method: 'POST',
       headers: signed.headers,
       body: signed.body,
-    }, 12000);
+    }, timeoutMs);
   } catch (error) {
     throw new XhsSessionError(error instanceof Error ? error.message : 'Xiaohongshu network error', 'fetch');
   }
@@ -172,7 +173,7 @@ async function searchNotesDetailed(keyword, cookie, maxNotes = 4, options = {}) 
     ],
     geo: '',
     image_formats: ['jpg', 'webp', 'avif'],
-  }, cookie);
+  }, cookie, options);
   return { notes: parseSearchNotes(data, maxNotes), debug: inspectSearchData(data) };
 }
 

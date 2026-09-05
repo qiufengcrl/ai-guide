@@ -574,8 +574,12 @@ async function testXhs(ctx, locale = 'en', keyword = '旅行', userId = null) {
     };
   }
   try {
-    const { notes, debug } = await withXhsRetry(() =>
-      searchNotesDetailed(String(keyword || '旅行').trim() || '旅行', cookie, 4), { cookie });
+    const searchKeyword = String(keyword || '旅行').trim() || '旅行';
+    // TREK settings actions time out at 15s; keep health checks single-shot and fast.
+    const { notes, debug } = await withXhsRetry(
+      () => searchNotesDetailed(searchKeyword, cookie, 4, { timeoutMs: 8000 }),
+      { cookie, maxRetries: 0, wait: false },
+    );
     await writeXhsCookieUpdatedAt(ctx, uid, cookie);
     if (!notes.length) {
       return {
