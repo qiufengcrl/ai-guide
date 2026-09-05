@@ -337,7 +337,113 @@
 
 ---
 
-## 4. 功能对比矩阵（我们 vs 竞品）
+## 4. 小红书稳定性专项（R01–R05）
+
+> 背景：GitHub 竞品调研结论——**没有项目能根治小红书限流**；成熟做法均为降速、排队、退避与降级。Cookie 续期依赖**用户本机**扫码或浏览器读取，无云端无感自动续期方案。  
+> 当前 ai-guide（v1.1.30）：XHS 请求间隔 800ms；遇 461/429 **不重试、直接中断搜索**；geocode 侧已有 CUQPS 指数退避。  
+> 以下五项为**短期可落地**改进，不改整体架构，建议优先于 F01 等多维度搜索（避免加剧限流）。
+
+| 编号 | 功能 | 参考项目 |
+|:----:|------|----------|
+| R01 | XHS 请求退避重试 | [xiaohongshu-cli](https://github.com/NanshineLoong/xiaohongshu-cli) |
+| R02 | 自适应请求间隔 | [xiaohongshu-mcp-readonly](https://github.com/sinmentis/xiaohongshu-mcp-readonly) |
+| R03 | 生成前 Cookie 健康检查 | [travel-planner-skill](https://github.com/ycyliu/travel-planner-skill) |
+| R04 | Cookie 更新时间提示 | [xiaohongshu-cli](https://github.com/NanshineLoong/xiaohongshu-cli) |
+| R05 | 限流降级文案优化 | [travel-planner-skill](https://github.com/ycyliu/travel-planner-skill) |
+
+---
+
+### R01 — XHS 请求退避重试
+
+| 项 | 内容 |
+|----|------|
+| 简述 | 小红书 signed API 遇 461/429/频繁/风控时，按 5s → 10s → 20s 渐进等待后重试，最多 1～2 次；认证失败（300011、Cookie 无效）不重试 |
+| 用户价值 | 偶发限流不再直接导致整次关键词搜索失败 |
+| 改动范围 | `server/index.js`（`runKeywordSearch`、`fetch_guides` 各 XHS 调用点）；`server/xhs/session.js`（可抽 `retryOnRateLimit` 工具） |
+| 复杂度 | 低 |
+| 依赖/风险 | 重试过多会加剧风控；须与 R02 联动限总请求量 |
+| 现状差距 | geocode 已有 `600 * 2^attempt` 退避；XHS 目前遇 461/429 直接 `break` |
+| 建议优先级 | **P0** |
+
+---
+
+### R02 — 自适应请求间隔
+
+| 项 | 内容 |
+|----|------|
+| 简述 | 将固定 `pauseForXhs`（800ms）改为可配置策略：基础间隔 3s；触发 461/429 后临时加倍（如 6s、12s），冷却后恢复；可选少量随机抖动 |
+| 用户价值 | 降低持续触发平台风控的概率，比盲目重试更安全 |
+| 改动范围 | `server/index.js`（`pauseForXhs` → 状态化 throttle）；可选 `trek-plugin.json` 实例级设置 |
+| 复杂度 | 低～中 |
+| 依赖/风险 | 间隔过长会拉长生成时间；参考 xiaohongshu-mcp-readonly 的 30s 对 UX 过重，建议 3～6s 起步 |
+| 参考参数 | readonly MCP：30s + jitter；rednote-analyzer：3s/次、10 次/分钟；xiaohongshu-cli：461 后永久加倍直至冷却 |
+| 建议优先级 | **P0** |
+
+---
+
+### R03 — 生成前 Cookie 健康检查
+
+| 项 | 内容 |
+|----|------|
+| 简述 | 在 `fetch_guides` 阶段、首次调用小红书 signed API 前，复用现有 `testXhs`（最小关键词搜索）探测 Cookie；失败则跳过后续搜索并立即给出可行动 warning |
+| 用户价值 | Cookie 过期时不白等整轮抓取；用户更快知道要去设置页更新 |
+| 改动范围 | `server/index.js`（`advance` / `fetch_guides` 入口）；复用 `testXhs` |
+| 复杂度 | 低 |
+| 依赖/风险 | 多一次探测请求；无 Cookie 且仅用链接/粘贴时可跳过 |
+| 参考 | travel-planner-skill 的 `check_login_status` 前置检查 |
+| 建议优先级 | **P0** |
+
+---
+
+### R04 — Cookie 更新时间提示
+
+| 项 | 内容 |
+|----|------|
+| 简述 | 用户保存/更新 `xhs_cookie` 时记录 `xhs_cookie_updated_at`（user scope）；超过 7 天在生成前 warning「Cookie 可能已过期，建议重新登录小红书后更新」；不阻断流程 |
+| 用户价值 | 主动提醒续期，减少「突然搜不到」的困惑 |
+| 改动范围 | `trek-plugin.json`（可选新 setting 或由服务端写 meta）；`server/index.js` 读写时间戳；设置页 hint |
+| 复杂度 | 低 |
+| 依赖/风险 | 平台 TTL 不固定，7 天仅为经验值；无法真正检测过期，只能提示 |
+| 参考 | xiaohongshu-cli 的 7 天 TTL + 浏览器自动刷新 |
+| 建议优先级 | **P1** |
+
+---
+
+### R05 — 限流降级文案优化
+
+| 项 | 内容 |
+|----|------|
+| 简述 | 统一 461/429/风控类 warning 文案：说明「已跳过/将继续使用链接、粘贴或表单生成」；区分「Cookie 问题」vs「请求过快」vs「平台临时限制」三种场景 |
+| 用户价值 | 用户知道任务未失败，只需稍后重试或更新 Cookie |
+| 改动范围 | `server/xhs/session.js`（`formatXhsWarning`）；`server/index.js`（`runKeywordSearch` 降级分支）；`client/index.html`（warnings 展示，可选） |
+| 复杂度 | 低 |
+| 依赖/风险 | 无 |
+| 现状差距 | 已有分级 warning，但限流时未明确说明降级路径 |
+| 建议优先级 | **P0** |
+
+---
+
+### 竞品限流 / Cookie 对策速查
+
+| 项目 | 限流 | Cookie 刷新 |
+|------|------|-------------|
+| xiaohongshu-mcp-readonly | 排队；间隔 ≥30s + jitter | 本机 `/login` 扫码；`check_login_status` |
+| xiaohongshu-cli | 渐进退避 5→30s；461 后加倍间隔 | 7 天 TTL；从浏览器读 Cookie；`xhs login --qrcode` |
+| rednote-analyzer-mcp | 3s/次，10 次/分钟 | `rednote-login` 浏览器扫码 |
+| travel-planner-skill | 超时重试 ≥2 次 | MCP `get_login_qrcode` |
+| **ai-guide 现状** | 800ms 固定间隔；461 不重试 | 手动粘贴 + `testXhs` |
+
+### 明确不在 R01–R05 范围（中期另议）
+
+| 方案 | 原因 |
+|------|------|
+| 云端无头浏览器自动登录 | 封号与合规风险高；多用户难隔离 |
+| 共享 Cookie 池 | 极易触发风控 |
+| 外接 xiaohongshu-mcp Sidecar | 架构变化大，见 ROADMAP 后续 C2/C3 类方案 |
+
+---
+
+## 5. 功能对比矩阵（我们 vs 竞品）
 
 | 功能 | ai-guide 现状 | 竞品常见 | 建议 |
 |------|:-------------:|:--------:|------|
@@ -358,12 +464,27 @@
 | 实价机票酒店 | ❌ | 少数 | F14 建议不做 |
 | AI 聊天 | ❌ | 少数 | F12 |
 | 逐步审批 | ❌ | 少数 | F15 |
+| XHS 限流退避重试 | 部分（仅 geocode） | 多数有 | R01 |
+| XHS 自适应间隔 | ❌（固定 800ms） | 多数有 | R02 |
+| Cookie 生成前检查 | 部分（testXhs 手动） | 多数有 | R03 |
+| Cookie 过期提醒 | ❌ | xiaohongshu-cli | R04 |
+| 限流降级文案 | 部分 | travel-planner-skill | R05 |
 
 ---
 
-## 5. 建议分期（待你确认）
+## 6. 建议分期（待你确认）
 
 以下为**推荐组合**，非最终排期。请勾选要做的编号。
+
+### 阶段 S — 小红书稳定性（建议先于阶段 A）
+
+| 编号 | 功能 | 建议 |
+|:----:|------|:----:|
+| R01 | XHS 请求退避重试 | ☐ 做 ☐ 不做 ☐ 延后 |
+| R02 | 自适应请求间隔 | ☐ 做 ☐ 不做 ☐ 延后 |
+| R03 | 生成前 Cookie 健康检查 | ☐ 做 ☐ 不做 ☐ 延后 |
+| R04 | Cookie 更新时间提示 | ☐ 做 ☐ 不做 ☐ 延后 |
+| R05 | 限流降级文案优化 | ☐ 做 ☐ 不做 ☐ 延后 |
 
 ### 阶段 A — 信息质量 + 出行实用（建议优先）
 
@@ -402,7 +523,7 @@
 
 ---
 
-## 6. 明确不建议优先做的项
+## 7. 明确不建议优先做的项
 
 | 编号 | 原因 |
 |------|------|
@@ -414,20 +535,21 @@
 
 ---
 
-## 7. 确认方式
+## 8. 确认方式
 
 请任选一种方式回复：
 
-1. **按编号列表**：例如 `F01,F02,F03,F04 做；F14 不做；其余延后`
-2. **按阶段**：例如 `阶段 A 全做，阶段 B 只做 F05+F07，阶段 C 暂不做`
-3. **在 PR 评论**：直接编辑本文档第 5 节勾选后提交
+1. **按编号列表**：例如 `R01–R05 全做；F01,F02,F03,F04 做；F14 不做`
+2. **按阶段**：例如 `阶段 S 全做，阶段 A 全做，阶段 B 只做 F05+F07`
+3. **在 PR 评论**：直接编辑本文档第 6 节勾选后提交
 
 确认后可将选中项拆为 GitHub Issues，并按阶段排入开发。
 
 ---
 
-## 8. 文档维护
+## 9. 文档维护
 
 | 日期 | 变更 |
 |------|------|
 | 2026-09-05 | 初版：基于 GitHub 竞品调研与 v1.1.30 基线 |
+| 2026-09-05 | 新增 §4 小红书稳定性专项 R01–R05；阶段 S 确认清单 |
