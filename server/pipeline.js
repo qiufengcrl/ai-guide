@@ -288,6 +288,110 @@ function remainingXhsNoteSlots(guides, pendingNotes, maxNotes) {
   return Math.max(0, maxNotes - collectXhsNoteIds(guides, pendingNotes).size);
 }
 
+async function mapConcurrent(items, limit, worker) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return [];
+  const results = new Array(list.length);
+  let nextIndex = 0;
+  async function runWorker() {
+    for (;;) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= list.length) return;
+      results[index] = await worker(list[index], index);
+    }
+  }
+  const workers = Math.min(Math.max(1, limit || 1), list.length);
+  await Promise.all(Array.from({ length: workers }, runWorker));
+  return results;
+}
+
+async function resolveCandidateEvidence(candidate, index, intent, searchPlacesFn, options, bias) {
+  const destination = intent.destination;
+  const queries = placeSearchNames(candidate, destination);
+  let lastError = null;
+  for (const query of queries) {
+    try {
+      const result = await searchPlacesFn(query, options);
+      const evidence = result
+        ? evidenceFromSearch(candidate, result, index, destination, bias)
+        : null;
+      if (evidence) return { evidence, query };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  return {
+    evidence: null,
+    query: queries[queries.length - 1] || String(candidate.name || ''),
+    error: lastError,
+  };
+}
+
+function progressForJob(job, locale) {
+  const work = job.work || {};
+  const stage = String(job.stage || '');
+  const intent = job.draft?.intent || {};
+  const destination = String(intent.destination || '').trim();
+
+  if (stage === 'fetch_guides') {
+    const urlTotal = work.urls?.length || 0;
+    if (work.urlIndex < urlTotal) {
+      return message(locale,
+        `正在读取链接 ${work.urlIndex + 1}/${urlTotal}`,
+        `Reading link ${work.urlIndex + 1}/${urlTotal}`);
+    }
+    if (!work.searchAttempted) {
+      return message(locale, '正在搜索小红书攻略…', 'Searching Xiaohongshu guides…');
+    }
+    const pendingTotal = work.pendingNotes?.length || 0;
+    if (work.noteIndex < pendingTotal) {
+      return message(locale,
+        `正在读取攻略 ${work.noteIndex + 1}/${pendingTotal}`,
+        `Reading guide ${work.noteIndex + 1}/${pendingTotal}`);
+    }
+    return message(locale, '正在整理攻略来源…', 'Organizing guide sources…');
+  }
+  if (stage === 'extract') {
+    return message(locale, '正在从攻略提取景点…', 'Extracting places from guides…');
+  }
+  if (stage === 'gather_evidence') {
+    if (!work.bias && !work.biasFailed && destination) {
+      return message(locale, `正在定位「${destination}」…`, `Locating “${destination}”…`);
+    }
+    if (!work.geocodeDone) {
+      const total = work.candidates?.length || 0;
+      return message(locale, `正在匹配地图坐标（${total} 个地点）…`, `Matching map coordinates (${total} places)…`);
+    }
+    if (!work.photosDone && (work.evidence?.length || 0) > 0) {
+      return message(locale, '正在获取景点配图…', 'Fetching place photos…');
+    }
+  }
+  if (stage === 'write_copy' || stage === 'gate' || stage === 'schedule') {
+    return message(locale, '正在排行程…', 'Building the itinerary…');
+  }
+  if (stage === 'ready') {
+    return message(locale, '预览已就绪', 'Preview is ready');
+  }
+  return message(locale, '处理中…', 'Working…');
+}
+
+function progressCounts(job) {
+  const work = job.work || {};
+  const guides = job.draft?.guides || [];
+  const guidesTotal = guides.length
+    + Math.max(0, (work.urls?.length || 0) - (work.urlIndex || 0))
+    + Math.max(0, (work.pendingNotes?.length || 0) - (work.noteIndex || 0));
+  const candidatesTotal = work.candidates?.length || 0;
+  const evidenceDone = work.geocodeDone ? (work.evidence?.length || 0) : 0;
+  return {
+    guidesRead: guides.length,
+    guidesTotal,
+    placesTotal: candidatesTotal,
+    placesResolved: evidenceDone,
+  };
+}
+
 function toCandidate(item, intent, fallbackName) {
   const name = String(fallbackName || item?.name || '').trim();
   return {
@@ -402,6 +506,7 @@ function evidenceFromSearch(candidate, result, index, destination, bias) {
     reservationHint: candidate.reservationTips || (candidate.reservationRequired ? 'Reservation may be required' : ''),
     reason: candidate.reason,
     dayHint: candidate.dayHint,
+    photoUrl: '',
   };
 }
 
@@ -495,6 +600,7 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
       categoryHint: item.categoryHint,
       stayMinutes: item.stayHintMinutes,
       notes: item.reason || item.reservationHint || '',
+      photoUrl: item.photoUrl || '',
       tooFar: false,
       selected: true,
     });
@@ -525,10 +631,8 @@ function publicDraft(job) {
       noteCount: guides.filter((guide) => guide.via === 'search' || guide.via === 'url').length,
     },
     progress: {
-      guidesRead: guides.length,
-      guidesTotal: guides.length
-        + Math.max(0, (job.work?.urls?.length || 0) - (job.work?.urlIndex || 0))
-        + Math.max(0, (job.work?.pendingNotes?.length || 0) - (job.work?.noteIndex || 0)),
+      ...progressCounts(job),
+      message: progressForJob(job, job.payload?.locale || 'en'),
     },
     warnings: draft.warnings || [],
     days: draft.days || [],
@@ -550,6 +654,10 @@ module.exports = {
   truthySetting,
   collectXhsNoteIds,
   remainingXhsNoteSlots,
+  mapConcurrent,
+  resolveCandidateEvidence,
+  progressForJob,
+  progressCounts,
   isZh,
   message,
   normalizeInput,

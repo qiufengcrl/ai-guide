@@ -26,6 +26,7 @@ test('redesign covers the complete planning and preview workflow', () => {
 
   for (const hook of [
     "trek.onContext", "trek.invoke('/prefs'", "trek.invoke('/plan'", "trek.invoke('/commit'",
+    "progress.message", "place-photo", "photoUrl",
     "trek.navigate('/settings?tab=plugins')", "trek.openExternal",
     'renderWarnings', 'renderSources', 'renderDays', 'syncDayState',
     'invokeErrorMessage', 'conflict', 'isTransientInvokeError', 'stillWorking',

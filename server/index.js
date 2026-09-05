@@ -11,8 +11,6 @@ const {
   normalizeCandidates,
   looksLikeShareCard,
   noteDisplayTitle,
-  placeSearchNames,
-  evidenceFromSearch,
   gateAndSchedule,
   publicDraft,
   geoSearchOptions,
@@ -20,6 +18,8 @@ const {
   truthySetting,
   remainingXhsNoteSlots,
   collectXhsNoteIds,
+  mapConcurrent,
+  resolveCandidateEvidence,
 } = require('./pipeline');
 const { fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const {
@@ -31,6 +31,7 @@ const {
   isXhsAuthError,
   isXhsVerificationError,
 } = require('./xhs/session');
+const { getXhsPhoto } = require('./xhs/photos');
 const { searchPlaces } = require('./geo/nominatim');
 
 const JOB_FIELDS = 'id, user_id, status, stage, payload_json, draft_json, work_json, error, committed_trip_id, created_at, updated_at';
@@ -286,6 +287,8 @@ async function advance(job, ctx) {
     job.work.candidateIndex = 0;
     job.work.evidence = [];
     job.work.bias = null;
+    job.work.geocodeDone = false;
+    job.work.photosDone = false;
     job.stage = 'gather_evidence';
     return;
   }
@@ -307,32 +310,41 @@ async function advance(job, ctx) {
       }
       return;
     }
-    if (job.work.candidateIndex < job.work.candidates.length) {
-      const index = job.work.candidateIndex;
-      const candidate = job.work.candidates[index];
-      const queries = placeSearchNames(candidate, job.draft.intent.destination);
-      const queryIndex = Number(job.work.retryQueryIndex) || 0;
-      const query = queries[queryIndex] || String(candidate.name || '');
-      job.work.retryQueryIndex = 0;
-      let result = null;
-      try {
-        result = await searchPlaces(query, geoSearchOptions(ctx.config, { lang: locale, locationBias: job.work.bias || undefined }));
-      } catch (error) {
-        addWarning(job, message(locale,
-          `「${query}」地图检索失败：${error.message}`,
-          `Place search for "${query}" failed: ${error.message}`));
+    if (!job.work.geocodeDone) {
+      const candidates = job.work.candidates || [];
+      const geoOpts = geoSearchOptions(ctx.config, { lang: locale, locationBias: job.work.bias || undefined });
+      const resolved = await mapConcurrent(candidates, 5, (candidate, index) =>
+        resolveCandidateEvidence(candidate, index, job.draft.intent, searchPlaces, geoOpts, job.work.bias));
+      job.work.evidence = [];
+      for (const item of resolved) {
+        if (item?.evidence) {
+          job.work.evidence.push(item.evidence);
+        } else if (item?.query) {
+          addWarning(job, message(locale,
+            `「${item.query}」无法匹配坐标，已跳过`,
+            `"${item.query}" could not be matched to coordinates and was skipped`));
+        }
+        if (item?.error) {
+          addWarning(job, message(locale,
+            `「${item.query || item.error.message}」地图检索失败：${item.error.message}`,
+            `Place search for "${item.query || item.error.message}" failed: ${item.error.message}`));
+        }
       }
-      const evidence = result
-        ? evidenceFromSearch(candidate, result, index, job.draft.intent.destination, job.work.bias)
-        : null;
-      if (evidence) {
-        job.work.evidence.push(evidence);
-        job.work.candidateIndex += 1;
-      } else if (queryIndex + 1 < queries.length) {
-        job.work.retryQueryIndex = queryIndex + 1;
-      } else {
-        addWarning(job, message(locale, `「${query}」无法匹配坐标，已跳过`, `"${query}" could not be matched to coordinates and was skipped`));
-        job.work.candidateIndex += 1;
+      job.work.geocodeDone = true;
+      return;
+    }
+    if (!job.work.photosDone) {
+      job.work.photosDone = true;
+      const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
+      if (cookie && job.work.evidence?.length) {
+        const destination = job.draft.intent.destination || '';
+        await mapConcurrent(job.work.evidence, 3, async (item) => {
+          try {
+            item.photoUrl = await getXhsPhoto(item.name, cookie, destination);
+          } catch {
+            item.photoUrl = '';
+          }
+        });
       }
       return;
     }

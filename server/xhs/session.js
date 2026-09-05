@@ -126,14 +126,15 @@ async function searchNotes(keyword, cookie, maxNotes = 4) {
   return notes;
 }
 
-async function searchNotesDetailed(keyword, cookie, maxNotes = 4) {
+async function searchNotesDetailed(keyword, cookie, maxNotes = 4, options = {}) {
   if (!cookie) throw new XhsSessionError('Xiaohongshu Cookie is empty', 'auth');
+  const sort = options.sort === 'time_descending' ? 'time_descending' : 'general';
   const data = await post('/api/sns/web/v1/search/notes', {
     keyword: String(keyword || '').trim(),
     page: 1,
     page_size: SEARCH_PAGE_SIZE,
     search_id: createSearchId(),
-    sort: 'general',
+    sort,
     note_type: 0,
     ext_flags: [],
     filters: [
@@ -190,6 +191,28 @@ async function fetchSessionNote(item, cookie) {
   return { ...note, via: item.via || 'search' };
 }
 
+function pickCoverImageUrl(noteCard) {
+  const imageList = noteCard?.image_list || noteCard?.imageList || [];
+  const first = imageList[0];
+  if (!first || typeof first !== 'object') return '';
+  const infoList = first.info_list || first.infoList || [];
+  if (Array.isArray(infoList) && infoList.length > 1 && infoList[1]?.url) return String(infoList[1].url);
+  if (Array.isArray(infoList) && infoList[0]?.url) return String(infoList[0].url);
+  return String(first.url_default || first.urlDefault || first.url_pre || first.urlPre || first.url || '');
+}
+
+async function fetchNoteCoverImage(item, cookie) {
+  const data = await post('/api/sns/web/v1/feed', {
+    source_note_id: item.noteId,
+    image_formats: ['jpg', 'webp', 'avif'],
+    extra: { need_body_topic: '0' },
+    xsec_source: item.via === 'search' ? 'pc_search' : 'pc_share',
+    xsec_token: item.xsecToken || '',
+  }, cookie);
+  const noteCard = data?.data?.items?.[0]?.note_card;
+  return pickCoverImageUrl(noteCard);
+}
+
 module.exports = {
   SEARCH_PAGE_SIZE,
   XhsSessionError,
@@ -201,5 +224,6 @@ module.exports = {
   searchNotes,
   searchNotesDetailed,
   fetchSessionNote,
+  fetchNoteCoverImage,
   parseSearchNotes,
 };

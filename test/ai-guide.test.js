@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, destinationSeeds, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message } = require('../server/pipeline');
+const { gateAndSchedule, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, destinationSeeds, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces } = require('../server/geo/nominatim');
@@ -755,4 +755,38 @@ test('remainingXhsNoteSlots 会扣除已有笔记名额', () => {
     [{ noteId: 'c' }],
     4,
   ), 1);
+});
+
+test('mapConcurrent 会并行处理任务', async () => {
+  const order = [];
+  const results = await mapConcurrent([1, 2, 3], 2, async (value) => {
+    order.push(value);
+    return value * 10;
+  });
+  assert.deepEqual(results, [10, 20, 30]);
+  assert.equal(order.length, 3);
+});
+
+test('progressForJob 会返回分阶段进度文案', () => {
+  const job = {
+    stage: 'fetch_guides',
+    payload: { locale: 'zh' },
+    draft: { guides: [], intent: { destination: '京都' } },
+    work: { urls: ['a'], urlIndex: 0, searchAttempted: false, pendingNotes: [], noteIndex: 0 },
+  };
+  assert.match(progressForJob(job, 'zh'), /正在读取链接/);
+  job.work.urlIndex = 1;
+  job.stage = 'extract';
+  assert.match(progressForJob(job, 'zh'), /提取景点/);
+});
+
+test('gateAndSchedule 会保留 photoUrl', () => {
+  const gated = gateAndSchedule(
+    { destination: '京都', dayCount: 1, pace: 'balanced', startDate: null },
+    [{ id: 'ev_1', name: '清水寺', lat: 35, lng: 135, photoUrl: 'https://example.test/photo.jpg', dayHint: 1 }],
+    { maxPlacesPerDay: 6 },
+    'zh',
+    '',
+  );
+  assert.equal(gated.days[0].places[0].photoUrl, 'https://example.test/photo.jpg');
 });
