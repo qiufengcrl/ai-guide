@@ -1222,7 +1222,8 @@
       var checkbox = document.getElementById('xhs-keyword-search');
       if (!field || !checkbox) return;
       field.classList.toggle('hidden', !xhsSearchAllowed);
-      checkbox.checked = Boolean(prefs && prefs.xhsKeywordSearchDefault);
+      checkbox.checked = false;
+      checkbox.disabled = !xhsSearchAllowed;
     }
 
     async function loadPrefs() {
@@ -1230,7 +1231,7 @@
         var prefs = await trek.invoke('/prefs', { method: 'GET' });
         applyXhsSearchPrefs(prefs);
       } catch (_) {
-        applyXhsSearchPrefs({ xhsSearchAllowed: false, xhsKeywordSearchDefault: false });
+        applyXhsSearchPrefs({ xhsSearchAllowed: false });
       }
     }
 
@@ -1640,28 +1641,14 @@
     function renderSources(guides, summary) {
       var root = document.getElementById('sources');
       root.innerHTML = '';
-      document.getElementById('source-count').textContent = String(guides.length);
-      document.getElementById('source-card').classList.remove('hidden');
-
+      var card = document.getElementById('source-card');
       if (!guides.length) {
-        var empty = document.createElement('div');
-        empty.className = 'source-empty';
-        empty.id = 'source-empty';
-        var emptyTitle = document.createElement('strong');
-        emptyTitle.textContent = t('sourcesEmpty');
-        var emptyHint = document.createElement('span');
-        emptyHint.textContent = t('sourcesEmptyHint');
-        empty.appendChild(emptyTitle);
-        empty.appendChild(emptyHint);
-        if (summary && summary.query) {
-          var query = document.createElement('span');
-          query.id = 'source-query';
-          query.textContent = t('sourcesQuery') + '：' + summary.query;
-          empty.appendChild(query);
-        }
-        root.appendChild(empty);
+        card.classList.add('hidden');
+        document.getElementById('source-count').textContent = '0';
         return;
       }
+      document.getElementById('source-count').textContent = String(guides.length);
+      card.classList.remove('hidden');
 
       guides.forEach(function (guide) {
         var row = document.createElement(guide.url ? 'button' : 'div');

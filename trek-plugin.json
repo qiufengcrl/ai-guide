@@ -1,7 +1,7 @@
 {
   "id": "ai-guide",
   "name": "AI 攻略",
-  "version": "1.1.15",
+  "version": "1.1.16",
   "apiVersion": 1,
   "author": "Your Name",
   "description": "把小红书旅行攻略转换为可编辑的 TREK 地图行程",
@@ -68,7 +68,7 @@
       "input_type": "select",
       "scope": "instance",
       "default": "false",
-      "hint": "关闭后，用户无法在生成页启用关键词搜索（仍可使用链接与粘贴正文）",
+      "hint": "关闭后，生成页不会出现关键词搜索选项，用户也无法通过接口开启",
       "options": [
         { "value": "true", "label": "允许" },
         { "value": "false", "label": "不允许" }
@@ -89,18 +89,6 @@
       "scope": "instance",
       "secret": true,
       "hint": "与 TREK 的 PLACES_API_KEY 一致；配合上面的地址使用高德/Google Places 兼容 bridge"
-    },
-    {
-      "key": "xhs_keyword_search",
-      "label": "默认启用关键词搜索",
-      "input_type": "select",
-      "scope": "user",
-      "default": "false",
-      "hint": "开启后，生成页会默认勾选「尝试小红书关键词搜索」。仍可在每次生成时手动开关。",
-      "options": [
-        { "value": "true", "label": "默认启用" },
-        { "value": "false", "label": "默认关闭" }
-      ]
     },
     {
       "key": "xhs_cookie",

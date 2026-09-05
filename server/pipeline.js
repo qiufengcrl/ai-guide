@@ -83,11 +83,11 @@ function settings(config) {
   };
 }
 
-function resolveXhsKeywordSearch(bodyValue, userSetting) {
+function resolveXhsKeywordSearch(bodyValue) {
   if (bodyValue !== undefined && bodyValue !== null && bodyValue !== '') {
     return truthySetting(bodyValue);
   }
-  return truthySetting(userSetting);
+  return false;
 }
 
 function geoSearchOptions(config, extra = {}) {

@@ -162,7 +162,7 @@ async function advance(job, ctx) {
         || (work.urls || []).length > 0;
       if (hasUserSources) return;
       const wantsKeywordSearch = limits.xhsEnabled
-        && resolveXhsKeywordSearch(job.payload.xhsKeywordSearch, await ctx.settings.get('xhs_keyword_search'));
+        && resolveXhsKeywordSearch(job.payload.xhsKeywordSearch);
       if (wantsKeywordSearch && cookie && job.draft.intent.destination) {
         const queries = (job.draft.intent.searchQueries || [job.draft.intent.guideQuery]).slice(0, 2);
         let lastError = null;
@@ -376,10 +376,8 @@ module.exports = definePlugin({
       method: 'GET', path: '/prefs', auth: true,
       async handler(req, ctx) {
         const limits = settings(ctx.config);
-        const userDefault = await ctx.settings.get('xhs_keyword_search');
         return response(200, {
           xhsSearchAllowed: limits.xhsEnabled,
-          xhsKeywordSearchDefault: resolveXhsKeywordSearch(undefined, userDefault),
         });
       },
     },

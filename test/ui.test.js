@@ -29,7 +29,7 @@ test('redesign covers the complete planning and preview workflow', () => {
     "trek.navigate('/settings?tab=plugins')", "trek.openExternal",
     'renderWarnings', 'renderSources', 'renderDays', 'syncDayState',
     'invokeErrorMessage', 'conflict', 'isTransientInvokeError', 'stillWorking',
-    'sourceSummary', 'sourcesEmpty', 'source-empty',
+    'sourceSummary', 'sourcesEmpty',
   ]) assert.ok(appScript.includes(hook), hook);
   assert.doesNotMatch(appScript, /source-card'\)\.classList\.toggle\('hidden', guides\.length === 0\)/);
 });

@@ -90,9 +90,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.ok(manifest.permissions.includes('http:outbound:trek-amap-bridge'));
   const xhsEnabled = manifest.settings.find((field) => field.key === 'xhs_enabled');
   assert.equal(xhsEnabled.default, 'false');
-  const xhsKeyword = manifest.settings.find((field) => field.key === 'xhs_keyword_search');
-  assert.equal(xhsKeyword.scope, 'user');
-  assert.equal(xhsKeyword.default, 'false');
+  assert.ok(!manifest.settings.some((field) => field.key === 'xhs_keyword_search'));
   const cookieFields = manifest.settings.filter((field) => field.key === 'xhs_cookie');
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
 });
@@ -622,21 +620,20 @@ test('Places API bridge 会映射 Google 兼容响应为 WGS-84 坐标', async (
 });
 
 test('关键词搜索默认关闭，需显式开启', () => {
-  assert.equal(resolveXhsKeywordSearch(undefined, undefined), false);
-  assert.equal(resolveXhsKeywordSearch(false, 'true'), false);
-  assert.equal(resolveXhsKeywordSearch(true, false), true);
-  assert.equal(resolveXhsKeywordSearch(undefined, 'true'), true);
+  assert.equal(resolveXhsKeywordSearch(undefined), false);
+  assert.equal(resolveXhsKeywordSearch(false), false);
+  assert.equal(resolveXhsKeywordSearch(true), true);
   assert.equal(truthySetting('false'), false);
 });
 
-test('Prefs 接口返回关键词搜索开关状态', async () => {
-  const allowed = buildHost({ config: { xhs_enabled: true }, userSettings: { xhs_keyword_search: 'true' } });
+test('Prefs 接口返回管理员是否允许关键词搜索', async () => {
+  const allowed = buildHost({ config: { xhs_enabled: true } });
   await allowed.app.load();
   const res = await allowed.app.route({ method: 'GET', path: '/prefs' }, {});
-  assert.deepEqual(res.body, { xhsSearchAllowed: true, xhsKeywordSearchDefault: true });
+  assert.deepEqual(res.body, { xhsSearchAllowed: true });
 
-  const blocked = buildHost({ config: { xhs_enabled: false }, userSettings: { xhs_keyword_search: 'true' } });
+  const blocked = buildHost({ config: { xhs_enabled: false } });
   await blocked.app.load();
   const denied = await blocked.app.route({ method: 'GET', path: '/prefs' }, {});
-  assert.deepEqual(denied.body, { xhsSearchAllowed: false, xhsKeywordSearchDefault: true });
+  assert.deepEqual(denied.body, { xhsSearchAllowed: false });
 });
