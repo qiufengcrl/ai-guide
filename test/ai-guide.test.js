@@ -25,6 +25,7 @@ const {
   BASE_INTERVAL_MS,
   MAX_INTERVAL_MS,
 } = require('../server/xhs/throttle');
+const { readXhsCookieUpdatedAt } = require('../server/xhs/freshness');
 
 setGeoThrottleInterval(0);
 setXhsThrottleForTests({ baseIntervalMs: 0, jitterMs: 0, backoffDelayMs: 0 });
@@ -112,6 +113,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
 function memoryDb() {
   const jobs = new Map();
   const userMeta = new Map();
+  const cookieClock = new Map();
   const api = {
     async migrate() { return { applied: true }; },
     async exec(sql, ...args) {
@@ -146,6 +148,23 @@ function memoryDb() {
         const existed = userMeta.delete(args[0]);
         return { changes: existed ? 1 : 0 };
       }
+      if (/INSERT INTO xhs_cookie_clock/i.test(sql)) {
+        const [fp, userId, at] = args;
+        const prev = cookieClock.get(fp) || {};
+        cookieClock.set(fp, {
+          fp,
+          user_id: userId != null ? userId : prev.user_id,
+          updated_at: at,
+        });
+        return { changes: 1 };
+      }
+      if (/DELETE FROM xhs_cookie_clock/i.test(sql)) {
+        let changes = 0;
+        for (const [fp, row] of cookieClock) {
+          if (row.user_id === args[0]) { cookieClock.delete(fp); changes += 1; }
+        }
+        return { changes };
+      }
       throw new Error(`Unexpected exec: ${sql}`);
     },
     async query(sql, ...args) {
@@ -162,6 +181,10 @@ function memoryDb() {
       if (sql.includes('WHERE user_id = ? ORDER BY created_at')) {
         return rows.filter((row) => row.user_id === args[0]).sort((a, b) => a.created_at - b.created_at);
       }
+      if (/FROM xhs_cookie_clock/i.test(sql)) {
+        const row = cookieClock.get(args[0]);
+        return row ? [row] : [];
+      }
       if (/FROM user_meta/i.test(sql)) {
         const row = userMeta.get(args[0]);
         return row ? [row] : [];
@@ -171,6 +194,7 @@ function memoryDb() {
     async tx() { return { results: [] }; },
     jobs,
     userMeta,
+    cookieClock,
   };
   return api;
 }
@@ -197,6 +221,7 @@ function buildHost(options = {}) {
   const db = memoryDb();
   host.ctx.db = db;
   host.userlessCtx.db = db;
+  host.ctx.user = { id: 7 };
   const originalCreate = host.ctx.trips.create.bind(host.ctx.trips);
   host.ctx.trips.create = async (input) => {
     const trip = await originalCreate(input);
@@ -1114,6 +1139,8 @@ test('xhsThrottle 基础间隔与 penalize 加倍，三次成功后恢复', asyn
   try {
     assert.equal(xhsThrottle.intervalMs, 3000);
     await xhsThrottle.wait();
+    assert.equal(sleeps.length, 0);
+    await xhsThrottle.wait();
     assert.equal(sleeps[0], 3000);
     xhsThrottle.penalize();
     assert.equal(xhsThrottle.intervalMs, 6000);
@@ -1202,22 +1229,37 @@ test('Cookie 超过 7 天给出非阻断 warning', async () => {
   assert.ok(state.warnings.some((warning) => /超过 7 天/.test(warning)));
   assert.ok(state.days.flatMap((day) => day.places).length >= 1);
   assert.ok(!state.warnings.some((warning) => /中断/.test(warning) && /失败/.test(warning)));
+
+  const enFixture = buildHost({
+    userSettings: {
+      xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session`,
+      xhs_cookie_updated_at: String(eightDaysAgo),
+    },
+  });
+  const { state: enState } = await makeReady(enFixture, { destination: '京都', locale: 'en' }, xhsFallback);
+  assert.ok(enState.warnings.some((warning) => /more than 7 days/i.test(warning)));
 });
 
 test('限流降级文案区分认证与请求过快（中英），并说明继续/跳过搜索', () => {
-  const authZh = formatXhsWarning(new XhsSessionError('signed session', 'auth'), 'zh', message);
-  const authEn = formatXhsWarning(new XhsSessionError('signed session', 'auth'), 'en', message);
+  const authZh = formatXhsWarning(new XhsSessionError('signed session', 'auth'), 'zh', message, { scene: 'search' });
+  const authEn = formatXhsWarning(new XhsSessionError('signed session', 'auth'), 'en', message, { scene: 'search' });
   assert.match(authZh, /【认证失败】/);
   assert.match(authZh, /插件设置/);
+  assert.match(authZh, /跳过搜索/);
   assert.match(authEn, /【Auth failed】/);
   assert.match(authEn, /plugin settings/i);
+  assert.match(authEn, /search was skipped/i);
 
-  const rateZh = formatXhsWarning(new XhsSessionError('Xiaohongshu returned 429', 'fetch'), 'zh', message);
-  const rateEn = formatXhsWarning(new XhsSessionError('Xiaohongshu returned 429', 'fetch'), 'en', message);
+  const rateZh = formatXhsWarning(new XhsSessionError('Xiaohongshu returned 429', 'fetch'), 'zh', message, { scene: 'search' });
+  const rateEn = formatXhsWarning(new XhsSessionError('Xiaohongshu returned 429', 'fetch'), 'en', message, { scene: 'search' });
   assert.match(rateZh, /【请求过快】/);
   assert.match(rateZh, /跳过搜索|继续使用/);
   assert.match(rateEn, /【Rate limited】/);
   assert.match(rateEn, /search was skipped|continu/i);
+
+  const signedZh = formatXhsWarning(new XhsSessionError('Xiaohongshu returned 429', 'fetch'), 'zh', message, { scene: 'signed' });
+  assert.match(signedZh, /【请求过快】/);
+  assert.doesNotMatch(signedZh, /已跳过搜索/);
 
   const verifyZh = formatXhsDegradedWarning(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification'), 'zh', message);
   const verifyEn = formatXhsDegradedWarning(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification'), 'en', message);
@@ -1245,8 +1287,106 @@ test('关键词搜索遇 429 会退避重试并降级继续表单路径', async 
     locale: 'zh',
   }, rateFallback);
   assert.equal(state.status, 'ready');
-  assert.ok(edithCalls >= 2);
+  assert.equal(edithCalls, 3);
   assert.ok(state.warnings.some((warning) => /请求过快|跳过搜索|继续使用/.test(warning)));
   assert.ok(state.days.flatMap((day) => day.places).length >= 1);
+});
+
+test('xhsThrottle penalize 按 Cookie 隔离，不影响其他用户', () => {
+  setXhsThrottleForTests({
+    baseIntervalMs: BASE_INTERVAL_MS,
+    maxIntervalMs: MAX_INTERVAL_MS,
+    jitterMs: 0,
+    backoffDelayMs: 0,
+  });
+  try {
+    const cookieA = `a1=${'a'.repeat(52)}; web_session=user-a`;
+    const cookieB = `a1=${'b'.repeat(52)}; web_session=user-b`;
+    xhsThrottle.penalize(cookieA);
+    assert.equal(xhsThrottle.intervalMsFor(cookieA), 6000);
+    assert.equal(xhsThrottle.intervalMsFor(cookieB), 3000);
+  } finally {
+    restoreXhsThrottle();
+  }
+});
+
+test('readXhsCookieUpdatedAt 取 settings 与 DB 的较新值', async () => {
+  const eightDaysAgo = Date.now() - (8 * 24 * 60 * 60 * 1000);
+  const fresh = Date.now();
+  const ctx = {
+    settings: { async get() { return String(eightDaysAgo); } },
+    db: { async query() { return [{ xhs_cookie_updated_at: fresh }]; } },
+  };
+  assert.equal(await readXhsCookieUpdatedAt(ctx, 7, ''), fresh);
+});
+
+test('设置页 testXhs 成功会写入 Cookie 时间戳', async () => {
+  const fixture = buildHost({
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+  });
+  await fixture.app.load();
+  const original = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() {
+          return {
+            success: true,
+            data: {
+              items: [{
+                model_type: 'note',
+                id: '64f000000000000000000002',
+                xsec_token: 'tok',
+                note_card: { display_title: '旅行' },
+              }],
+            },
+          };
+        },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  try {
+    const result = await fixture.app.action('testXhs');
+    assert.equal(result.ok, true);
+    assert.ok(Number(fixture.db.userMeta.get(7)?.xhs_cookie_updated_at) > 0);
+  } finally {
+    global.fetch = original;
+  }
+});
+
+test('settings 旧时间戳不会盖住健康检查写入的新值', async () => {
+  const eightDaysAgo = Date.now() - (8 * 24 * 60 * 60 * 1000);
+  const fixture = buildHost({
+    config: { xhs_enabled: true },
+    userSettings: {
+      xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session`,
+      xhs_cookie_updated_at: String(eightDaysAgo),
+    },
+  });
+  const xhsFallback = (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() { return { success: true, data: { items: [] } }; },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  const first = await makeReady(fixture, {
+    destination: '京都',
+    locale: 'zh',
+    xhsKeywordSearch: true,
+  }, xhsFallback);
+  assert.ok(first.state.warnings.some((warning) => /超过 7 天/.test(warning)));
+  assert.ok(Number(fixture.db.userMeta.get(7)?.xhs_cookie_updated_at) > eightDaysAgo);
+
+  const second = await makeReady(fixture, { destination: '京都', locale: 'zh' }, xhsFallback);
+  assert.ok(!second.state.warnings.some((warning) => /超过 7 天/.test(warning)));
 });
 

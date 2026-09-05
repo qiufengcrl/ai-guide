@@ -1,6 +1,6 @@
 const { fetchWithTimeout, fetchPublicNote, exploreNoteUrl } = require('./url');
 const { createSearchId, createSignedPost } = require('./signature');
-const { isXhsRateLimitError } = require('./throttle');
+const { isXhsRateLimitError, withXhsRetry } = require('./throttle');
 
 const SEARCH_PAGE_SIZE = 20;
 
@@ -45,22 +45,35 @@ function isXhsVerificationError(error) {
   return /461|471|verification/i.test(String(error?.message || error || ''));
 }
 
-function formatXhsWarning(error, locale, messageFn) {
+function degradedSuffix(scene, locale, messageFn) {
+  if (scene === 'search') {
+    return messageFn(locale,
+      '已跳过搜索，继续使用链接、粘贴或表单生成。',
+      'Search was skipped; continuing with links, pasted text, or the form.');
+  }
+  return messageFn(locale,
+    '已继续使用链接、粘贴或表单生成。',
+    'Planning continued with links, pasted text, or the form.');
+}
+
+function formatXhsWarning(error, locale, messageFn, options = {}) {
   const text = error instanceof Error ? error.message : String(error || '');
+  const scene = options.scene || 'signed';
+  const suffix = degradedSuffix(scene, locale, messageFn);
   if (isXhsAuthError(error)) {
     return messageFn(locale,
-      '【认证失败】小红书 Cookie 无效、不完整或已过期，请在插件设置中更新 Cookie。已跳过搜索，继续使用链接、粘贴或表单生成。',
-      '【Auth failed】Your Xiaohongshu Cookie is invalid, incomplete, or expired. Update it in plugin settings. Search was skipped; continuing with links, pasted text, or the form.');
+      `【认证失败】小红书 Cookie 无效、不完整或已过期，请在插件设置中更新 Cookie。${suffix}`,
+      `【Auth failed】Your Xiaohongshu Cookie is invalid, incomplete, or expired. Update it in plugin settings. ${suffix}`);
   }
   if (isXhsVerificationError(error) || /风控/.test(text)) {
     return messageFn(locale,
-      '【需要验证】小红书要求验证码或触发风控（461）。请在本机浏览器登录后更新 Cookie。已降级继续，使用链接、粘贴或表单生成。',
-      '【Verification required】Xiaohongshu requested captcha or risk control (461). Log in locally and update your Cookie. Degraded and continuing with links, pasted text, or the form.');
+      `【需要验证】小红书要求验证码或触发风控（461）。请在本机浏览器登录后更新 Cookie。已降级继续。${suffix}`,
+      `【Verification required】Xiaohongshu requested captcha or risk control (461). Log in locally and update your Cookie. Degraded and continuing. ${suffix}`);
   }
   if (isXhsRateLimitError(error) || /429|频繁|cuqps|too many requests|rate limit/i.test(text)) {
     return messageFn(locale,
-      '【请求过快】小红书暂时限流。请稍后重试关键词搜索；已跳过搜索，继续使用链接、粘贴或表单生成。',
-      '【Rate limited】Xiaohongshu throttled this request. Try keyword search later; search was skipped and planning continued with links, pasted text, or the form.');
+      `【请求过快】小红书暂时限流。请稍后重试关键词搜索。${suffix}`,
+      `【Rate limited】Xiaohongshu throttled this request. Try keyword search later. ${suffix}`);
   }
   return messageFn(locale, `小红书请求失败：${text}`, `Xiaohongshu request failed: ${text}`);
 }
@@ -174,15 +187,19 @@ function inspectSearchData(data) {
   };
 }
 
+async function fetchSignedFeed(item, cookie) {
+  return post('/api/sns/web/v1/feed', {
+    source_note_id: item.noteId,
+    image_formats: ['jpg', 'webp', 'avif'],
+    extra: { need_body_topic: '1' },
+    xsec_source: 'pc_search',
+    xsec_token: item.xsecToken || '',
+  }, cookie);
+}
+
 async function fetchSessionNote(item, cookie) {
   try {
-    const data = await post('/api/sns/web/v1/feed', {
-      source_note_id: item.noteId,
-      image_formats: ['jpg', 'webp', 'avif'],
-      extra: { need_body_topic: '1' },
-      xsec_source: 'pc_search',
-      xsec_token: item.xsecToken || '',
-    }, cookie);
+    const data = await withXhsRetry(() => fetchSignedFeed(item, cookie), { cookie });
     const note = data?.data?.items?.[0]?.note_card;
     if (note && (note.desc || note.display_title)) {
       return {
@@ -194,7 +211,12 @@ async function fetchSessionNote(item, cookie) {
       };
     }
   } catch (error) {
-    if (isXhsAuthError(error) || isXhsVerificationError(error)) throw error;
+    if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+      if (isXhsRateLimitError(error) && item.url) {
+        try { error.fallbackNote = await fetchPublicNote(item.url); } catch { /* keep signed error */ }
+      }
+      throw error;
+    }
     // Public SSR is the intentional detail fallback for fetch/network failures.
   }
   const note = await fetchPublicNote(item.url);

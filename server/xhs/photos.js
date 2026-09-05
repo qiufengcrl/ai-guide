@@ -1,5 +1,5 @@
-const { searchNotesDetailed, fetchNoteCoverImage } = require('./session');
-const { withXhsRetry } = require('./throttle');
+const { searchNotesDetailed, fetchNoteCoverImage, isXhsAuthError, isXhsVerificationError } = require('./session');
+const { withXhsRetry, xhsThrottle, isXhsRateLimitError } = require('./throttle');
 
 const PHOTO_CACHE_MAX = 256;
 const PHOTO_CACHE_HIT_TTL_MS = 6 * 60 * 60 * 1000;
@@ -34,13 +34,23 @@ async function getXhsPhoto(name, cookie, destination = '') {
   const cached = cacheGet(cacheKey);
   if (cached !== undefined) return cached;
 
+  if (xhsThrottle.isSignedBlocked(cookie)) return '';
+
   let url = '';
   try {
     const query = `${label} 风景`;
-    const { notes } = await withXhsRetry(() => searchNotesDetailed(query, cookie, 1, { sort: 'time_descending' }));
+    const { notes } = await withXhsRetry(
+      () => searchNotesDetailed(query, cookie, 1, { sort: 'time_descending' }),
+      { cookie, wait: false },
+    );
     const item = notes[0];
-    if (item) url = await withXhsRetry(() => fetchNoteCoverImage(item, cookie));
-  } catch {
+    if (item) {
+      url = await withXhsRetry(() => fetchNoteCoverImage(item, cookie), { cookie, wait: false });
+    }
+  } catch (error) {
+    if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+      xhsThrottle.markSignedBlocked(cookie);
+    }
     url = '';
   }
   cachePut(cacheKey, url);

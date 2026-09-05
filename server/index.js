@@ -36,52 +36,35 @@ const {
   isXhsAuthError,
   isXhsVerificationError,
 } = require('./xhs/session');
-const { withXhsRetry, xhsThrottle } = require('./xhs/throttle');
+const { withXhsRetry, xhsThrottle, isXhsRateLimitError } = require('./xhs/throttle');
+const {
+  XHS_COOKIE_STALE_MS,
+  resolveActingUserId,
+  readXhsCookieUpdatedAt,
+  writeXhsCookieUpdatedAt,
+} = require('./xhs/freshness');
 const { getXhsPhoto } = require('./xhs/photos');
 const { searchPlaces } = require('./geo/nominatim');
 
 const JOB_FIELDS = 'id, user_id, status, stage, payload_json, draft_json, work_json, error, committed_trip_id, created_at, updated_at';
 const ticks = new Map();
 const JOB_STALE_MS = 30 * 60 * 1000;
-const XHS_COOKIE_STALE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const json = (value, fallback) => {
   try { return JSON.parse(String(value || '')); } catch { return fallback; }
 };
 const response = (status, body) => ({ status, headers: { 'content-type': 'application/json' }, body });
 
-async function readXhsCookieUpdatedAt(ctx, userId) {
-  const fromSettings = Number(await ctx.settings.get('xhs_cookie_updated_at'));
-  if (Number.isFinite(fromSettings) && fromSettings > 0) return fromSettings;
-  if (userId == null) return 0;
-  try {
-    const rows = await ctx.db.query('SELECT xhs_cookie_updated_at FROM user_meta WHERE user_id = ?', userId);
-    return Number(rows[0]?.xhs_cookie_updated_at) || 0;
-  } catch {
-    return 0;
-  }
-}
-
-async function writeXhsCookieUpdatedAt(ctx, userId, at = Date.now()) {
-  const stamp = String(at);
-  if (typeof ctx.settings?.set === 'function') {
-    try { await ctx.settings.set('xhs_cookie_updated_at', stamp); } catch { /* SDK may be read-only */ }
-  }
-  if (userId == null) return;
-  try {
-    await ctx.db.exec(
-      'INSERT INTO user_meta (user_id, xhs_cookie_updated_at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET xhs_cookie_updated_at = excluded.xhs_cookie_updated_at',
-      userId,
-      at,
-    );
-  } catch {
-    // Health check / testXhs should not fail because meta storage is unavailable.
-  }
+function blockSignedXhs(work, cookie) {
+  if (work) work.xhsSignedApiBlocked = true;
+  if (cookie) xhsThrottle.markSignedBlocked(cookie);
 }
 
 async function warnIfXhsCookieStale(job, ctx, cookie, locale) {
-  if (!cookie) return;
-  const updatedAt = await readXhsCookieUpdatedAt(ctx, job.userId);
+  const work = job.work || {};
+  if (!cookie || work.xhsCookieAgeChecked) return;
+  work.xhsCookieAgeChecked = true;
+  const updatedAt = await readXhsCookieUpdatedAt(ctx, job.userId, cookie);
   if (!updatedAt) return;
   if (Date.now() - updatedAt <= XHS_COOKIE_STALE_MS) return;
   addWarning(job, message(locale,
@@ -95,13 +78,13 @@ async function ensureXhsSignedAccess(job, work, cookie, locale, ctx) {
   if (work.xhsHealthChecked) return true;
   work.xhsHealthChecked = true;
   try {
-    await withXhsRetry(() => searchNotesDetailed('旅行', cookie, 1));
-    await writeXhsCookieUpdatedAt(ctx, job.userId);
+    await withXhsRetry(() => searchNotesDetailed('旅行', cookie, 1), { cookie });
+    await writeXhsCookieUpdatedAt(ctx, job.userId, cookie);
     return true;
   } catch (error) {
-    addWarning(job, formatXhsWarning(error, locale, message));
-    if (isXhsAuthError(error) || isXhsVerificationError(error)) {
-      work.xhsSignedApiBlocked = true;
+    addWarning(job, formatXhsWarning(error, locale, message, { scene: 'search' }));
+    if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+      blockSignedXhs(work, cookie);
       return false;
     }
     return true;
@@ -212,7 +195,7 @@ async function runKeywordSearch(job, work, cookie, limits, locale, ctx) {
   let lastError = null;
   for (const query of queries) {
     try {
-      const { notes: automatic } = await withXhsRetry(() => searchNotesDetailed(query, cookie, remaining));
+      const { notes: automatic } = await withXhsRetry(() => searchNotesDetailed(query, cookie, remaining), { cookie });
       work.lastSearchQuery = query;
       work.lastSearchCount = automatic.length;
       if (automatic.length) {
@@ -226,15 +209,17 @@ async function runKeywordSearch(job, work, cookie, limits, locale, ctx) {
       }
     } catch (error) {
       lastError = error;
-      if (isXhsAuthError(error) || isXhsVerificationError(error)) break;
-      if (/461|429|频繁|风控/.test(String(error.message || ''))) break;
+      if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+        blockSignedXhs(work, cookie);
+        break;
+      }
     }
   }
 
   const added = work.pendingNotes.length - beforePending;
   if (added > 0) return;
   if (lastError) {
-    addWarning(job, formatXhsWarning(lastError, locale, message));
+    addWarning(job, formatXhsWarning(lastError, locale, message, { scene: 'search' }));
     return;
   }
   if (!hasUserSources) {
@@ -283,7 +268,7 @@ async function advance(job, ctx) {
           if (!(await ensureXhsSignedAccess(job, work, cookie, locale, ctx))) return;
           const remaining = remainingXhsNoteSlots(job.draft.guides, work.pendingNotes, limits.maxNotes);
           const seen = collectXhsNoteIds(job.draft.guides, work.pendingNotes);
-          for (const item of await withXhsRetry(() => searchNotes(keyword, cookie, remaining || limits.maxNotes))) {
+          for (const item of await withXhsRetry(() => searchNotes(keyword, cookie, remaining || limits.maxNotes), { cookie })) {
             if (seen.has(item.noteId) || seen.size >= limits.maxNotes) continue;
             seen.add(item.noteId);
             work.pendingNotes.push(item);
@@ -291,7 +276,7 @@ async function advance(job, ctx) {
         } else {
           const host = (() => { try { return new URL(value).hostname; } catch { return ''; } })();
           if (isShortLinkHost(host) && !work.resolvedNote) {
-            await xhsThrottle.wait();
+            await xhsThrottle.wait(cookie);
             work.resolvedNote = await resolveNoteUrl(value);
             return;
           }
@@ -301,7 +286,7 @@ async function advance(job, ctx) {
           work.urlIndex += 1;
           let note;
           try {
-            await xhsThrottle.wait();
+            await xhsThrottle.wait(cookie);
             note = await fetchPublicNoteFromResolved(resolved);
           } catch (publicError) {
             const noteId = publicError.noteId || resolved.noteId || noteIdFromUrl(resolved.url || value);
@@ -326,10 +311,13 @@ async function advance(job, ctx) {
         work.resolvedNote = null;
         if (!consumed) work.urlIndex += 1;
         const detail = error instanceof Error ? error.message : String(error || '');
-        const warning = error?.name === 'XhsSessionError' || isXhsAuthError(error) || isXhsVerificationError(error)
-          ? formatXhsWarning(error, locale, message)
+        const warning = error?.name === 'XhsSessionError' || isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)
+          ? formatXhsWarning(error, locale, message, { scene: 'signed' })
           : message(locale, `链接读取失败：${detail}`, `Could not read link: ${detail}`);
         addWarning(job, warning);
+        if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+          blockSignedXhs(work, cookie);
+        }
       }
       return;
     }
@@ -345,7 +333,7 @@ async function advance(job, ctx) {
       }
       const item = work.pendingNotes[work.noteIndex++];
       try {
-        const note = await withXhsRetry(() => fetchSessionNote(item, cookie));
+        const note = await fetchSessionNote(item, cookie);
         job.draft.guides.push({
           ...note,
           id: `g_${job.draft.guides.length + 1}`,
@@ -354,7 +342,20 @@ async function advance(job, ctx) {
           text: note.text.slice(0, 4000),
         });
       } catch (error) {
-        addWarning(job, formatXhsWarning(error, locale, message));
+        if (error.fallbackNote) {
+          job.draft.guides.push({
+            ...error.fallbackNote,
+            id: `g_${job.draft.guides.length + 1}`,
+            via: item.via || error.fallbackNote.via || 'search',
+            title: noteDisplayTitle(error.fallbackNote, message(locale, '小红书笔记', 'Xiaohongshu note')),
+            text: String(error.fallbackNote.text || '').slice(0, 4000),
+          });
+        }
+        addWarning(job, formatXhsWarning(error, locale, message, { scene: 'signed' }));
+        if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+          blockSignedXhs(work, cookie);
+          work.noteIndex = work.pendingNotes.length;
+        }
       }
       return;
     }
@@ -542,6 +543,7 @@ async function advance(job, ctx) {
 
 async function testXhs(ctx, locale = 'en', keyword = '旅行', userId = null) {
   const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
+  const uid = resolveActingUserId(ctx, userId);
   if (!cookie) {
     return {
       ok: false,
@@ -550,7 +552,8 @@ async function testXhs(ctx, locale = 'en', keyword = '旅行', userId = null) {
   }
   try {
     const { notes, debug } = await withXhsRetry(() =>
-      searchNotesDetailed(String(keyword || '旅行').trim() || '旅行', cookie, 4));
+      searchNotesDetailed(String(keyword || '旅行').trim() || '旅行', cookie, 4), { cookie });
+    await writeXhsCookieUpdatedAt(ctx, uid, cookie);
     if (!notes.length) {
       return {
         ok: false,
@@ -559,7 +562,6 @@ async function testXhs(ctx, locale = 'en', keyword = '旅行', userId = null) {
         message: message(locale, `小红书会话可用，但「${keyword}」没有搜到笔记`, `Session works, but "${keyword}" returned no notes`),
       };
     }
-    await writeXhsCookieUpdatedAt(ctx, userId);
     return {
       ok: true,
       count: notes.length,
@@ -567,7 +569,7 @@ async function testXhs(ctx, locale = 'en', keyword = '旅行', userId = null) {
       message: message(locale, `小红书会话可用，搜到 ${notes.length} 篇`, `Xiaohongshu session is available (${notes.length} notes)`),
     };
   } catch (error) {
-    return { ok: false, message: formatXhsWarning(error, locale, message) };
+    return { ok: false, message: formatXhsWarning(error, locale, message, { scene: 'search' }) };
   }
 }
 
@@ -593,6 +595,11 @@ module.exports = definePlugin({
     await ctx.db.migrate('003_user_meta', `CREATE TABLE IF NOT EXISTS user_meta (
       user_id INTEGER PRIMARY KEY,
       xhs_cookie_updated_at INTEGER
+    )`);
+    await ctx.db.migrate('004_xhs_cookie_clock', `CREATE TABLE IF NOT EXISTS xhs_cookie_clock (
+      fp TEXT PRIMARY KEY,
+      user_id INTEGER,
+      updated_at INTEGER NOT NULL
     )`);
   },
   routes: [
@@ -782,6 +789,7 @@ module.exports = definePlugin({
   async deleteUserData({ userId }, ctx) {
     await ctx.db.exec('DELETE FROM jobs WHERE user_id = ?', userId);
     await ctx.db.exec('DELETE FROM user_meta WHERE user_id = ?', userId);
+    await ctx.db.exec('DELETE FROM xhs_cookie_clock WHERE user_id = ?', userId);
   },
   async exportUserData({ userId }, ctx) {
     const rows = await ctx.db.query(`SELECT ${JOB_FIELDS} FROM jobs WHERE user_id = ? ORDER BY created_at`, userId);

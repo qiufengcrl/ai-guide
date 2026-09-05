@@ -5,6 +5,9 @@ const { test } = require('node:test');
 const { searchNotes, fetchSessionNote, formatXhsWarning, isXhsAuthError, isXhsVerificationError, XhsSessionError } = require('../server/xhs/session');
 const { createSignedPost, parseCookieHeader } = require('../server/xhs/signature');
 const { extractXhsUrls, fetchPublicNote } = require('../server/xhs/url');
+const { setXhsThrottleForTests, isXhsRateLimitError } = require('../server/xhs/throttle');
+
+setXhsThrottleForTests({ baseIntervalMs: 0, jitterMs: 0, backoffDelayMs: 0 });
 
 const fixture = (name) => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8'));
 const VALID_COOKIE = `a1=${'a'.repeat(52)}; web_session=fixture-session; xsecappid=xhs-pc-web`;
@@ -220,6 +223,37 @@ test('xhslink 不跟随到 egress 外域名', async () => {
   });
   try {
     await assert.rejects(fetchPublicNote('https://xhslink.com/a/test'), /left the allowed hosts/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('session 笔记 429 会重试 signed feed，并保留公开页兜底', async () => {
+  const originalFetch = global.fetch;
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures', 'note.html'), 'utf8');
+  let signedCalls = 0;
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes('edith.xiaohongshu.com')) {
+      signedCalls += 1;
+      return { ok: false, status: 429, headers: { get() { return null; } }, async json() { return {}; } };
+    }
+    return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
+  };
+  try {
+    await assert.rejects(
+      fetchSessionNote({
+        noteId: '64f000000000000000000001',
+        xsecToken: 'tok',
+        url: 'https://www.xiaohongshu.com/explore/64f000000000000000000001',
+      }, VALID_COOKIE),
+      (error) => {
+        assert.equal(isXhsRateLimitError(error), true);
+        assert.equal(error.fallbackNote.noteId, '64f000000000000000000001');
+        return true;
+      },
+    );
+    assert.ok(signedCalls >= 2);
   } finally {
     global.fetch = originalFetch;
   }
