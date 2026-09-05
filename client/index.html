@@ -299,12 +299,14 @@
     .section-icon {
       display: grid;
       place-items: center;
+      flex: none;
       width: 36px;
       height: 36px;
       border-radius: 12px;
       background: var(--accent-subtle);
       color: var(--accent);
     }
+    .section-icon .icon { width: 18px; height: 18px; }
     .section-heading h3 {
       margin: 0;
       font-size: 14px;
@@ -901,20 +903,56 @@
 
     .panel-settings-btn { display: inline-flex; min-height: 40px; }
     .phone-title { display: block; font-size: 22px; margin: 0; letter-spacing: -.03em; }
-    .panel-header { padding: 16px 16px 12px; flex-wrap: wrap; }
-    .panel-header-tools { width: 100%; justify-content: space-between; }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 16px 12px;
+      flex-wrap: nowrap;
+    }
+    .panel-header-main { flex: 1; min-width: 0; }
+    .panel-header-tools {
+      width: auto;
+      flex: none;
+      justify-content: flex-end;
+    }
     .panel-kicker,
     .panel-header .desktop-title,
     .panel-header p,
     .panel-header .trek-chip,
     .section-heading p { display: none; }
-    .form-body { padding: 0 16px 20px; }
+    .field-label-main .icon { display: none; }
+    .field-label-main { gap: 0; }
+    .form-body { padding: 0 16px calc(28px + var(--ai-guide-dock, 112px) + env(safe-area-inset-bottom, 0px)); }
     .form-section { padding: 16px 0; }
-    .section-heading { margin-bottom: 12px; }
-    .submit-zone { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .section-heading { margin-bottom: 12px; align-items: center; }
+    .submit-zone { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 4px; }
     .generate-btn { width: 100%; }
+    /* Compact route map card on phone (hero copy stays hidden). */
+    .hero {
+      display: block;
+      min-height: 0;
+      padding: 0;
+      margin: 0 0 12px;
+      overflow: visible;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .hero::after { display: none; }
+    .hero-copy { display: none; }
+    .hero-map {
+      display: block;
+      min-height: 132px;
+      margin: 0;
+      transform: none;
+      border-radius: 16px;
+    }
+    .hero-map .map-badge,
+    .hero-map .map-place { display: inline-flex; }
     .app-shell.trek-scroll {
-      padding-bottom: calc(24px + var(--trek-inset-bottom, 88px) + env(safe-area-inset-bottom, 0px));
+      padding-bottom: calc(16px + var(--ai-guide-dock, 112px) + env(safe-area-inset-bottom, 0px));
       box-sizing: border-box;
     }
     .preview-layout { grid-template-columns: minmax(0, 1fr); }
@@ -935,7 +973,18 @@
     @media (min-width: 1180px) {
       .page { padding: 34px 32px 72px; }
       .app-shell.trek-scroll { padding-bottom: 0; }
-      .hero { display: grid; }
+      .hero {
+        display: grid;
+        min-height: 360px;
+        padding: 42px 44px;
+        margin: 0;
+        overflow: hidden;
+        border-radius: var(--r-xl, 28px);
+        background: unset;
+        box-shadow: unset;
+      }
+      .hero::after { display: block; }
+      .hero-copy { display: flex; }
       .guide-rail { display: grid; }
       .workspace-grid {
         grid-template-columns: minmax(0, 1fr) 290px;
@@ -955,6 +1004,8 @@
       .section-heading p { display: block; }
       .panel-header { padding: 28px 30px 24px; flex-wrap: nowrap; }
       .panel-header-tools { width: auto; }
+      .field-label-main .icon { display: block; }
+      .field-label-main { gap: 7px; }
       .form-body { padding: 4px 30px 30px; }
       .form-section { padding: 26px 0; }
       .section-heading { margin-bottom: 18px; }
@@ -1037,6 +1088,11 @@
     html.layout-phone .source-field .trek-textarea { font-size: 16px; }
     html[data-form-factor="phone"] .choice,
     html.layout-phone .choice { width: 22px; height: 22px; }
+    @media (max-width: 1179px) {
+      .app-shell .trek-select,
+      .app-shell .trek-select-trigger { width: 100%; box-sizing: border-box; }
+      .field-grid--travel .small-field:last-child { margin-bottom: 4px; }
+    }
   </style>
 </head>
 <body>
@@ -1565,6 +1621,14 @@
       var phone = isPhoneLayout(ctx);
       document.documentElement.classList.toggle('layout-phone', phone);
       document.documentElement.classList.toggle('layout-desktop', !phone);
+      var bottomInset = 112;
+      var vp = ctx && ctx.viewport;
+      if (vp && vp.insets && typeof vp.insets.bottom === 'number') {
+        bottomInset = Math.max(vp.insets.bottom, 96);
+      } else if (phone) {
+        bottomInset = 112;
+      }
+      document.documentElement.style.setProperty('--ai-guide-dock', bottomInset + 'px');
     }
 
     applyLayoutMode(null);
