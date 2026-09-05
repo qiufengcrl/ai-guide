@@ -5,36 +5,6 @@ const MAX_FROM_DESTINATION_KM = 500;
 const REGION_CLUSTER_KM = 80;
 const REGION_SPLIT_MIN_SPAN_KM = 80;
 
-const DESTINATION_SEEDS = {
-  北京: ['故宫', '天坛', '颐和园', '八达岭长城', '景山公园', '北海公园', '雍和宫', '南锣鼓巷'],
-  上海: ['外滩', '豫园', '南京路步行街', '田子坊', '上海博物馆', '武康路'],
-  河南: ['龙门石窟', '少林寺', '白马寺', '清明上河园', '开封府', '殷墟', '云台山'],
-  洛阳: ['龙门石窟', '白马寺', '应天门', '洛邑古城', '关林'],
-  开封: ['清明上河园', '开封府', '大相国寺', '铁塔公园'],
-  郑州: ['河南博物院', '二七纪念塔', '嵩山少林寺', '黄河风景名胜区'],
-  西安: ['兵马俑', '大雁塔', '西安城墙', '回民街', '大唐不夜城', '钟楼'],
-  成都: ['宽窄巷子', '锦里', '成都大熊猫繁育研究基地', '武侯祠', '杜甫草堂'],
-  杭州: ['西湖', '灵隐寺', '河坊街', '西溪湿地', '断桥'],
-  南京: ['中山陵', '夫子庙', '总统府', '玄武湖', '南京博物院'],
-  苏州: ['拙政园', '狮子林', '平江路', '虎丘', '寒山寺'],
-  广州: ['陈家祠', '沙面', '北京路步行街', '白云山'],
-  深圳: ['世界之窗', '莲花山公园', '大梅沙', '深圳博物馆'],
-  重庆: ['洪崖洞', '解放碑', '磁器口', '长江索道', '李子坝'],
-  厦门: ['鼓浪屿', '南普陀寺', '曾厝垵', '中山路步行街'],
-  青岛: ['栈桥', '八大关', '崂山', '天主教堂'],
-  大理: ['大理古城', '洱海', '崇圣寺三塔', '喜洲古镇'],
-  丽江: ['丽江古城', '玉龙雪山', '束河古镇', '黑龙潭'],
-  桂林: ['漓江', '象鼻山', '两江四湖', '阳朔西街'],
-  张家界: ['天门山', '张家界国家森林公园', '张家界大峡谷'],
-  三亚: ['亚龙湾', '天涯海角', '南山寺', '蜈支洲岛'],
-  漠河: ['北极村', '洛古河', '北红村', '黑龙江第一湾'],
-  大兴安岭: ['北极村', '洛古河', '北红村', '白桦林观景台', '黑龙江第一湾', '呼中区', '漠河', '莫尔道嘎国家森林公园'],
-  京都: ['伏见稻荷大社', '清水寺', '岚山', '金阁寺', '祇园'],
-  大阪: ['大阪城', '道顿堀', '心斋桥', '通天阁'],
-  东京: ['浅草寺', '东京塔', '明治神宫', '涩谷', '上野公园'],
-  衡阳: ['东洲岛', '船山书院', '罗汉寺', '夫之楼', '石鼓书院', '南岳衡山'],
-};
-
 const GUIDE_SECTION_SKIP = /^(🍜|💡|#|美食推荐|避坑|小贴士)/;
 const GUIDE_ROUTE_SKIP = /^(廊桥|登岛|欣赏|观看|拍照|散步|环岛(?!步道)|灯光|喷泉|夜景灯光)/;
 const GUIDE_NAME_SUFFIX = /(登顶|数字展馆.*|与夜景.*|灯光.*|\/喷泉)$/u;
@@ -134,24 +104,19 @@ function candidatesFromGuideText(guides, intent) {
 
 function resolveExtractCandidates(extracted, guides, intent) {
   const llmCandidateCount = Array.isArray(extracted?.candidates) ? extracted.candidates.length : 0;
-  let candidates = normalizeCandidates(extracted, intent, { skipSeeds: true });
+  let candidates = normalizeCandidates(extracted, intent);
   if (candidates.length) {
-    return { candidates: normalizeCandidates(extracted, intent), source: 'llm', llmCandidateCount };
+    return { candidates, source: 'llm', llmCandidateCount };
   }
   const hasGuideText = (guides || []).some((guide) => String(guide.text || '').trim());
   if (hasGuideText) {
     const fromGuide = candidatesFromGuideText(guides, intent);
-    candidates = normalizeCandidates({ candidates: fromGuide }, intent, { skipSeeds: true });
+    candidates = normalizeCandidates({ candidates: fromGuide }, intent);
     if (candidates.length) {
-      return {
-        candidates: normalizeCandidates({ candidates: fromGuide }, intent),
-        source: 'guide_text',
-        llmCandidateCount,
-      };
+      return { candidates, source: 'guide_text', llmCandidateCount };
     }
   }
-  candidates = normalizeCandidates(extracted, intent);
-  return { candidates, source: candidates.length ? 'seeds' : null, llmCandidateCount };
+  return { candidates: [], source: null, llmCandidateCount };
 }
 
 function guideTextForExtractRetry(guides) {
@@ -360,20 +325,26 @@ function isWeakPlaceName(name, intent) {
   return (intent?.interests || []).some((item) => foldName(item) === folded);
 }
 
-function destinationSeeds(destination) {
-  const dest = String(destination || '').trim();
-  if (!dest) return [];
-  const destFold = foldName(stripAdminTail(dest)) || foldName(dest);
-  for (const [key, places] of Object.entries(DESTINATION_SEEDS)) {
-    const keyFold = foldName(stripAdminTail(key));
-    if (!destFold || !keyFold) continue;
-    if (destFold === keyFold) return places.slice();
-    if (destFold.length >= 2 && keyFold.length >= 2
-      && (destFold.startsWith(keyFold) || keyFold.startsWith(destFold) || destFold.includes(keyFold))) {
-      return places.slice();
+function normalizeCandidates(raw, intent) {
+  const model = Array.isArray(raw?.candidates) ? raw.candidates : [];
+  const seen = new Set();
+  const unique = [];
+  const pushUnique = (item) => {
+    if (!item?.name || isWeakPlaceName(item.name, intent)) return;
+    const key = foldName(item.name);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    unique.push(item);
+  };
+  for (const item of model) pushUnique(toCandidate(item, intent));
+  const target = targetPlaceCount(intent);
+  if (unique.length < target) {
+    for (const name of intent.mustSee || []) {
+      pushUnique(toCandidate({}, intent, name));
+      if (unique.length >= target) break;
     }
   }
-  return [];
+  return spreadDayHints(unique, intent.dayCount);
 }
 
 function targetPlaceCount(intent) {
@@ -556,28 +527,6 @@ function spreadDayHints(candidates, dayCount) {
   return candidates.map((item, index) => ({ ...item, dayHint: (index % days) + 1 }));
 }
 
-function normalizeCandidates(raw, intent, options = {}) {
-  const model = Array.isArray(raw?.candidates) ? raw.candidates : [];
-  const seen = new Set();
-  const unique = [];
-  const pushUnique = (item) => {
-    if (!item?.name || isWeakPlaceName(item.name, intent)) return;
-    const key = foldName(item.name);
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    unique.push(item);
-  };
-  for (const item of model) pushUnique(toCandidate(item, intent));
-  const target = targetPlaceCount(intent);
-  if (!options.skipSeeds && unique.length < target) {
-    for (const name of [...intent.mustSee, ...destinationSeeds(intent.destination)]) {
-      pushUnique(toCandidate({}, intent, name));
-      if (unique.length >= target) break;
-    }
-  }
-  return spreadDayHints(unique, intent.dayCount);
-}
-
 function placeSearchQuery(candidate, destination) {
   const rawName = String(candidate?.nameZh || candidate?.name || '').trim();
   const name = PLACE_SEARCH_ALIASES[rawName] || rawName;
@@ -709,39 +658,27 @@ function clusterEvidence(items, linkKm) {
 
 function adminUnitFromAddress(address) {
   const parts = String(address || '').split(/[,，]/).map((part) => part.trim()).filter(Boolean);
-  for (const part of parts) {
-    const match = part.match(/^(.+?)(市|县|州|盟|地区)$/);
-    if (match && match[1].length >= 2) {
-      const name = stripAdminTail(part);
-      if (name.length >= 2) return name;
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    const embedded = part.match(/(?:省|自治区)(.{2,10}?)(市|县|州|盟|地区)/);
+    if (embedded) {
+      const name = stripAdminTail(`${embedded[1]}${embedded[2]}`);
+      if (name.length >= 2 && !/(省|自治区)$/.test(name)) return name;
+    }
+    const match = part.match(/([^,，/]{2,10}?)(市|县|州|盟|地区)$/);
+    if (match) {
+      const name = stripAdminTail(match[0]);
+      if (name.length >= 2 && !/(省|自治区)$/.test(name)) return name;
     }
   }
   return null;
-}
-
-function cityFromDestinationSeeds(placeName, destination) {
-  const folded = foldName(placeName);
-  const dest = stripAdminTail(String(destination || ''));
-  let best = null;
-  for (const [city, seeds] of Object.entries(DESTINATION_SEEDS)) {
-    if (!city || city === dest || isGenericPlaceName(city, destination)) continue;
-    if (seeds.some((seed) => {
-      const seedFold = foldName(seed);
-      return seedFold === folded || folded.includes(seedFold) || seedFold.includes(folded);
-    })) {
-      if (!best || city.length <= best.length) best = city;
-    }
-  }
-  return best;
 }
 
 function inferRegionName(items, destination, locale) {
   const counts = new Map();
   for (const item of items) {
     const fromAddress = adminUnitFromAddress(item.address);
-    if (fromAddress) counts.set(fromAddress, (counts.get(fromAddress) || 0) + 2);
-    const fromSeed = cityFromDestinationSeeds(item.name, destination);
-    if (fromSeed) counts.set(fromSeed, (counts.get(fromSeed) || 0) + 1);
+    if (fromAddress) counts.set(fromAddress, (counts.get(fromAddress) || 0) + 1);
   }
   if (counts.size) {
     return [...counts.entries()].sort((left, right) => right[1] - left[1])[0][0];
@@ -941,7 +878,6 @@ module.exports = {
   TOO_FAR_KM,
   MAX_FROM_DESTINATION_KM,
   EXTRACTION_SCHEMA,
-  DESTINATION_SEEDS,
   PLACE_SEARCH_ALIASES,
   looksLikeShareCard,
   noteDisplayTitle,
@@ -967,7 +903,6 @@ module.exports = {
   extractRetryInstruction,
   isGenericPlaceName,
   isWeakPlaceName,
-  destinationSeeds,
   targetPlaceCount,
   placeSearchQuery,
   placeSearchNames,

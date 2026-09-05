@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, destinationSeeds, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob } = require('../server/pipeline');
+const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces } = require('../server/geo/nominatim');
@@ -228,13 +228,13 @@ test('Gate 丢弃无坐标/重复，并保留过远点且默认不选', () => {
   assert.equal(result.warnings.length, 2);
 });
 
-test('无攻略时抽取具体景点，丢掉省/市名，并把地点分到各天', () => {
+test('无攻略时过滤省/市名与兴趣词，mustSee 仍可补点', () => {
   const intent = {
     destination: '河南',
     dayCount: 2,
     pace: 'relaxed',
     interests: ['历史'],
-    mustSee: [],
+    mustSee: ['龙门石窟'],
   };
   const text = extractionText([], intent);
   assert.match(text, /Destination: 河南/);
@@ -246,14 +246,20 @@ test('无攻略时抽取具体景点，丢掉省/市名，并把地点分到各�
   assert.equal(isWeakPlaceName('历史', intent), true);
   assert.equal(isWeakPlaceName('龙门石窟', intent), false);
 
-  const candidates = normalizeCandidates({ candidates: [{ name: '河南省', dayHint: 1 }] }, intent);
-  const names = candidates.map((item) => item.name);
-  assert.ok(!names.includes('河南省'));
-  assert.ok(!names.includes('历史'));
-  assert.ok(names.includes('龙门石窟'));
-  assert.ok(candidates.length >= 4);
-  assert.deepEqual([...new Set(candidates.map((item) => item.dayHint))].sort(), [1, 2]);
+  const filtered = normalizeCandidates({ candidates: [{ name: '河南省', dayHint: 1 }] }, intent);
+  assert.deepEqual(filtered.map((item) => item.name), ['龙门石窟']);
   assert.equal(placeSearchQuery({ name: '龙门石窟' }, '河南'), '龙门石窟 河南');
+
+  const llmCandidates = normalizeCandidates({
+    candidates: [
+      { name: '龙门石窟', dayHint: 1 },
+      { name: '少林寺', dayHint: 1 },
+      { name: '白马寺', dayHint: 1 },
+      { name: '清明上河园', dayHint: 1 },
+    ],
+  }, { ...intent, mustSee: [] });
+  assert.ok(llmCandidates.length >= 4);
+  assert.deepEqual([...new Set(llmCandidates.map((item) => item.dayHint))].sort(), [1, 2]);
 
   const evidence = [
     { id: 'ev_1', name: '龙门石窟', lat: 34.55, lng: 112.47, dayHint: 1, address: '河南省洛阳市洛龙区' },
@@ -328,8 +334,6 @@ test('分享口令里的 xhslink.cn 会被抽成笔记链接，大兴安岭有�
     { maxDays: 14, maxPlacesPerDay: 6, maxNotes: 4 },
   );
   assert.deepEqual(intent.urls, ['https://xhslink.cn/o/4YIkUR0MNXN']);
-  assert.ok(destinationSeeds('大兴安岭').includes('北极村'));
-  assert.ok(destinationSeeds('大兴安岭').includes('北红村'));
   assert.equal(placeSearchQuery({ name: '北极村' }, '大兴安岭'), '北极镇 漠河 大兴安岭');
   assert.deepEqual(placeSearchNames({ name: '洛古河' }, '大兴安岭')[0], '洛古河村 大兴安岭');
   assert.equal(isGenericPlaceName('漠河市', '大兴安岭'), false);
@@ -338,7 +342,7 @@ test('分享口令里的 xhslink.cn 会被抽成笔记链接，大兴安岭有�
   assert.equal(noteDisplayTitle({ title: '', text: '上海出发5天4晚，追上大兴安岭的秋\n正文' }, '小红书笔记'), '上海出发5天4晚，追上大兴安岭的秋');
   const candidates = normalizeCandidates({ candidates: [{ name: '大兴安岭' }] }, intent);
   assert.ok(!candidates.some((item) => item.name === '大兴安岭'));
-  assert.ok(candidates.some((item) => item.name === '北极村'));
+  assert.equal(candidates.length, 0);
 });
 
 test('地图证据会丢掉远离目的地的误匹配', () => {
@@ -413,9 +417,13 @@ test('无 Cookie 的纯表单仍形成地图预览，并只使用 extract.result
   assert.ok(state.warnings.some((warning) => warning.includes('无坐标店')));
 });
 
-test('模型只返回省名时，仍补上具体景点、分到两天，并说明未读攻略', async () => {
+test('模型只返回省名时会被过滤，需靠 LLM/攻略给出具体景点', async () => {
   const fixture = buildHost({
-    aiResults: [{ candidates: [{ name: '河南省', dayHint: 1 }] }],
+    aiResults: [{ candidates: [
+      { name: '龙门石窟', dayHint: 1 },
+      { name: '少林寺', dayHint: 1 },
+      { name: '白马寺', dayHint: 2 },
+    ] }],
   });
   const { state, geoCalls } = await makeReady(fixture, {
     destination: '河南',
@@ -435,11 +443,15 @@ test('模型只返回省名时，仍补上具体景点、分到两天，并说�
   assert.match(state.sourceSummary.query, /河南/);
 });
 
-test('Cookie 搜索为空时给出说明，并仍生成具体景点而不是兴趣词', async () => {
+test('Cookie 搜索为空时给出说明，兴趣词不会变成景点', async () => {
   const fixture = buildHost({
     config: { xhs_enabled: true },
     userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
-    aiResults: [{ candidates: [{ name: '历史', dayHint: 1 }] }],
+    aiResults: [{ candidates: [
+      { name: '龙门石窟', dayHint: 1 },
+      { name: '少林寺', dayHint: 1 },
+      { name: '白马寺', dayHint: 2 },
+    ] }],
   });
   const xhsFallback = async (url) => {
     const href = String(url);
@@ -463,7 +475,7 @@ test('Cookie 搜索为空时给出说明，并仍生成具体景点而不是兴�
   assert.ok(state.warnings.some((warning) => /没有返回笔记/.test(warning)));
   const names = state.days.flatMap((day) => day.places).map((place) => place.name);
   assert.ok(!names.includes('历史'));
-  assert.ok(!names.includes('历市镇'));
+  assert.ok(names.some((name) => /龙门|Longmen/i.test(name)));
   assert.ok(state.days.flatMap((day) => day.places).length >= 3);
 });
 
