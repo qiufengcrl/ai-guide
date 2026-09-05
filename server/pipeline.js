@@ -68,15 +68,26 @@ const clampInt = (value, fallback, min, max) => {
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
 };
 
+function truthySetting(value) {
+  return value === true || value === 'true' || value === 1 || value === '1';
+}
+
 function settings(config) {
   return {
     maxDays: clampInt(config.max_days, 8, 1, 14),
     maxPlacesPerDay: clampInt(config.max_places_per_day, 6, 1, 12),
     maxNotes: clampInt(config.max_notes, 4, 1, 8),
-    xhsEnabled: config.xhs_enabled !== false && String(config.xhs_enabled ?? 'true') !== 'false',
+    xhsEnabled: truthySetting(config.xhs_enabled),
     placesApiBase: String(config.places_api_base || '').trim(),
     placesApiKey: String(config.places_api_key || '').trim(),
   };
+}
+
+function resolveXhsKeywordSearch(bodyValue, userSetting) {
+  if (bodyValue !== undefined && bodyValue !== null && bodyValue !== '') {
+    return truthySetting(bodyValue);
+  }
+  return truthySetting(userSetting);
 }
 
 function geoSearchOptions(config, extra = {}) {
@@ -128,6 +139,7 @@ function normalizeInput(body, limits) {
     urls,
     guideQuery: `${destination} ${interests.length ? interests.join(' ') : '景点'} 旅游 景点攻略`.trim(),
     searchQueries: guideSearchQueries(destination, interests),
+    xhsKeywordSearch: body.xhsKeywordSearch,
   };
 }
 
@@ -517,6 +529,8 @@ module.exports = {
   noteDisplayTitle,
   settings,
   geoSearchOptions,
+  resolveXhsKeywordSearch,
+  truthySetting,
   isZh,
   message,
   normalizeInput,

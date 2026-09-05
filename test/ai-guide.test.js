@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, destinationSeeds, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch } = require('../server/pipeline');
+const { gateAndSchedule, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, destinationSeeds, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces } = require('../server/geo/nominatim');
@@ -88,6 +88,11 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.ok(!manifest.permissions.includes('maps:read'));
   assert.ok(manifest.permissions.includes('http:outbound:nominatim.openstreetmap.org'));
   assert.ok(manifest.permissions.includes('http:outbound:trek-amap-bridge'));
+  const xhsEnabled = manifest.settings.find((field) => field.key === 'xhs_enabled');
+  assert.equal(xhsEnabled.default, 'false');
+  const xhsKeyword = manifest.settings.find((field) => field.key === 'xhs_keyword_search');
+  assert.equal(xhsKeyword.scope, 'user');
+  assert.equal(xhsKeyword.default, 'false');
   const cookieFields = manifest.settings.filter((field) => field.key === 'xhs_cookie');
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
 });
@@ -347,7 +352,7 @@ test('无 Cookie 的纯表单仍形成地图预览，并只使用 extract.result
   const fixture = buildHost();
   const { state, geoCalls } = await makeReady(fixture);
   assert.ok(state.days.flatMap((day) => day.places).length >= 3);
-  assert.ok(state.warnings.some((warning) => warning.includes('Cookie')));
+  assert.ok(!state.warnings.some((warning) => warning.includes('Cookie')));
   assert.equal(state.sourceSummary.basis, 'destination');
   assert.ok(state.sourceSummary.query);
   assert.ok(fixture.host.calls.some((call) => call.method === 'ai.extract'));
@@ -405,6 +410,7 @@ test('Cookie 搜索为空时给出说明，并仍生成具体景点而不是兴�
     dayCount: 2,
     pace: 'relaxed',
     interests: '历史',
+    xhsKeywordSearch: true,
   }, xhsFallback);
   assert.ok(state.warnings.some((warning) => /没有返回笔记/.test(warning)));
   const names = state.days.flatMap((day) => day.places).map((place) => place.name);
@@ -613,4 +619,24 @@ test('Places API bridge 会映射 Google 兼容响应为 WGS-84 坐标', async (
   } finally {
     global.fetch = original;
   }
+});
+
+test('关键词搜索默认关闭，需显式开启', () => {
+  assert.equal(resolveXhsKeywordSearch(undefined, undefined), false);
+  assert.equal(resolveXhsKeywordSearch(false, 'true'), false);
+  assert.equal(resolveXhsKeywordSearch(true, false), true);
+  assert.equal(resolveXhsKeywordSearch(undefined, 'true'), true);
+  assert.equal(truthySetting('false'), false);
+});
+
+test('Prefs 接口返回关键词搜索开关状态', async () => {
+  const allowed = buildHost({ config: { xhs_enabled: true }, userSettings: { xhs_keyword_search: 'true' } });
+  await allowed.app.load();
+  const res = await allowed.app.route({ method: 'GET', path: '/prefs' }, {});
+  assert.deepEqual(res.body, { xhsSearchAllowed: true, xhsKeywordSearchDefault: true });
+
+  const blocked = buildHost({ config: { xhs_enabled: false }, userSettings: { xhs_keyword_search: 'true' } });
+  await blocked.app.load();
+  const denied = await blocked.app.route({ method: 'GET', path: '/prefs' }, {});
+  assert.deepEqual(denied.body, { xhsSearchAllowed: false, xhsKeywordSearchDefault: true });
 });

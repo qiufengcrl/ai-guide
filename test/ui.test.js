@@ -19,13 +19,13 @@ test('page keeps the TREK kit contract and has valid application JavaScript', ()
 test('redesign covers the complete planning and preview workflow', () => {
   const requiredIds = [
     'plan-form', 'destination', 'interests', 'start-date', 'end-date', 'day-count',
-    'pace', 'urls', 'source-text', 'generate', 'status', 'progress', 'warnings',
+    'pace', 'urls', 'source-text', 'xhs-keyword-search', 'xhs-search-field', 'generate', 'status', 'progress', 'warnings',
     'warning-list', 'preview', 'sources', 'days', 'trip-title', 'commit',
   ];
   for (const id of requiredIds) assert.match(html, new RegExp(`id=["']${id}["']`), id);
 
   for (const hook of [
-    "trek.onContext", "trek.invoke('/plan'", "trek.invoke('/commit'",
+    "trek.onContext", "trek.invoke('/prefs'", "trek.invoke('/plan'", "trek.invoke('/commit'",
     "trek.navigate('/settings?tab=plugins')", "trek.openExternal",
     'renderWarnings', 'renderSources', 'renderDays', 'syncDayState',
     'invokeErrorMessage', 'conflict', 'isTransientInvokeError', 'stillWorking',

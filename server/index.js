@@ -16,6 +16,8 @@ const {
   gateAndSchedule,
   publicDraft,
   geoSearchOptions,
+  resolveXhsKeywordSearch,
+  truthySetting,
 } = require('./pipeline');
 const { fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const { normalizeXhsCookie, searchNotes, searchNotesDetailed, fetchSessionNote } = require('./xhs/session');
@@ -159,7 +161,9 @@ async function advance(job, ctx) {
         || (work.pendingNotes || []).length > 0
         || (work.urls || []).length > 0;
       if (hasUserSources) return;
-      if (limits.xhsEnabled && cookie && job.draft.intent.destination) {
+      const wantsKeywordSearch = limits.xhsEnabled
+        && resolveXhsKeywordSearch(job.payload.xhsKeywordSearch, await ctx.settings.get('xhs_keyword_search'));
+      if (wantsKeywordSearch && cookie && job.draft.intent.destination) {
         const queries = (job.draft.intent.searchQueries || [job.draft.intent.guideQuery]).slice(0, 2);
         let lastError = null;
         for (const query of queries) {
@@ -191,8 +195,12 @@ async function advance(job, ctx) {
               `Xiaohongshu search returned no notes (query: ${work.lastSearchQuery || job.draft.intent.guideQuery}). Places were proposed from the destination.`));
           }
         }
-      } else if (!cookie) {
+      } else if (wantsKeywordSearch && !cookie) {
         addWarning(job, message(locale, '未配置小红书 Cookie；已继续使用表单、链接或粘贴内容', 'No Xiaohongshu Cookie is configured; continuing with form, links, or pasted text'));
+      } else if (!limits.xhsEnabled && truthySetting(job.payload.xhsKeywordSearch)) {
+        addWarning(job, message(locale,
+          '管理员已关闭小红书关键词搜索；已继续使用表单、链接或粘贴内容',
+          'Xiaohongshu keyword search is disabled by the admin; continuing with form, links, or pasted text'));
       }
       return;
     }
@@ -364,6 +372,17 @@ module.exports = definePlugin({
     );
   },
   routes: [
+    {
+      method: 'GET', path: '/prefs', auth: true,
+      async handler(req, ctx) {
+        const limits = settings(ctx.config);
+        const userDefault = await ctx.settings.get('xhs_keyword_search');
+        return response(200, {
+          xhsSearchAllowed: limits.xhsEnabled,
+          xhsKeywordSearchDefault: resolveXhsKeywordSearch(undefined, userDefault),
+        });
+      },
+    },
     {
       method: 'POST', path: '/plan', auth: true,
       async handler(req, ctx) {
