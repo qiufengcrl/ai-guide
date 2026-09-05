@@ -1,12 +1,12 @@
 # AI 攻略 — 未来功能规划
 
 > 文档版本：2026-09-05  
-> 基线版本：**v1.1.30**  
+> 基线版本：**v1.1.31**  
 > 用途：汇总竞品调研结论与内部改进方向，供产品确认「做 / 不做 / 延后」。
 
 ---
 
-## 1. 当前能力基线（v1.1.30）
+## 1. 当前能力基线（v1.1.31）
 
 以下能力**已实现**，本文档不再重复规划：
 
@@ -21,7 +21,7 @@
 | 任务恢复 | job 持久化；GET /plan 异步轮询，不阻塞网关 |
 | 隐私 | xhs_cookie 仅存服务端，不进 iframe / AI / 导出 |
 | 来源追溯 | 每条地点可关联来源笔记 |
-| 限流与容错 | CUQPS 退避、30 分钟超时、瞬态错误 warning |
+| 限流与容错 | CUQPS 退避、XHS 5s→10s→20s 重试、自适应 3s 间隔、30 分钟超时、瞬态错误 warning |
 
 **核心差异化**：多数开源项目止步于 HTML/Markdown 攻略页；我们是 **小红书 → 可编辑预览 → TREK 真实行程** 的闭环。
 
@@ -340,16 +340,16 @@
 ## 4. 小红书稳定性专项（R01–R05）
 
 > 背景：GitHub 竞品调研结论——**没有项目能根治小红书限流**；成熟做法均为降速、排队、退避与降级。Cookie 续期依赖**用户本机**扫码或浏览器读取，无云端无感自动续期方案。  
-> 当前 ai-guide（v1.1.30）：XHS 请求间隔 800ms；遇 461/429 **不重试、直接中断搜索**；geocode 侧已有 CUQPS 指数退避。  
+> 当前 ai-guide（**v1.1.31，R01–R05 已实现**）：XHS 自适应间隔 3s（限流后加倍，上限 12s）；遇 461/429 按 5s→10s→20s 重试最多 2 次；生成前 Cookie 健康检查；超 7 天非阻断提醒；限流时降级到链接/粘贴/表单。  
 > 以下五项为**短期可落地**改进，不改整体架构，建议优先于 F01 等多维度搜索（避免加剧限流）。
 
-| 编号 | 功能 | 参考项目 |
-|:----:|------|----------|
-| R01 | XHS 请求退避重试 | [xiaohongshu-cli](https://github.com/NanshineLoong/xiaohongshu-cli) |
-| R02 | 自适应请求间隔 | [xiaohongshu-mcp-readonly](https://github.com/sinmentis/xiaohongshu-mcp-readonly) |
-| R03 | 生成前 Cookie 健康检查 | [travel-planner-skill](https://github.com/ycyliu/travel-planner-skill) |
-| R04 | Cookie 更新时间提示 | [xiaohongshu-cli](https://github.com/NanshineLoong/xiaohongshu-cli) |
-| R05 | 限流降级文案优化 | [travel-planner-skill](https://github.com/ycyliu/travel-planner-skill) |
+| 编号 | 功能 | 参考项目 | 状态 |
+|:----:|------|----------|:----:|
+| R01 | XHS 请求退避重试 | [xiaohongshu-cli](https://github.com/NanshineLoong/xiaohongshu-cli) | ✅ v1.1.31 |
+| R02 | 自适应请求间隔 | [xiaohongshu-mcp-readonly](https://github.com/sinmentis/xiaohongshu-mcp-readonly) | ✅ v1.1.31 |
+| R03 | 生成前 Cookie 健康检查 | [travel-planner-skill](https://github.com/ycyliu/travel-planner-skill) | ✅ v1.1.31 |
+| R04 | Cookie 更新时间提示 | [xiaohongshu-cli](https://github.com/NanshineLoong/xiaohongshu-cli) | ✅ v1.1.31 |
+| R05 | 限流降级文案优化 | [travel-planner-skill](https://github.com/ycyliu/travel-planner-skill) | ✅ v1.1.31 |
 
 ---
 
@@ -362,8 +362,9 @@
 | 改动范围 | `server/index.js`（`runKeywordSearch`、`fetch_guides` 各 XHS 调用点）；`server/xhs/session.js`（可抽 `retryOnRateLimit` 工具） |
 | 复杂度 | 低 |
 | 依赖/风险 | 重试过多会加剧风控；须与 R02 联动限总请求量 |
-| 现状差距 | geocode 已有 `600 * 2^attempt` 退避；XHS 目前遇 461/429 直接 `break` |
+| 现状差距 | geocode 已有 `600 * 2^attempt` 退避；**XHS 已在 v1.1.31 实现 5s→10s→20s 重试** |
 | 建议优先级 | **P0** |
+| 状态 | **已实现（v1.1.31）** |
 
 ---
 
@@ -378,6 +379,7 @@
 | 依赖/风险 | 间隔过长会拉长生成时间；参考 xiaohongshu-mcp-readonly 的 30s 对 UX 过重，建议 3～6s 起步 |
 | 参考参数 | readonly MCP：30s + jitter；rednote-analyzer：3s/次、10 次/分钟；xiaohongshu-cli：461 后永久加倍直至冷却 |
 | 建议优先级 | **P0** |
+| 状态 | **已实现（v1.1.31）** |
 
 ---
 
@@ -392,6 +394,7 @@
 | 依赖/风险 | 多一次探测请求；无 Cookie 且仅用链接/粘贴时可跳过 |
 | 参考 | travel-planner-skill 的 `check_login_status` 前置检查 |
 | 建议优先级 | **P0** |
+| 状态 | **已实现（v1.1.31）** |
 
 ---
 
@@ -406,6 +409,7 @@
 | 依赖/风险 | 平台 TTL 不固定，7 天仅为经验值；无法真正检测过期，只能提示 |
 | 参考 | xiaohongshu-cli 的 7 天 TTL + 浏览器自动刷新 |
 | 建议优先级 | **P1** |
+| 状态 | **已实现（v1.1.31）** |
 
 ---
 
@@ -420,6 +424,7 @@
 | 依赖/风险 | 无 |
 | 现状差距 | 已有分级 warning，但限流时未明确说明降级路径 |
 | 建议优先级 | **P0** |
+| 状态 | **已实现（v1.1.31）** |
 
 ---
 
@@ -431,7 +436,7 @@
 | xiaohongshu-cli | 渐进退避 5→30s；461 后加倍间隔 | 7 天 TTL；从浏览器读 Cookie；`xhs login --qrcode` |
 | rednote-analyzer-mcp | 3s/次，10 次/分钟 | `rednote-login` 浏览器扫码 |
 | travel-planner-skill | 超时重试 ≥2 次 | MCP `get_login_qrcode` |
-| **ai-guide 现状** | 800ms 固定间隔；461 不重试 | 手动粘贴 + `testXhs` |
+| **ai-guide v1.1.31** | 3s 自适应间隔 + 461/429 退避重试 | 手动粘贴 + `testXhs` + 生成前健康检查 + 7 天提醒 |
 
 ### 明确不在 R01–R05 范围（中期另议）
 
@@ -464,11 +469,11 @@
 | 实价机票酒店 | ❌ | 少数 | F14 建议不做 |
 | AI 聊天 | ❌ | 少数 | F12 |
 | 逐步审批 | ❌ | 少数 | F15 |
-| XHS 限流退避重试 | 部分（仅 geocode） | 多数有 | R01 |
-| XHS 自适应间隔 | ❌（固定 800ms） | 多数有 | R02 |
-| Cookie 生成前检查 | 部分（testXhs 手动） | 多数有 | R03 |
-| Cookie 过期提醒 | ❌ | xiaohongshu-cli | R04 |
-| 限流降级文案 | 部分 | travel-planner-skill | R05 |
+| XHS 限流退避重试 | ✅ R01 | 多数有 | R01 |
+| XHS 自适应间隔 | ✅ R02 | 多数有 | R02 |
+| Cookie 生成前检查 | ✅ R03 | 多数有 | R03 |
+| Cookie 过期提醒 | ✅ R04 | xiaohongshu-cli | R04 |
+| 限流降级文案 | ✅ R05 | travel-planner-skill | R05 |
 
 ---
 
@@ -480,11 +485,11 @@
 
 | 编号 | 功能 | 建议 |
 |:----:|------|:----:|
-| R01 | XHS 请求退避重试 | ☐ 做 ☐ 不做 ☐ 延后 |
-| R02 | 自适应请求间隔 | ☐ 做 ☐ 不做 ☐ 延后 |
-| R03 | 生成前 Cookie 健康检查 | ☐ 做 ☐ 不做 ☐ 延后 |
-| R04 | Cookie 更新时间提示 | ☐ 做 ☐ 不做 ☐ 延后 |
-| R05 | 限流降级文案优化 | ☐ 做 ☐ 不做 ☐ 延后 |
+| R01 | XHS 请求退避重试 | ☑ 做 ☐ 不做 ☐ 延后 |
+| R02 | 自适应请求间隔 | ☑ 做 ☐ 不做 ☐ 延后 |
+| R03 | 生成前 Cookie 健康检查 | ☑ 做 ☐ 不做 ☐ 延后 |
+| R04 | Cookie 更新时间提示 | ☑ 做 ☐ 不做 ☐ 延后 |
+| R05 | 限流降级文案优化 | ☑ 做 ☐ 不做 ☐ 延后 |
 
 ### 阶段 A — 信息质量 + 出行实用（建议优先）
 
@@ -553,3 +558,4 @@
 |------|------|
 | 2026-09-05 | 初版：基于 GitHub 竞品调研与 v1.1.30 基线 |
 | 2026-09-05 | 新增 §4 小红书稳定性专项 R01–R05；阶段 S 确认清单 |
+| 2026-09-05 | **v1.1.31**：R01–R05 已实现（退避重试、自适应间隔、Cookie 健康检查、7 天提醒、限流降级文案） |

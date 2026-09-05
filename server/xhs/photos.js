@@ -1,4 +1,5 @@
 const { searchNotesDetailed, fetchNoteCoverImage } = require('./session');
+const { withXhsRetry } = require('./throttle');
 
 const PHOTO_CACHE_MAX = 256;
 const PHOTO_CACHE_HIT_TTL_MS = 6 * 60 * 60 * 1000;
@@ -36,9 +37,9 @@ async function getXhsPhoto(name, cookie, destination = '') {
   let url = '';
   try {
     const query = `${label} 风景`;
-    const { notes } = await searchNotesDetailed(query, cookie, 1, { sort: 'time_descending' });
+    const { notes } = await withXhsRetry(() => searchNotesDetailed(query, cookie, 1, { sort: 'time_descending' }));
     const item = notes[0];
-    if (item) url = await fetchNoteCoverImage(item, cookie);
+    if (item) url = await withXhsRetry(() => fetchNoteCoverImage(item, cookie));
   } catch {
     url = '';
   }

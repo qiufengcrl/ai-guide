@@ -1,5 +1,6 @@
 const { fetchWithTimeout, fetchPublicNote, exploreNoteUrl } = require('./url');
 const { createSearchId, createSignedPost } = require('./signature');
+const { isXhsRateLimitError } = require('./throttle');
 
 const SEARCH_PAGE_SIZE = 20;
 
@@ -48,15 +49,24 @@ function formatXhsWarning(error, locale, messageFn) {
   const text = error instanceof Error ? error.message : String(error || '');
   if (isXhsAuthError(error)) {
     return messageFn(locale,
-      '【认证失败】小红书 Cookie 无效、不完整或已过期，请在插件设置中更新 Cookie',
-      '【Auth failed】Your Xiaohongshu Cookie is invalid, incomplete, or expired. Update it in plugin settings.');
+      '【认证失败】小红书 Cookie 无效、不完整或已过期，请在插件设置中更新 Cookie。已跳过搜索，继续使用链接、粘贴或表单生成。',
+      '【Auth failed】Your Xiaohongshu Cookie is invalid, incomplete, or expired. Update it in plugin settings. Search was skipped; continuing with links, pasted text, or the form.');
   }
-  if (isXhsVerificationError(error)) {
+  if (isXhsVerificationError(error) || /风控/.test(text)) {
     return messageFn(locale,
-      '【需要验证】小红书要求验证码（461），请在本机浏览器登录后更新 Cookie',
-      '【Verification required】Xiaohongshu requested captcha (461). Log in locally and update your Cookie.');
+      '【需要验证】小红书要求验证码或触发风控（461）。请在本机浏览器登录后更新 Cookie。已降级继续，使用链接、粘贴或表单生成。',
+      '【Verification required】Xiaohongshu requested captcha or risk control (461). Log in locally and update your Cookie. Degraded and continuing with links, pasted text, or the form.');
+  }
+  if (isXhsRateLimitError(error) || /429|频繁|cuqps|too many requests|rate limit/i.test(text)) {
+    return messageFn(locale,
+      '【请求过快】小红书暂时限流。请稍后重试关键词搜索；已跳过搜索，继续使用链接、粘贴或表单生成。',
+      '【Rate limited】Xiaohongshu throttled this request. Try keyword search later; search was skipped and planning continued with links, pasted text, or the form.');
   }
   return messageFn(locale, `小红书请求失败：${text}`, `Xiaohongshu request failed: ${text}`);
+}
+
+function formatXhsDegradedWarning(error, locale, messageFn) {
+  return formatXhsWarning(error, locale, messageFn);
 }
 
 function assertSessionResponse(data) {
@@ -221,6 +231,7 @@ module.exports = {
   isXhsAuthError,
   isXhsVerificationError,
   formatXhsWarning,
+  formatXhsDegradedWarning,
   searchNotes,
   searchNotesDetailed,
   fetchSessionNote,

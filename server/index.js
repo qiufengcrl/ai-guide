@@ -36,18 +36,77 @@ const {
   isXhsAuthError,
   isXhsVerificationError,
 } = require('./xhs/session');
+const { withXhsRetry, xhsThrottle } = require('./xhs/throttle');
 const { getXhsPhoto } = require('./xhs/photos');
 const { searchPlaces } = require('./geo/nominatim');
 
 const JOB_FIELDS = 'id, user_id, status, stage, payload_json, draft_json, work_json, error, committed_trip_id, created_at, updated_at';
 const ticks = new Map();
 const JOB_STALE_MS = 30 * 60 * 1000;
+const XHS_COOKIE_STALE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const json = (value, fallback) => {
   try { return JSON.parse(String(value || '')); } catch { return fallback; }
 };
 const response = (status, body) => ({ status, headers: { 'content-type': 'application/json' }, body });
-const pauseForXhs = () => new Promise((resolve) => setTimeout(resolve, 800));
+
+async function readXhsCookieUpdatedAt(ctx, userId) {
+  const fromSettings = Number(await ctx.settings.get('xhs_cookie_updated_at'));
+  if (Number.isFinite(fromSettings) && fromSettings > 0) return fromSettings;
+  if (userId == null) return 0;
+  try {
+    const rows = await ctx.db.query('SELECT xhs_cookie_updated_at FROM user_meta WHERE user_id = ?', userId);
+    return Number(rows[0]?.xhs_cookie_updated_at) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function writeXhsCookieUpdatedAt(ctx, userId, at = Date.now()) {
+  const stamp = String(at);
+  if (typeof ctx.settings?.set === 'function') {
+    try { await ctx.settings.set('xhs_cookie_updated_at', stamp); } catch { /* SDK may be read-only */ }
+  }
+  if (userId == null) return;
+  try {
+    await ctx.db.exec(
+      'INSERT INTO user_meta (user_id, xhs_cookie_updated_at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET xhs_cookie_updated_at = excluded.xhs_cookie_updated_at',
+      userId,
+      at,
+    );
+  } catch {
+    // Health check / testXhs should not fail because meta storage is unavailable.
+  }
+}
+
+async function warnIfXhsCookieStale(job, ctx, cookie, locale) {
+  if (!cookie) return;
+  const updatedAt = await readXhsCookieUpdatedAt(ctx, job.userId);
+  if (!updatedAt) return;
+  if (Date.now() - updatedAt <= XHS_COOKIE_STALE_MS) return;
+  addWarning(job, message(locale,
+    '小红书 Cookie 已超过 7 天未更新，可能已过期。建议重新登录 www.xiaohongshu.com 后在插件设置中更新 Cookie。生成不会因此中断。',
+    'Your Xiaohongshu Cookie was last updated more than 7 days ago and may have expired. Log in at www.xiaohongshu.com and update it in plugin settings. Planning will continue.'));
+}
+
+async function ensureXhsSignedAccess(job, work, cookie, locale, ctx) {
+  if (!cookie) return false;
+  if (work.xhsSignedApiBlocked) return false;
+  if (work.xhsHealthChecked) return true;
+  work.xhsHealthChecked = true;
+  try {
+    await withXhsRetry(() => searchNotesDetailed('旅行', cookie, 1));
+    await writeXhsCookieUpdatedAt(ctx, job.userId);
+    return true;
+  } catch (error) {
+    addWarning(job, formatXhsWarning(error, locale, message));
+    if (isXhsAuthError(error) || isXhsVerificationError(error)) {
+      work.xhsSignedApiBlocked = true;
+      return false;
+    }
+    return true;
+  }
+}
 
 function isTransientTickError(error) {
   if (!error) return false;
@@ -114,7 +173,7 @@ function addWarning(job, text) {
   if (!job.draft.warnings.includes(text)) job.draft.warnings.push(text);
 }
 
-async function runKeywordSearch(job, work, cookie, limits, locale) {
+async function runKeywordSearch(job, work, cookie, limits, locale, ctx) {
   const wantsKeywordSearch = limits.xhsEnabled
     && resolveXhsKeywordSearch(job.payload.xhsKeywordSearch);
   if (!wantsKeywordSearch) return;
@@ -130,6 +189,7 @@ async function runKeywordSearch(job, work, cookie, limits, locale) {
       'No Xiaohongshu Cookie is configured; keyword search was skipped'));
     return;
   }
+  if (work.xhsSignedApiBlocked) return;
   if (!job.draft.intent.destination) return;
 
   const hasUserSources = (job.draft.guides || []).length > 0
@@ -144,14 +204,15 @@ async function runKeywordSearch(job, work, cookie, limits, locale) {
     return;
   }
 
+  if (!(await ensureXhsSignedAccess(job, work, cookie, locale, ctx))) return;
+
   const queries = (job.draft.intent.searchQueries || [job.draft.intent.guideQuery]).slice(0, 2);
   const seen = collectXhsNoteIds(job.draft.guides, work.pendingNotes);
   const beforePending = work.pendingNotes.length;
   let lastError = null;
   for (const query of queries) {
     try {
-      await pauseForXhs();
-      const { notes: automatic } = await searchNotesDetailed(query, cookie, remaining);
+      const { notes: automatic } = await withXhsRetry(() => searchNotesDetailed(query, cookie, remaining));
       work.lastSearchQuery = query;
       work.lastSearchCount = automatic.length;
       if (automatic.length) {
@@ -209,6 +270,7 @@ async function advance(job, ctx) {
   if (job.stage === 'fetch_guides') {
     const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
     const work = job.work;
+    await warnIfXhsCookieStale(job, ctx, cookie, locale);
     if (work.urlIndex < work.urls.length) {
       const value = work.urls[work.urlIndex];
       let consumed = false;
@@ -218,10 +280,10 @@ async function advance(job, ctx) {
           consumed = true;
           work.urlIndex += 1;
           if (!cookie) throw new Error(message(locale, '搜索结果链接需要用户 Cookie', 'A search-result link requires the user Cookie'));
-          await pauseForXhs();
+          if (!(await ensureXhsSignedAccess(job, work, cookie, locale, ctx))) return;
           const remaining = remainingXhsNoteSlots(job.draft.guides, work.pendingNotes, limits.maxNotes);
           const seen = collectXhsNoteIds(job.draft.guides, work.pendingNotes);
-          for (const item of await searchNotes(keyword, cookie, remaining || limits.maxNotes)) {
+          for (const item of await withXhsRetry(() => searchNotes(keyword, cookie, remaining || limits.maxNotes))) {
             if (seen.has(item.noteId) || seen.size >= limits.maxNotes) continue;
             seen.add(item.noteId);
             work.pendingNotes.push(item);
@@ -229,7 +291,7 @@ async function advance(job, ctx) {
         } else {
           const host = (() => { try { return new URL(value).hostname; } catch { return ''; } })();
           if (isShortLinkHost(host) && !work.resolvedNote) {
-            await pauseForXhs();
+            await xhsThrottle.wait();
             work.resolvedNote = await resolveNoteUrl(value);
             return;
           }
@@ -239,7 +301,7 @@ async function advance(job, ctx) {
           work.urlIndex += 1;
           let note;
           try {
-            await pauseForXhs();
+            await xhsThrottle.wait();
             note = await fetchPublicNoteFromResolved(resolved);
           } catch (publicError) {
             const noteId = publicError.noteId || resolved.noteId || noteIdFromUrl(resolved.url || value);
@@ -273,14 +335,17 @@ async function advance(job, ctx) {
     }
     if (!work.searchAttempted) {
       work.searchAttempted = true;
-      await runKeywordSearch(job, work, cookie, limits, locale);
+      await runKeywordSearch(job, work, cookie, limits, locale, ctx);
       return;
     }
     if (work.noteIndex < work.pendingNotes.length) {
+      if (!(await ensureXhsSignedAccess(job, work, cookie, locale, ctx))) {
+        work.noteIndex = work.pendingNotes.length;
+        return;
+      }
       const item = work.pendingNotes[work.noteIndex++];
       try {
-        await pauseForXhs();
-        const note = await fetchSessionNote(item, cookie);
+        const note = await withXhsRetry(() => fetchSessionNote(item, cookie));
         job.draft.guides.push({
           ...note,
           id: `g_${job.draft.guides.length + 1}`,
@@ -429,7 +494,7 @@ async function advance(job, ctx) {
     if (!job.work.photosDone) {
       job.work.photosDone = true;
       const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
-      if (cookie && job.work.evidence?.length) {
+      if (cookie && job.work.evidence?.length && !job.work.xhsSignedApiBlocked) {
         const destination = job.draft.intent.destination || '';
         await mapConcurrent(job.work.evidence, 3, async (item) => {
           try {
@@ -475,7 +540,7 @@ async function advance(job, ctx) {
   }
 }
 
-async function testXhs(ctx, locale = 'en', keyword = '旅行') {
+async function testXhs(ctx, locale = 'en', keyword = '旅行', userId = null) {
   const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
   if (!cookie) {
     return {
@@ -484,7 +549,8 @@ async function testXhs(ctx, locale = 'en', keyword = '旅行') {
     };
   }
   try {
-    const { notes, debug } = await searchNotesDetailed(String(keyword || '旅行').trim() || '旅行', cookie, 4);
+    const { notes, debug } = await withXhsRetry(() =>
+      searchNotesDetailed(String(keyword || '旅行').trim() || '旅行', cookie, 4));
     if (!notes.length) {
       return {
         ok: false,
@@ -493,6 +559,7 @@ async function testXhs(ctx, locale = 'en', keyword = '旅行') {
         message: message(locale, `小红书会话可用，但「${keyword}」没有搜到笔记`, `Session works, but "${keyword}" returned no notes`),
       };
     }
+    await writeXhsCookieUpdatedAt(ctx, userId);
     return {
       ok: true,
       count: notes.length,
@@ -523,6 +590,10 @@ module.exports = definePlugin({
       '002_one_active_job',
       "CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_user ON jobs(user_id) WHERE status IN ('queued', 'running')",
     );
+    await ctx.db.migrate('003_user_meta', `CREATE TABLE IF NOT EXISTS user_meta (
+      user_id INTEGER PRIMARY KEY,
+      xhs_cookie_updated_at INTEGER
+    )`);
   },
   routes: [
     {
@@ -701,7 +772,7 @@ module.exports = definePlugin({
     {
       method: 'POST', path: '/xhs/test', auth: true,
       async handler(req, ctx) {
-        return response(200, await testXhs(ctx, req.body?.locale || 'en', req.body?.keyword));
+        return response(200, await testXhs(ctx, req.body?.locale || 'en', req.body?.keyword, req.user?.id));
       },
     },
   ],
@@ -710,6 +781,7 @@ module.exports = definePlugin({
   },
   async deleteUserData({ userId }, ctx) {
     await ctx.db.exec('DELETE FROM jobs WHERE user_id = ?', userId);
+    await ctx.db.exec('DELETE FROM user_meta WHERE user_id = ?', userId);
   },
   async exportUserData({ userId }, ctx) {
     const rows = await ctx.db.query(`SELECT ${JOB_FIELDS} FROM jobs WHERE user_id = ? ORDER BY created_at`, userId);

@@ -13,11 +13,21 @@ Module._load = function (request, parent, isMain) {
 const plugin = require('../server/index');
 Module._load = originalLoad;
 const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, inferDestinationFromGuides, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES } = require('../server/pipeline');
-const { normalizeXhsCookie } = require('../server/xhs/session');
+const { normalizeXhsCookie, formatXhsWarning, formatXhsDegradedWarning, isXhsAuthError, XhsSessionError } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces, isRateLimitError } = require('../server/geo/nominatim');
+const {
+  isXhsRateLimitError,
+  withXhsRetry,
+  xhsThrottle,
+  xhsBackoffDelayMs,
+  setXhsThrottleForTests,
+  BASE_INTERVAL_MS,
+  MAX_INTERVAL_MS,
+} = require('../server/xhs/throttle');
 
 setGeoThrottleInterval(0);
+setXhsThrottleForTests({ baseIntervalMs: 0, jitterMs: 0, backoffDelayMs: 0 });
 
 const GRANTS = [
   'ai:invoke', 'db:own', 'db:create:trips', 'db:read:trips',
@@ -94,10 +104,14 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.ok(!manifest.settings.some((field) => field.key === 'xhs_keyword_search'));
   const cookieFields = manifest.settings.filter((field) => field.key === 'xhs_cookie');
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
+  const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
+  assert.equal(cookieUpdatedAt.scope, 'user');
+  assert.equal(manifest.version, '1.1.31');
 });
 
 function memoryDb() {
   const jobs = new Map();
+  const userMeta = new Map();
   const api = {
     async migrate() { return { applied: true }; },
     async exec(sql, ...args) {
@@ -123,6 +137,15 @@ function memoryDb() {
         for (const [id, row] of jobs) if (row.user_id === args[0]) { jobs.delete(id); changes += 1; }
         return { changes };
       }
+      if (/INSERT INTO user_meta/i.test(sql)) {
+        const [userId, at] = args;
+        userMeta.set(userId, { user_id: userId, xhs_cookie_updated_at: at });
+        return { changes: 1 };
+      }
+      if (/DELETE FROM user_meta/i.test(sql)) {
+        const existed = userMeta.delete(args[0]);
+        return { changes: existed ? 1 : 0 };
+      }
       throw new Error(`Unexpected exec: ${sql}`);
     },
     async query(sql, ...args) {
@@ -139,10 +162,15 @@ function memoryDb() {
       if (sql.includes('WHERE user_id = ? ORDER BY created_at')) {
         return rows.filter((row) => row.user_id === args[0]).sort((a, b) => a.created_at - b.created_at);
       }
+      if (/FROM user_meta/i.test(sql)) {
+        const row = userMeta.get(args[0]);
+        return row ? [row] : [];
+      }
       throw new Error(`Unexpected query: ${sql}`);
     },
     async tx() { return { results: [] }; },
     jobs,
+    userMeta,
   };
   return api;
 }
@@ -1043,3 +1071,182 @@ test('GET /plan 等待 tick 后会从数据库返回最新阶段', async () => {
   const second = await fixture.app.route({ method: 'GET', path: '/plan' }, { query: { jobId: created.body.jobId } });
   assert.notEqual(first.body.stage, second.body.stage);
 });
+
+function restoreXhsThrottle() {
+  setXhsThrottleForTests({ baseIntervalMs: 0, jitterMs: 0, backoffDelayMs: 0 });
+}
+
+test('isXhsRateLimitError 与 withXhsRetry：限流至少重试一次，认证错误不重试', async () => {
+  assert.equal(isXhsRateLimitError(new Error('Xiaohongshu returned 429')), true);
+  assert.equal(isXhsRateLimitError(new Error('请求过于频繁')), true);
+  assert.equal(isXhsRateLimitError(new Error('Xiaohongshu requested verification (461)')), true);
+  assert.equal(isXhsRateLimitError(new Error('CUQPS has exceeded the limit')), true);
+  assert.equal(isXhsRateLimitError(new XhsSessionError('signed session code=300011', 'auth')), false);
+  assert.equal(xhsBackoffDelayMs(0), 0);
+
+  let rateCalls = 0;
+  const retried = await withXhsRetry(async () => {
+    rateCalls += 1;
+    if (rateCalls === 1) throw new Error('Xiaohongshu returned 429');
+    return 'ok';
+  });
+  assert.equal(retried, 'ok');
+  assert.ok(rateCalls >= 2);
+
+  let authCalls = 0;
+  await assert.rejects(withXhsRetry(async () => {
+    authCalls += 1;
+    throw new XhsSessionError('Xiaohongshu rejected the signed session (code=300011)', 'auth');
+  }), (error) => isXhsAuthError(error));
+  assert.equal(authCalls, 1);
+});
+
+test('xhsThrottle 基础间隔与 penalize 加倍，三次成功后恢复', async () => {
+  const sleeps = [];
+  setXhsThrottleForTests({
+    baseIntervalMs: BASE_INTERVAL_MS,
+    maxIntervalMs: MAX_INTERVAL_MS,
+    jitterMs: 0,
+    backoffDelayMs: 0,
+    now: () => 0,
+    sleep: async (ms) => { sleeps.push(ms); },
+  });
+  try {
+    assert.equal(xhsThrottle.intervalMs, 3000);
+    await xhsThrottle.wait();
+    assert.equal(sleeps[0], 3000);
+    xhsThrottle.penalize();
+    assert.equal(xhsThrottle.intervalMs, 6000);
+    xhsThrottle.penalize();
+    assert.equal(xhsThrottle.intervalMs, 12000);
+    xhsThrottle.penalize();
+    assert.equal(xhsThrottle.intervalMs, 12000);
+    xhsThrottle.recordSuccess();
+    xhsThrottle.recordSuccess();
+    assert.equal(xhsThrottle.intervalMs, 12000);
+    xhsThrottle.recordSuccess();
+    assert.equal(xhsThrottle.intervalMs, 6000);
+    xhsThrottle.recordSuccess();
+    xhsThrottle.recordSuccess();
+    xhsThrottle.recordSuccess();
+    assert.equal(xhsThrottle.intervalMs, 3000);
+    assert.equal(xhsBackoffDelayMs(0), 0);
+  } finally {
+    restoreXhsThrottle();
+  }
+});
+
+test('xhsBackoffDelayMs 生产值为 5s → 10s → 20s', () => {
+  setXhsThrottleForTests({ baseIntervalMs: 0, jitterMs: 0 });
+  try {
+    assert.equal(xhsBackoffDelayMs(0), 5000);
+    assert.equal(xhsBackoffDelayMs(1), 10000);
+    assert.equal(xhsBackoffDelayMs(2), 20000);
+  } finally {
+    restoreXhsThrottle();
+  }
+});
+
+test('Cookie 健康检查失败时跳过 signed API，粘贴路径仍 ready', async () => {
+  const fixture = buildHost({
+    config: { xhs_enabled: true },
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+  });
+  let edithCalls = 0;
+  const authFallback = (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      edithCalls += 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() { return { success: false, code: 300011, msg: '账号异常' }; },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  const { state } = await makeReady(fixture, {
+    destination: '京都',
+    sourceText: '清水寺值得清晨前往。金阁寺也很美。',
+    xhsKeywordSearch: true,
+  }, authFallback);
+  assert.equal(state.status, 'ready');
+  assert.ok(state.warnings.some((warning) => /【认证失败】/.test(warning)));
+  assert.ok(state.guides.some((guide) => guide.via === 'paste'));
+  assert.ok(!state.guides.some((guide) => guide.via === 'search'));
+  assert.equal(edithCalls, 1);
+  assert.ok(state.days.flatMap((day) => day.places).length >= 1);
+});
+
+test('Cookie 超过 7 天给出非阻断 warning', async () => {
+  const eightDaysAgo = Date.now() - (8 * 24 * 60 * 60 * 1000);
+  const fixture = buildHost({
+    userSettings: {
+      xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session`,
+      xhs_cookie_updated_at: String(eightDaysAgo),
+    },
+  });
+  const xhsFallback = (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() { return { success: true, data: { items: [] } }; },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  const { state } = await makeReady(fixture, { destination: '京都', locale: 'zh' }, xhsFallback);
+  assert.equal(state.status, 'ready');
+  assert.ok(state.warnings.some((warning) => /超过 7 天/.test(warning)));
+  assert.ok(state.days.flatMap((day) => day.places).length >= 1);
+  assert.ok(!state.warnings.some((warning) => /中断/.test(warning) && /失败/.test(warning)));
+});
+
+test('限流降级文案区分认证与请求过快（中英），并说明继续/跳过搜索', () => {
+  const authZh = formatXhsWarning(new XhsSessionError('signed session', 'auth'), 'zh', message);
+  const authEn = formatXhsWarning(new XhsSessionError('signed session', 'auth'), 'en', message);
+  assert.match(authZh, /【认证失败】/);
+  assert.match(authZh, /插件设置/);
+  assert.match(authEn, /【Auth failed】/);
+  assert.match(authEn, /plugin settings/i);
+
+  const rateZh = formatXhsWarning(new XhsSessionError('Xiaohongshu returned 429', 'fetch'), 'zh', message);
+  const rateEn = formatXhsWarning(new XhsSessionError('Xiaohongshu returned 429', 'fetch'), 'en', message);
+  assert.match(rateZh, /【请求过快】/);
+  assert.match(rateZh, /跳过搜索|继续使用/);
+  assert.match(rateEn, /【Rate limited】/);
+  assert.match(rateEn, /search was skipped|continu/i);
+
+  const verifyZh = formatXhsDegradedWarning(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification'), 'zh', message);
+  const verifyEn = formatXhsDegradedWarning(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification'), 'en', message);
+  assert.match(verifyZh, /【需要验证】/);
+  assert.match(verifyZh, /已降级继续/);
+  assert.match(verifyEn, /Degraded and continuing/i);
+});
+
+test('关键词搜索遇 429 会退避重试并降级继续表单路径', async () => {
+  const fixture = buildHost({
+    config: { xhs_enabled: true },
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+  });
+  let edithCalls = 0;
+  const rateFallback = (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      edithCalls += 1;
+      return { ok: false, status: 429, headers: { get() { return null; } }, async json() { return {}; } };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  const { state } = await makeReady(fixture, {
+    destination: '京都',
+    xhsKeywordSearch: true,
+    locale: 'zh',
+  }, rateFallback);
+  assert.equal(state.status, 'ready');
+  assert.ok(edithCalls >= 2);
+  assert.ok(state.warnings.some((warning) => /请求过快|跳过搜索|继续使用/.test(warning)));
+  assert.ok(state.days.flatMap((day) => day.places).length >= 1);
+});
+
