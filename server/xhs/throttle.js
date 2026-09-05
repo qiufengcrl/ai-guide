@@ -25,8 +25,12 @@ function xhsBackoffDelayMs(attempt) {
   return backoffFn(Math.max(0, attempt));
 }
 
-function scopeKey(cookie) {
-  return cookieFingerprint(cookie) || 'public';
+function scopeKey(cookie, userId) {
+  const fp = cookieFingerprint(cookie);
+  if (fp) return fp;
+  const id = Number(userId);
+  if (Number.isInteger(id) && id > 0) return `u:${id}`;
+  return 'anon';
 }
 
 function createScope() {
@@ -39,17 +43,20 @@ function createScope() {
   };
 }
 
-function getScope(cookie) {
-  const key = scopeKey(cookie);
+function getScope(cookie, userId) {
+  const key = scopeKey(cookie, userId);
   let scope = scopes.get(key);
-  if (!scope) {
-    if (scopes.size >= MAX_SCOPES) {
-      const oldest = scopes.keys().next().value;
-      if (oldest) scopes.delete(oldest);
-    }
-    scope = createScope();
+  if (scope) {
+    scopes.delete(key);
     scopes.set(key, scope);
+    return scope;
   }
+  if (scopes.size >= MAX_SCOPES) {
+    const oldest = scopes.keys().next().value;
+    if (oldest) scopes.delete(oldest);
+  }
+  scope = createScope();
+  scopes.set(key, scope);
   return scope;
 }
 
@@ -57,14 +64,15 @@ function resetThrottleState() {
   scopes.clear();
 }
 
-function penalize(cookie) {
-  const scope = getScope(cookie);
+function penalize(cookie, userId) {
+  const scope = getScope(cookie, userId);
   scope.intervalMs = Math.min(maxIntervalMs, Math.max(baseIntervalMs, scope.intervalMs) * 2);
   scope.successStreak = 0;
 }
 
-function recordSuccess(cookie) {
-  const scope = getScope(cookie);
+function recordSuccess(cookie, userId) {
+  const scope = getScope(cookie, userId);
+  scope.signedBlockedUntil = 0;
   if (scope.intervalMs <= baseIntervalMs) {
     scope.intervalMs = baseIntervalMs;
     scope.successStreak = 0;
@@ -77,12 +85,12 @@ function recordSuccess(cookie) {
   }
 }
 
-function markSignedBlocked(cookie) {
-  getScope(cookie).signedBlockedUntil = nowFn() + SIGNED_BLOCK_MS;
+function markSignedBlocked(cookie, userId) {
+  getScope(cookie, userId).signedBlockedUntil = nowFn() + SIGNED_BLOCK_MS;
 }
 
-function isSignedBlocked(cookie) {
-  return nowFn() < (getScope(cookie).signedBlockedUntil || 0);
+function isSignedBlocked(cookie, userId) {
+  return nowFn() < (getScope(cookie, userId).signedBlockedUntil || 0);
 }
 
 async function waitOnce(scope) {
@@ -94,27 +102,27 @@ async function waitOnce(scope) {
   scope.lastAt = nowFn();
 }
 
-async function wait(cookie) {
-  const scope = getScope(cookie);
+async function wait(cookie, userId) {
+  const scope = getScope(cookie, userId);
   const run = scope.waitChain.then(() => waitOnce(scope), () => waitOnce(scope));
   scope.waitChain = run.catch(() => {});
   return run;
 }
 
-async function withXhsRetry(fn, { maxRetries = 2, onRateLimit, cookie, wait: doWait = true } = {}) {
+async function withXhsRetry(fn, { maxRetries = 2, onRateLimit, cookie, userId, wait: doWait = true } = {}) {
   let attempt = 0;
   for (;;) {
-    if (doWait) await wait(cookie);
+    if (doWait) await wait(cookie, userId);
     try {
       const result = await fn();
-      recordSuccess(cookie);
+      recordSuccess(cookie, userId);
       return result;
     } catch (error) {
       if (!isXhsRateLimitError(error) || attempt >= maxRetries) {
-        if (isXhsRateLimitError(error)) markSignedBlocked(cookie);
+        if (isXhsRateLimitError(error)) markSignedBlocked(cookie, userId);
         throw error;
       }
-      penalize(cookie);
+      penalize(cookie, userId);
       if (typeof onRateLimit === 'function') onRateLimit(error, attempt);
       await sleepFn(xhsBackoffDelayMs(attempt));
       attempt += 1;
@@ -141,9 +149,9 @@ function setXhsThrottleForTests(options = {}) {
 }
 
 const xhsThrottle = {
-  get intervalMs() { return getScope('').intervalMs; },
-  get successStreak() { return getScope('').successStreak; },
-  intervalMsFor(cookie) { return getScope(cookie).intervalMs; },
+  get intervalMs() { return getScope().intervalMs; },
+  get successStreak() { return getScope().successStreak; },
+  intervalMsFor(cookie, userId) { return getScope(cookie, userId).intervalMs; },
   wait,
   penalize,
   recordSuccess,

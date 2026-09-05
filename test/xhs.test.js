@@ -5,7 +5,8 @@ const { test } = require('node:test');
 const { searchNotes, fetchSessionNote, formatXhsWarning, isXhsAuthError, isXhsVerificationError, XhsSessionError } = require('../server/xhs/session');
 const { createSignedPost, parseCookieHeader } = require('../server/xhs/signature');
 const { extractXhsUrls, fetchPublicNote } = require('../server/xhs/url');
-const { setXhsThrottleForTests, isXhsRateLimitError } = require('../server/xhs/throttle');
+const { setXhsThrottleForTests, isXhsRateLimitError, xhsThrottle } = require('../server/xhs/throttle');
+const { getXhsPhoto, resetXhsPhotoCacheForTests } = require('../server/xhs/photos');
 
 setXhsThrottleForTests({ baseIntervalMs: 0, jitterMs: 0, backoffDelayMs: 0 });
 
@@ -256,5 +257,65 @@ test('session 笔记 429 会重试 signed feed，并保留公开页兜底', asyn
     assert.ok(signedCalls >= 2);
   } finally {
     global.fetch = originalFetch;
+  }
+});
+
+test('配图 429 不写入空缓存，且不按进程级 signedBlocked 跳过', async () => {
+  resetXhsPhotoCacheForTests();
+  const originalFetch = global.fetch;
+  let signedCalls = 0;
+  global.fetch = async (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      signedCalls += 1;
+      return { ok: false, status: 429, headers: { get() { return null; } }, async json() { return {}; } };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  try {
+    await assert.rejects(getXhsPhoto('清水寺', VALID_COOKIE, '京都'), isXhsRateLimitError);
+    const afterFirst = signedCalls;
+    assert.ok(afterFirst >= 2);
+    await assert.rejects(getXhsPhoto('清水寺', VALID_COOKIE, '京都'), isXhsRateLimitError);
+    assert.ok(signedCalls > afterFirst);
+    assert.equal(xhsThrottle.isSignedBlocked(VALID_COOKIE), true);
+  } finally {
+    global.fetch = originalFetch;
+    resetXhsPhotoCacheForTests();
+  }
+});
+
+test('配图缓存按 Cookie 隔离，成功 URL 不串到其他用户', async () => {
+  resetXhsPhotoCacheForTests();
+  const otherCookie = `a1=${'b'.repeat(52)}; web_session=other-session; xsecappid=xhs-pc-web`;
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    const href = String(url);
+    if (href.includes('/search/notes')) {
+      return response(fixture('search.json'));
+    }
+    if (href.includes('/feed')) {
+      const cookie = String(init?.headers?.cookie || '');
+      const cover = cookie.includes('other-session') ? 'https://example.test/other.jpg' : 'https://example.test/owner.jpg';
+      return response({
+        success: true,
+        data: {
+          items: [{
+            note_card: {
+              image_list: [{ info_list: [{ url: cover }, { url: cover }] }],
+            },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected fetch: ${href}`);
+  };
+  try {
+    const owner = await getXhsPhoto('清水寺', VALID_COOKIE, '京都');
+    const other = await getXhsPhoto('清水寺', otherCookie, '京都');
+    assert.equal(owner, 'https://example.test/owner.jpg');
+    assert.equal(other, 'https://example.test/other.jpg');
+  } finally {
+    global.fetch = originalFetch;
+    resetXhsPhotoCacheForTests();
   }
 });

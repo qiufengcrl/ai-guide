@@ -71,9 +71,12 @@ function formatXhsWarning(error, locale, messageFn, options = {}) {
       `【Verification required】Xiaohongshu requested captcha or risk control (461). Log in locally and update your Cookie. Degraded and continuing. ${suffix}`);
   }
   if (isXhsRateLimitError(error) || /429|频繁|cuqps|too many requests|rate limit/i.test(text)) {
+    const retry = scene === 'search'
+      ? messageFn(locale, '请稍后重试关键词搜索。', 'Try keyword search later. ')
+      : messageFn(locale, '请稍后再试。', 'Try again later. ');
     return messageFn(locale,
-      `【请求过快】小红书暂时限流。请稍后重试关键词搜索。${suffix}`,
-      `【Rate limited】Xiaohongshu throttled this request. Try keyword search later. ${suffix}`);
+      `【请求过快】小红书暂时限流。${retry}${suffix}`,
+      `【Rate limited】Xiaohongshu throttled this request. ${retry}${suffix}`);
   }
   return messageFn(locale, `小红书请求失败：${text}`, `Xiaohongshu request failed: ${text}`);
 }

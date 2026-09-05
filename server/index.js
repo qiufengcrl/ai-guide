@@ -26,7 +26,7 @@ const {
   mapConcurrent,
   resolveCandidateEvidence,
 } = require('./pipeline');
-const { fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
+const { fetchPublicNote, fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const {
   normalizeXhsCookie,
   searchNotes,
@@ -156,6 +156,25 @@ function addWarning(job, text) {
   if (!job.draft.warnings.includes(text)) job.draft.warnings.push(text);
 }
 
+async function ingestPendingNoteFromPublic(job, item, locale, userId) {
+  if (!item?.url) return;
+  try {
+    await xhsThrottle.wait(null, userId);
+    const note = await fetchPublicNote(item.url);
+    if (!String(note?.text || '').trim() && !String(note?.title || '').trim()) return;
+    job.draft.guides.push({
+      ...note,
+      id: `g_${job.draft.guides.length + 1}`,
+      via: item.via || note.via || 'url',
+      title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
+      text: String(note.text || '').slice(0, 4000),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error || '');
+    addWarning(job, message(locale, `链接读取失败：${detail}`, `Could not read link: ${detail}`));
+  }
+}
+
 async function runKeywordSearch(job, work, cookie, limits, locale, ctx) {
   const wantsKeywordSearch = limits.xhsEnabled
     && resolveXhsKeywordSearch(job.payload.xhsKeywordSearch);
@@ -276,7 +295,7 @@ async function advance(job, ctx) {
         } else {
           const host = (() => { try { return new URL(value).hostname; } catch { return ''; } })();
           if (isShortLinkHost(host) && !work.resolvedNote) {
-            await xhsThrottle.wait(cookie);
+            await xhsThrottle.wait(cookie, job.userId);
             work.resolvedNote = await resolveNoteUrl(value);
             return;
           }
@@ -286,7 +305,7 @@ async function advance(job, ctx) {
           work.urlIndex += 1;
           let note;
           try {
-            await xhsThrottle.wait(cookie);
+            await xhsThrottle.wait(cookie, job.userId);
             note = await fetchPublicNoteFromResolved(resolved);
           } catch (publicError) {
             const noteId = publicError.noteId || resolved.noteId || noteIdFromUrl(resolved.url || value);
@@ -327,11 +346,12 @@ async function advance(job, ctx) {
       return;
     }
     if (work.noteIndex < work.pendingNotes.length) {
-      if (!(await ensureXhsSignedAccess(job, work, cookie, locale, ctx))) {
-        work.noteIndex = work.pendingNotes.length;
+      const signedOk = await ensureXhsSignedAccess(job, work, cookie, locale, ctx);
+      const item = work.pendingNotes[work.noteIndex++];
+      if (!signedOk) {
+        await ingestPendingNoteFromPublic(job, item, locale, job.userId);
         return;
       }
-      const item = work.pendingNotes[work.noteIndex++];
       try {
         const note = await fetchSessionNote(item, cookie);
         job.draft.guides.push({
@@ -354,7 +374,6 @@ async function advance(job, ctx) {
         addWarning(job, formatXhsWarning(error, locale, message, { scene: 'signed' }));
         if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
           blockSignedXhs(work, cookie);
-          work.noteIndex = work.pendingNotes.length;
         }
       }
       return;
@@ -497,13 +516,17 @@ async function advance(job, ctx) {
       const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
       if (cookie && job.work.evidence?.length && !job.work.xhsSignedApiBlocked) {
         const destination = job.draft.intent.destination || '';
-        await mapConcurrent(job.work.evidence, 3, async (item) => {
+        for (const item of job.work.evidence) {
+          if (job.work.xhsSignedApiBlocked) break;
           try {
             item.photoUrl = await getXhsPhoto(item.name, cookie, destination);
-          } catch {
+          } catch (error) {
             item.photoUrl = '';
+            if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+              blockSignedXhs(job.work, cookie);
+            }
           }
-        });
+        }
       }
       return;
     }
@@ -543,7 +566,7 @@ async function advance(job, ctx) {
 
 async function testXhs(ctx, locale = 'en', keyword = '旅行', userId = null) {
   const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
-  const uid = resolveActingUserId(ctx, userId);
+  const uid = await resolveActingUserId(ctx, userId);
   if (!cookie) {
     return {
       ok: false,
@@ -601,6 +624,7 @@ module.exports = definePlugin({
       user_id INTEGER,
       updated_at INTEGER NOT NULL
     )`);
+    await ctx.db.migrate('005_xhs_cookie_clock_drop_orphans', 'DELETE FROM xhs_cookie_clock WHERE user_id IS NULL');
   },
   routes: [
     {

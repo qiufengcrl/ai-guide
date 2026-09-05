@@ -1260,6 +1260,9 @@ test('限流降级文案区分认证与请求过快（中英），并说明继�
   const signedZh = formatXhsWarning(new XhsSessionError('Xiaohongshu returned 429', 'fetch'), 'zh', message, { scene: 'signed' });
   assert.match(signedZh, /【请求过快】/);
   assert.doesNotMatch(signedZh, /已跳过搜索/);
+  assert.doesNotMatch(signedZh, /关键词搜索/);
+  const signedEn = formatXhsWarning(new XhsSessionError('Xiaohongshu returned 429', 'fetch'), 'en', message, { scene: 'signed' });
+  assert.doesNotMatch(signedEn, /keyword search/i);
 
   const verifyZh = formatXhsDegradedWarning(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification'), 'zh', message);
   const verifyEn = formatXhsDegradedWarning(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification'), 'en', message);
@@ -1305,25 +1308,41 @@ test('xhsThrottle penalize 按 Cookie 隔离，不影响其他用户', () => {
     xhsThrottle.penalize(cookieA);
     assert.equal(xhsThrottle.intervalMsFor(cookieA), 6000);
     assert.equal(xhsThrottle.intervalMsFor(cookieB), 3000);
+    xhsThrottle.penalize('', 11);
+    assert.equal(xhsThrottle.intervalMsFor('', 11), 6000);
+    assert.equal(xhsThrottle.intervalMsFor('', 12), 3000);
   } finally {
     restoreXhsThrottle();
   }
 });
 
-test('readXhsCookieUpdatedAt 取 settings 与 DB 的较新值', async () => {
+test('readXhsCookieUpdatedAt 以 DB 为准，手填 settings 不能盖住旧值', async () => {
   const eightDaysAgo = Date.now() - (8 * 24 * 60 * 60 * 1000);
   const fresh = Date.now();
-  const ctx = {
+  const dbWins = {
     settings: { async get() { return String(eightDaysAgo); } },
     db: { async query() { return [{ xhs_cookie_updated_at: fresh }]; } },
   };
-  assert.equal(await readXhsCookieUpdatedAt(ctx, 7, ''), fresh);
+  assert.equal(await readXhsCookieUpdatedAt(dbWins, 7, ''), fresh);
+
+  const settingsCannotHide = {
+    settings: { async get() { return String(fresh); } },
+    db: { async query() { return [{ xhs_cookie_updated_at: eightDaysAgo }]; } },
+  };
+  assert.equal(await readXhsCookieUpdatedAt(settingsCannotHide, 7, ''), eightDaysAgo);
+
+  const futureSettings = {
+    settings: { async get() { return String(Date.now() + 86400000); } },
+    db: { async query() { return []; } },
+  };
+  assert.equal(await readXhsCookieUpdatedAt(futureSettings, 7, ''), 0);
 });
 
-test('设置页 testXhs 成功会写入 Cookie 时间戳', async () => {
+test('POST /xhs/test 成功会写入 Cookie 时间戳', async () => {
   const fixture = buildHost({
     userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
   });
+  delete fixture.host.ctx.user;
   await fixture.app.load();
   const original = global.fetch;
   global.fetch = async (url) => {
@@ -1350,9 +1369,38 @@ test('设置页 testXhs 成功会写入 Cookie 时间戳', async () => {
     throw new Error(`Unexpected fetch: ${url}`);
   };
   try {
-    const result = await fixture.app.action('testXhs');
-    assert.equal(result.ok, true);
+    const result = await fixture.app.route({ method: 'POST', path: '/xhs/test' }, { body: { locale: 'zh' } });
+    assert.equal(result.body.ok, true);
     assert.ok(Number(fixture.db.userMeta.get(7)?.xhs_cookie_updated_at) > 0);
+    assert.equal([...fixture.db.cookieClock.values()].every((row) => row.user_id === 7), true);
+  } finally {
+    global.fetch = original;
+  }
+});
+
+test('设置页 testXhs 在无 userId 时不写无主 clock', async () => {
+  const fixture = buildHost({
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+  });
+  delete fixture.host.ctx.user;
+  await fixture.app.load();
+  const original = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() { return { success: true, data: { items: [] } }; },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  try {
+    const result = await fixture.app.action('testXhs');
+    assert.equal(result.ok, false);
+    assert.equal(fixture.db.userMeta.size, 0);
+    assert.equal(fixture.db.cookieClock.size, 0);
   } finally {
     global.fetch = original;
   }
@@ -1388,5 +1436,80 @@ test('settings 旧时间戳不会盖住健康检查写入的新值', async () =>
 
   const second = await makeReady(fixture, { destination: '京都', locale: 'zh' }, xhsFallback);
   assert.ok(!second.state.warnings.some((warning) => /超过 7 天/.test(warning)));
+});
+
+test('session 429 后剩余笔记改走公开页，且文案不再提关键词搜索', async () => {
+  const fixture = buildHost({
+    config: { xhs_enabled: true },
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+  });
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures/note.html'), 'utf8');
+  let publicCalls = 0;
+  const xhsFallback = (url) => {
+    const href = String(url);
+    if (href.includes('/search/notes')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() {
+          return {
+            success: true,
+            data: {
+              items: [
+                { model_type: 'note', id: '64f000000000000000000001', xsec_token: 'tok', note_card: { display_title: '一' } },
+                { model_type: 'note', id: '64f000000000000000000002', xsec_token: 'tok', note_card: { display_title: '二' } },
+              ],
+            },
+          };
+        },
+      };
+    }
+    if (href.includes('edith.xiaohongshu.com')) {
+      return { ok: false, status: 429, headers: { get() { return null; } }, async json() { return {}; } };
+    }
+    if (href.includes('xiaohongshu.com')) {
+      publicCalls += 1;
+      const body = href.includes('64f000000000000000000002')
+        ? html.replaceAll('64f000000000000000000001', '64f000000000000000000002')
+        : html;
+      return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return body; } };
+    }
+    throw new Error(`Unexpected fetch: ${href}`);
+  };
+  const { state } = await makeReady(fixture, {
+    destination: '京都',
+    xhsKeywordSearch: true,
+    locale: 'zh',
+  }, xhsFallback);
+  assert.equal(state.status, 'ready');
+  assert.ok(publicCalls >= 2);
+  assert.equal(state.guides.filter((guide) => guide.via === 'search' || guide.via === 'url').length, 2);
+  assert.ok(state.warnings.some((warning) => /请求过快/.test(warning)));
+  assert.equal(state.warnings.some((warning) => /请求过快/.test(warning) && /关键词搜索/.test(warning)), false);
+});
+
+test('deleteUserData 清除该用户 cookie clock', async () => {
+  const fixture = buildHost({
+    config: { xhs_enabled: true },
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+  });
+  const xhsFallback = (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() { return { success: true, data: { items: [] } }; },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  await makeReady(fixture, { destination: '京都', xhsKeywordSearch: true, locale: 'zh' }, xhsFallback);
+  assert.ok(fixture.db.cookieClock.size > 0);
+  assert.ok([...fixture.db.cookieClock.values()].every((row) => row.user_id === 7));
+  await fixture.app.deleteUserData(7);
+  assert.equal(fixture.db.cookieClock.size, 0);
+  assert.equal(fixture.db.userMeta.size, 0);
 });
 

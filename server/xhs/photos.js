@@ -1,10 +1,14 @@
-const { searchNotesDetailed, fetchNoteCoverImage, isXhsAuthError, isXhsVerificationError } = require('./session');
-const { withXhsRetry, xhsThrottle, isXhsRateLimitError } = require('./throttle');
+const { searchNotesDetailed, fetchNoteCoverImage } = require('./session');
+const { withXhsRetry } = require('./throttle');
+const { cookieFingerprint } = require('./freshness');
 
 const PHOTO_CACHE_MAX = 256;
 const PHOTO_CACHE_HIT_TTL_MS = 6 * 60 * 60 * 1000;
-const PHOTO_CACHE_MISS_TTL_MS = 10 * 60 * 1000;
 const photoCache = new Map();
+
+function cacheKey(destination, label, cookie) {
+  return `${cookieFingerprint(cookie)}::${destination}::${label}`;
+}
 
 function cacheGet(key) {
   const entry = photoCache.get(key);
@@ -17,9 +21,11 @@ function cacheGet(key) {
 }
 
 function cachePut(key, url) {
+  const href = String(url || '').trim();
+  if (!href) return;
   photoCache.set(key, {
-    url: String(url || ''),
-    expiresAt: Date.now() + (url ? PHOTO_CACHE_HIT_TTL_MS : PHOTO_CACHE_MISS_TTL_MS),
+    url: href,
+    expiresAt: Date.now() + PHOTO_CACHE_HIT_TTL_MS,
   });
   if (photoCache.size > PHOTO_CACHE_MAX) {
     const oldest = photoCache.keys().next().value;
@@ -27,36 +33,30 @@ function cachePut(key, url) {
   }
 }
 
+function resetXhsPhotoCacheForTests() {
+  photoCache.clear();
+}
+
 async function getXhsPhoto(name, cookie, destination = '') {
   const label = String(name || '').trim();
   if (!label || !cookie) return '';
-  const cacheKey = `${destination}::${label}`;
-  const cached = cacheGet(cacheKey);
+  const key = cacheKey(destination, label, cookie);
+  const cached = cacheGet(key);
   if (cached !== undefined) return cached;
 
-  if (xhsThrottle.isSignedBlocked(cookie)) return '';
-
-  let url = '';
-  try {
-    const query = `${label} 风景`;
-    const { notes } = await withXhsRetry(
-      () => searchNotesDetailed(query, cookie, 1, { sort: 'time_descending' }),
-      { cookie, wait: false },
-    );
-    const item = notes[0];
-    if (item) {
-      url = await withXhsRetry(() => fetchNoteCoverImage(item, cookie), { cookie, wait: false });
-    }
-  } catch (error) {
-    if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
-      xhsThrottle.markSignedBlocked(cookie);
-    }
-    url = '';
-  }
-  cachePut(cacheKey, url);
-  return url;
+  const query = `${label} 风景`;
+  const { notes } = await withXhsRetry(
+    () => searchNotesDetailed(query, cookie, 1, { sort: 'time_descending' }),
+    { cookie },
+  );
+  const item = notes[0];
+  if (!item) return '';
+  const url = await withXhsRetry(() => fetchNoteCoverImage(item, cookie), { cookie });
+  cachePut(key, url);
+  return url || '';
 }
 
 module.exports = {
   getXhsPhoto,
+  resetXhsPhotoCacheForTests,
 };
