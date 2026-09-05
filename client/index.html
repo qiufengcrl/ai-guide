@@ -904,19 +904,20 @@
       .commit-card .field { grid-row: 1 / span 2; align-self: end; }
     }
     @media (max-width: 720px) {
-      .page { padding: 14px 14px 56px; }
+      .page { padding: 10px 12px calc(132px + env(safe-area-inset-bottom, 0px) + var(--trek-inset-bottom, 0px)); }
       .app-shell::before { background-size: 52px 52px; }
-      .hero { display: block; min-height: auto; padding: 22px 18px 18px; border-radius: 22px; }
-      .hero h1 { font-size: clamp(32px, 10vw, 42px); line-height: 1.05; }
-      .hero-subtitle { margin-top: 12px; font-size: 14px; line-height: 1.65; }
-      .hero-actions { margin-top: 16px; }
-      .hero-note { width: 100%; }
+      .hero { display: block; min-height: auto; padding: 14px 16px 12px; border-radius: 20px; }
+      .hero::after { display: none; }
+      .hero .eyebrow, .hero-subtitle, .hero-note { display: none; }
+      .hero h1 { font-size: 26px; line-height: 1.08; }
+      .hero-actions { margin-top: 0; }
       .hero-map { display: none; }
       .map-place { width: 34px; height: 34px; }
       .workspace-grid,
       .preview-layout { margin-top: 14px; gap: 14px; grid-template-columns: minmax(0, 1fr); }
-      .panel-header { display: block; padding: 23px 20px 20px; }
-      .panel-header h2 { font-size: 22px; }
+      .panel-header { display: block; padding: 18px 18px 16px; }
+      .panel-header h2 { font-size: 19px; margin-top: 8px; }
+      .panel-header p { display: none; }
       .form-body { padding: 0 20px 22px; }
       .form-section { padding: 22px 0; }
       .field-grid, .field-grid--travel { grid-template-columns: minmax(0, 1fr); }
@@ -930,19 +931,36 @@
       .day-header { grid-template-columns: auto 34px minmax(0, 1fr); padding: 16px; }
       .day-total { display: none; }
       .place-list { padding: 3px 16px 6px; }
-      .place-row { grid-template-columns: auto 28px 44px minmax(0, 1fr); gap: 10px; }
+      .place-row {
+        grid-template-columns: auto 28px 44px minmax(0, 1fr);
+        grid-template-areas:
+          "check marker photo copy"
+          ". . . meta";
+        gap: 10px;
+      }
       .place-row::before { left: 33px; }
-      .place-marker { width: 28px; height: 28px; }
-      .place-meta { grid-column: 3; justify-content: flex-start; max-width: none; margin-top: -6px; padding-bottom: 3px; }
+      .place-marker { width: 28px; height: 28px; grid-area: marker; }
+      .place-check { grid-area: check; }
+      .place-photo { grid-area: photo; width: 44px; height: 44px; }
+      .place-copy { grid-area: copy; }
+      .place-meta { grid-area: meta; justify-content: flex-start; max-width: none; margin-top: 0; padding-bottom: 3px; }
       .distance-warning { max-width: none; }
       .commit-card { display: block; padding: 22px; }
       .commit-card .field { margin-top: 20px; }
     }
 
-    [data-form-factor="phone"] .page { padding: 10px 12px calc(118px + var(--trek-inset-bottom, 0px)); }
+    [data-form-factor="phone"] .page { padding: 10px 12px calc(132px + env(safe-area-inset-bottom, 0px) + var(--trek-inset-bottom, 0px)); }
     [data-form-factor="phone"] .hero-map { display: none; }
-    [data-form-factor="phone"] .hero { display: block; min-height: auto; padding: 18px 16px 16px; }
-    [data-form-factor="phone"] .hero h1 { font-size: 32px; line-height: 1.08; }
+    [data-form-factor="phone"] .hero { display: block; min-height: auto; padding: 14px 16px 12px; }
+    [data-form-factor="phone"] .hero::after { display: none; }
+    [data-form-factor="phone"] .hero .eyebrow,
+    [data-form-factor="phone"] .hero-subtitle,
+    [data-form-factor="phone"] .hero-note { display: none; }
+    [data-form-factor="phone"] .hero h1 { font-size: 26px; line-height: 1.08; }
+    [data-form-factor="phone"] .hero-actions { margin-top: 0; }
+    [data-form-factor="phone"] .panel-header { padding: 18px 18px 16px; }
+    [data-form-factor="phone"] .panel-header h2 { font-size: 19px; margin-top: 8px; }
+    [data-form-factor="phone"] .panel-header p { display: none; }
     [data-form-factor="phone"] .planner-panel { border-radius: 20px; }
     [data-form-factor="phone"] .workspace-grid,
     [data-form-factor="phone"] .preview-layout,
@@ -964,18 +982,39 @@
   <style id="ai-guide-overrides">
     /* Injected kit CSS lands above this block; these rules must win in the phone iframe. */
     [data-form-factor="phone"] .hero-map { display: none !important; }
-    [data-form-factor="phone"] .hero { display: block; min-height: auto; padding: 18px 16px 16px; }
-    [data-form-factor="phone"] .hero h1 { font-size: 32px; line-height: 1.08; }
+    [data-form-factor="phone"] .hero { display: block; min-height: auto; padding: 14px 16px 12px; }
+    [data-form-factor="phone"] .hero::after { display: none !important; }
+    [data-form-factor="phone"] .hero .eyebrow,
+    [data-form-factor="phone"] .hero-subtitle,
+    [data-form-factor="phone"] .hero-note { display: none !important; }
+    [data-form-factor="phone"] .hero h1 { font-size: 26px; line-height: 1.08; }
+    [data-form-factor="phone"] .hero-actions { margin-top: 0; }
+    [data-form-factor="phone"] .panel-header p { display: none !important; }
     @media (max-width: 720px) {
       .hero-map { display: none !important; }
-      .hero h1 { font-size: clamp(32px, 10vw, 42px); line-height: 1.05; }
+      .hero::after { display: none !important; }
+      .hero .eyebrow, .hero-subtitle, .hero-note { display: none !important; }
+      .hero h1 { font-size: 26px; line-height: 1.08; }
+      .hero-actions { margin-top: 0; }
+      .page { padding: 10px 12px calc(132px + env(safe-area-inset-bottom, 0px) + var(--trek-inset-bottom, 0px)) !important; }
+      .panel-header p { display: none !important; }
+      .place-row {
+        grid-template-areas:
+          "check marker photo copy"
+          ". . . meta";
+      }
+      .place-check { grid-area: check; }
+      .place-marker { grid-area: marker; }
+      .place-photo { grid-area: photo; }
+      .place-copy { grid-area: copy; }
+      .place-meta { grid-area: meta; grid-column: auto; }
     }
     .planner-panel.trek-glass,
     [data-form-factor="phone"] .planner-panel.trek-glass { padding: 0; }
     [data-form-factor="phone"] .workspace-grid,
     [data-form-factor="phone"] .preview-layout,
     [data-form-factor="phone"] .guide-rail { grid-template-columns: minmax(0, 1fr); }
-    [data-form-factor="phone"] .page { padding: 10px 12px calc(118px + var(--trek-inset-bottom, 0px)); }
+    [data-form-factor="phone"] .page { padding: 10px 12px calc(132px + env(safe-area-inset-bottom, 0px) + var(--trek-inset-bottom, 0px)); }
     [data-form-factor="phone"] .field-grid--travel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
     [data-form-factor="phone"] .field-grid--travel .date-field { grid-column: 1 / -1; }
     .source-field { display: grid; width: 100%; min-width: 0; }
