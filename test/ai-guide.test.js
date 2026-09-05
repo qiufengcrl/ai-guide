@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, splitRegions, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, destinationSeeds, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob } = require('../server/pipeline');
+const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, destinationSeeds, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces } = require('../server/geo/nominatim');
@@ -291,6 +291,34 @@ test('小范围景点不会被拆成多个区域', () => {
   const split = splitRegions(intent, evidence, 'zh');
   assert.equal(split.regions.length, 0);
   assert.equal(evidence[0].regionName, undefined);
+});
+
+test('LLM 返回空时从衡阳东洲岛攻略正文规则提取景点', () => {
+  const intent = { destination: '衡阳', dayCount: 2, pace: 'balanced', interests: [], mustSee: [] };
+  const guideText = `东洲岛是衡阳湘江上的一江心岛，与长沙橘子洲 、 岳阳君山并称湘江三大洲。
+🗺️推荐路线：
+廊桥登岛 → 船山书院 → 罗汉寺/三面观音 → 夫之楼登顶 → 环岛散步 → 欣赏夜景灯光/喷泉
+▪️船山书院
+晚清名臣彭玉麟捐建的书院。
+▪️罗汉寺
+岛上现存最古老的建筑之一。
+▪️夫之楼
+全岛的最高点。
+▪️环岛步道与夜景
+沿着4.2公里的环岛步道散步。`;
+  const guides = [{ id: 'g_1', title: '📍衡阳｜东洲岛 游玩攻略📝', text: guideText }];
+  const parsed = candidatesFromGuideText(guides, intent);
+  const names = parsed.map((item) => item.name);
+  assert.ok(names.includes('船山书院'));
+  assert.ok(names.includes('罗汉寺'));
+  assert.ok(names.includes('夫之楼'));
+  assert.ok(!names.includes('廊桥登岛'));
+  assert.ok(!names.includes('欣赏夜景'));
+
+  const resolved = resolveExtractCandidates({ candidates: [] }, guides, intent);
+  assert.equal(resolved.source, 'guide_text');
+  assert.ok(resolved.candidates.some((item) => item.name === '船山书院'));
+  assert.equal(resolved.candidates[0].guideId, 'g_1');
 });
 
 test('分享口令里的 xhslink.cn 会被抽成笔记链接，大兴安岭有具体景点', () => {

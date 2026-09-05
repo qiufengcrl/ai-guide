@@ -9,6 +9,10 @@ const {
   extractionText,
   extractionInstruction,
   normalizeCandidates,
+  candidatesFromGuideText,
+  resolveExtractCandidates,
+  guideTextForExtractRetry,
+  extractRetryInstruction,
   looksLikeShareCard,
   noteDisplayTitle,
   gateAndSchedule,
@@ -269,18 +273,57 @@ async function advance(job, ctx) {
 
   if (job.stage === 'extract') {
     const hasGuides = (job.draft.guides || []).some((guide) => String(guide.text || '').trim());
-    const result = await ctx.ai.extract(
-      extractionText(job.draft.guides, job.draft.intent),
-      EXTRACTION_SCHEMA,
-      extractionInstruction(job.draft.intent, hasGuides),
-    );
-    const extracted = result.results[0] || {};
+    let extracted = {};
+    let llmError = null;
+    try {
+      const result = await ctx.ai.extract(
+        extractionText(job.draft.guides, job.draft.intent),
+        EXTRACTION_SCHEMA,
+        extractionInstruction(job.draft.intent, hasGuides),
+      );
+      extracted = result.results[0] || {};
+    } catch (error) {
+      llmError = error instanceof Error ? error.message : String(error);
+      addWarning(job, message(locale,
+        `模型抽取失败（${llmError}），将尝试从攻略正文提取。`,
+        `Model extraction failed (${llmError}); trying guide text parsing.`));
+    }
     if (!job.draft.intent.destination && typeof extracted.intent?.destination === 'string') {
       job.draft.intent.destination = extracted.intent.destination.trim();
       job.draft.intent.guideQuery = `${job.draft.intent.destination} ${job.draft.intent.interests.length ? job.draft.intent.interests.join(' ') : '景点'} 旅游 景点攻略`.trim();
     }
-    job.work.candidates = normalizeCandidates(extracted, job.draft.intent);
-    if (!job.work.candidates.length) {
+    let resolved = resolveExtractCandidates(extracted, job.draft.guides, job.draft.intent);
+    if (!resolved.candidates.length && hasGuides && !job.work.extractRetried) {
+      job.work.extractRetried = true;
+      try {
+        const retry = await ctx.ai.extract(
+          guideTextForExtractRetry(job.draft.guides),
+          EXTRACTION_SCHEMA,
+          extractRetryInstruction(locale, job.draft.intent.dayCount),
+        );
+        const retryResolved = resolveExtractCandidates(retry.results[0] || {}, [], job.draft.intent);
+        if (retryResolved.candidates.length) {
+          resolved = { ...retryResolved, source: 'llm_retry', llmCandidateCount: resolved.llmCandidateCount };
+          addWarning(job, message(locale,
+            '首次模型抽取为空，简版重试已成功识别景点。',
+            'First extraction was empty; a simplified retry succeeded.'));
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (!llmError) llmError = detail;
+      }
+    }
+    job.work.candidates = resolved.candidates;
+    job.work.extractMeta = {
+      source: resolved.source,
+      llmCandidateCount: resolved.llmCandidateCount,
+      llmError,
+    };
+    if (resolved.source === 'guide_text') {
+      addWarning(job, message(locale,
+        '模型未能识别景点，已从攻略正文按规则提取。',
+        'The model did not extract places; names were parsed from guide text.'));
+    } else if (!resolved.candidates.length) {
       addWarning(job, message(locale,
         '没有提取到具体景点。请粘贴攻略、添加链接，或换一个更具体的城市。',
         'No specific places were extracted. Paste a note, add links, or try a more specific city.'));

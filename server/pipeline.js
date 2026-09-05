@@ -32,7 +32,146 @@ const DESTINATION_SEEDS = {
   京都: ['伏见稻荷大社', '清水寺', '岚山', '金阁寺', '祇园'],
   大阪: ['大阪城', '道顿堀', '心斋桥', '通天阁'],
   东京: ['浅草寺', '东京塔', '明治神宫', '涩谷', '上野公园'],
+  衡阳: ['东洲岛', '船山书院', '罗汉寺', '夫之楼', '石鼓书院', '南岳衡山'],
 };
+
+const GUIDE_SECTION_SKIP = /^(🍜|💡|#|美食推荐|避坑|小贴士)/;
+const GUIDE_ROUTE_SKIP = /^(廊桥|登岛|欣赏|观看|拍照|散步|环岛(?!步道)|灯光|喷泉|夜景灯光)/;
+const GUIDE_NAME_SUFFIX = /(登顶|数字展馆.*|与夜景.*|灯光.*|\/喷泉)$/u;
+
+function stripInvisible(text) {
+  return String(text || '')
+    .replace(/[\u200b-\u200d\ufeff\uFE0F\u00a0]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanGuidePlaceName(raw) {
+  let name = stripInvisible(raw)
+    .replace(/^[▪️•·\-–—\d①②③④⑤⑥⑦⑧⑨⑩1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟📍🗺️]+\s*/u, '')
+    .replace(/[:：].*$/, '')
+    .replace(/[（(].*[）)]/g, '')
+    .replace(GUIDE_NAME_SUFFIX, '')
+    .trim();
+  if (name.endsWith('与夜景')) name = name.replace(/与夜景$/, '').trim();
+  return name;
+}
+
+function guidePlaceNamesFromSegment(segment, intent) {
+  const cleaned = cleanGuidePlaceName(segment);
+  if (!cleaned || cleaned.length < 2 || cleaned.length > 24) return [];
+  if (GUIDE_ROUTE_SKIP.test(cleaned)) return [];
+  if (isWeakPlaceName(cleaned, intent)) return [];
+  return cleaned.split(/[/／、|｜]/).map(cleanGuidePlaceName).filter((item) => item.length >= 2);
+}
+
+function candidatesFromGuideText(guides, intent) {
+  const target = targetPlaceCount(intent);
+  const seen = new Set();
+  const results = [];
+  const push = (rawName, guideId, reason) => {
+    for (const name of guidePlaceNamesFromSegment(rawName, intent)) {
+      if (isWeakPlaceName(name, intent) || isGenericPlaceName(name, intent.destination)) continue;
+      const key = foldName(name);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      results.push(toCandidate({
+        name,
+        nameZh: name,
+        reason: String(reason || '').trim(),
+        guideId,
+        dayHint: 1,
+      }, intent));
+      if (results.length >= target) return true;
+    }
+    return false;
+  };
+
+  for (const guide of guides || []) {
+    const text = String(guide.text || '');
+    if (!text.trim()) continue;
+    const guideId = String(guide.id || '').trim();
+    let inFoodSection = false;
+    for (const line of text.split(/\n/)) {
+      const trimmed = stripInvisible(line);
+      if (!trimmed) continue;
+      if (/^🍜|^美食推荐/.test(trimmed)) {
+        inFoodSection = true;
+        continue;
+      }
+      if (GUIDE_SECTION_SKIP.test(trimmed)) {
+        inFoodSection = false;
+        continue;
+      }
+      if (inFoodSection || /^#/.test(trimmed)) continue;
+
+      const bullet = trimmed.match(/^[▪️•·]\s*(.+)$/);
+      if (bullet && push(bullet[1], guideId, '')) return results;
+
+      if (/推荐路线|路线[:：]|→/.test(trimmed)) {
+        const routePart = trimmed.replace(/^.*?(?:推荐路线|路线)[:：]?\s*/u, '');
+        for (const segment of routePart.split(/\s*(?:→|->|➡|—>)\s*/)) {
+          if (push(segment, guideId, '')) return results;
+        }
+        continue;
+      }
+
+      const quoted = trimmed.match(/[“"]([^”"]{2,24})[”"]/);
+      if (quoted && /(停车场|站|导航)/.test(trimmed) && push(quoted[1], guideId, '')) return results;
+
+      const nearby = trimmed.match(/去(?:旁边|附近)的?\s*(.{2,16})/);
+      if (nearby && push(nearby[1], guideId, '')) return results;
+    }
+
+    const title = stripInvisible(guide.title || '');
+    const titleMatch = title.match(/[｜|]\s*([^｜|]+?)(?:\s*游玩攻略|\s*攻略)?\s*📝?\s*$/u)
+      || title.match(/📍\s*[^｜|]+[｜|]\s*([^｜|]+?)(?:\s*游玩攻略|\s*攻略)?/u);
+    if (titleMatch && push(titleMatch[1], guideId, '')) return results;
+  }
+
+  return results;
+}
+
+function resolveExtractCandidates(extracted, guides, intent) {
+  const llmCandidateCount = Array.isArray(extracted?.candidates) ? extracted.candidates.length : 0;
+  let candidates = normalizeCandidates(extracted, intent, { skipSeeds: true });
+  if (candidates.length) {
+    return { candidates: normalizeCandidates(extracted, intent), source: 'llm', llmCandidateCount };
+  }
+  const hasGuideText = (guides || []).some((guide) => String(guide.text || '').trim());
+  if (hasGuideText) {
+    const fromGuide = candidatesFromGuideText(guides, intent);
+    candidates = normalizeCandidates({ candidates: fromGuide }, intent, { skipSeeds: true });
+    if (candidates.length) {
+      return {
+        candidates: normalizeCandidates({ candidates: fromGuide }, intent),
+        source: 'guide_text',
+        llmCandidateCount,
+      };
+    }
+  }
+  candidates = normalizeCandidates(extracted, intent);
+  return { candidates, source: candidates.length ? 'seeds' : null, llmCandidateCount };
+}
+
+function guideTextForExtractRetry(guides) {
+  return (guides || [])
+    .map((guide) => {
+      const title = String(guide.title || '').trim();
+      const text = String(guide.text || '').trim();
+      if (title && text) return `${title}\n${text}`;
+      return text || title;
+    })
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, 12000);
+}
+
+function extractRetryInstruction(locale, dayCount) {
+  return message(locale,
+    `仅列出正文中字面出现的具体景点、寺庙、街区、公园名称；不要返回城市或省份。每项一条 candidate，带 name 与 dayHint（1..${dayCount}）。`,
+    `List only concrete place names that appear verbatim in the text; do not return cities or provinces. One candidate per place with name and dayHint (1..${dayCount}).`);
+}
 
 const PLACE_SEARCH_ALIASES = {
   北极村: '北极镇 漠河',
@@ -417,7 +556,7 @@ function spreadDayHints(candidates, dayCount) {
   return candidates.map((item, index) => ({ ...item, dayHint: (index % days) + 1 }));
 }
 
-function normalizeCandidates(raw, intent) {
+function normalizeCandidates(raw, intent, options = {}) {
   const model = Array.isArray(raw?.candidates) ? raw.candidates : [];
   const seen = new Set();
   const unique = [];
@@ -430,7 +569,7 @@ function normalizeCandidates(raw, intent) {
   };
   for (const item of model) pushUnique(toCandidate(item, intent));
   const target = targetPlaceCount(intent);
-  if (unique.length < target) {
+  if (!options.skipSeeds && unique.length < target) {
     for (const name of [...intent.mustSee, ...destinationSeeds(intent.destination)]) {
       pushUnique(toCandidate({}, intent, name));
       if (unique.length >= target) break;
@@ -822,6 +961,10 @@ module.exports = {
   extractionText,
   extractionInstruction,
   normalizeCandidates,
+  candidatesFromGuideText,
+  resolveExtractCandidates,
+  guideTextForExtractRetry,
+  extractRetryInstruction,
   isGenericPlaceName,
   isWeakPlaceName,
   destinationSeeds,
