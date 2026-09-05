@@ -912,84 +912,21 @@
       .commit-card .field { grid-row: 1 / span 2; align-self: end; }
     }
     @media (max-width: 720px) {
-      .page { padding: 10px 12px calc(132px + env(safe-area-inset-bottom, 0px) + var(--trek-inset-bottom, 0px)); }
-      .app-shell::before { background-size: 52px 52px; }
-      .hero { display: block; min-height: auto; padding: 14px 16px 12px; border-radius: 20px; }
-      .hero::after { display: none; }
-      .hero .eyebrow, .hero-subtitle, .hero-note { display: none; }
-      .hero h1 { font-size: 26px; line-height: 1.08; }
-      .hero-actions { margin-top: 0; }
-      .hero-map { display: none; }
-      .map-place { width: 34px; height: 34px; }
-      .workspace-grid,
-      .preview-layout { margin-top: 14px; gap: 14px; grid-template-columns: minmax(0, 1fr); }
-      .panel-header { display: block; padding: 18px 18px 16px; }
-      .panel-header h2 { font-size: 19px; margin-top: 8px; }
-      .panel-header p { display: none; }
-      .form-body { padding: 0 20px 22px; }
-      .form-section { padding: 22px 0; }
-      .field-grid, .field-grid--travel { grid-template-columns: minmax(0, 1fr); }
-      .field-grid--travel .date-field, .field-grid--travel .small-field { grid-column: auto; }
-      .submit-zone { grid-template-columns: minmax(0, 1fr); gap: 13px; }
-      .generate-btn { width: 100%; }
+      .workspace-grid, .preview-layout { grid-template-columns: minmax(0, 1fr); }
       .guide-rail { grid-template-columns: minmax(0, 1fr); }
-      .preview-section { margin-top: 42px; }
-      .preview-heading { display: block; }
-      .preview-heading p { margin-top: 12px; text-align: left; }
-      .day-header { grid-template-columns: auto 34px minmax(0, 1fr); padding: 16px; }
-      .day-total { display: none; }
-      .place-list { padding: 3px 16px 6px; }
       .place-row {
         grid-template-columns: auto 28px 44px minmax(0, 1fr);
         grid-template-areas:
           "check marker photo copy"
           ". . . meta";
-        gap: 10px;
       }
-      .place-row::before { left: 33px; }
-      .place-marker { width: 28px; height: 28px; grid-area: marker; }
       .place-check { grid-area: check; }
+      .place-marker { grid-area: marker; width: 28px; height: 28px; }
       .place-photo { grid-area: photo; width: 44px; height: 44px; }
       .place-copy { grid-area: copy; }
-      .place-meta { grid-area: meta; justify-content: flex-start; max-width: none; margin-top: 0; padding-bottom: 3px; }
-      .distance-warning { max-width: none; }
+      .place-meta { grid-area: meta; justify-content: flex-start; max-width: none; margin-top: 0; }
       .commit-card { display: block; padding: 22px; }
-      .commit-card .field { margin-top: 20px; }
     }
-
-    [data-form-factor="phone"] .hero { display: none !important; }
-    [data-form-factor="phone"] .page { padding: 8px 12px 16px !important; }
-    [data-form-factor="phone"] .app-shell.trek-scroll {
-      padding-bottom: calc(20px + var(--trek-inset-bottom, 96px) + env(safe-area-inset-bottom, 0px)) !important;
-      box-sizing: border-box;
-    }
-    [data-form-factor="phone"] .workspace-grid { margin-top: 0 !important; gap: 12px !important; }
-    [data-form-factor="phone"] .field-grid,
-    [data-form-factor="phone"] .field-grid--travel { grid-template-columns: minmax(0, 1fr) !important; }
-    [data-form-factor="phone"] .field-grid--travel .date-field,
-    [data-form-factor="phone"] .field-grid--travel .small-field { grid-column: auto !important; }
-    [data-form-factor="phone"] .panel-header {
-      display: flex !important;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px;
-      padding: 16px 16px 12px !important;
-    }
-    [data-form-factor="phone"] .panel-kicker,
-    [data-form-factor="phone"] .panel-header .desktop-title,
-    [data-form-factor="phone"] .panel-header p,
-    [data-form-factor="phone"] .panel-header .trek-chip,
-    [data-form-factor="phone"] .section-heading p { display: none !important; }
-    [data-form-factor="phone"] .phone-title { display: block !important; font-size: 22px !important; margin: 0 !important; letter-spacing: -.03em; }
-    [data-form-factor="phone"] .panel-header-tools { width: 100%; justify-content: space-between; }
-    [data-form-factor="phone"] .panel-settings-btn { display: inline-flex !important; min-height: 40px; }
-    [data-form-factor="phone"] .form-body { padding: 0 16px 20px !important; }
-    [data-form-factor="phone"] .form-section { padding: 16px 0 !important; }
-    [data-form-factor="phone"] .section-heading { margin-bottom: 12px !important; }
-    [data-form-factor="phone"] .guide-rail { display: none !important; }
-    [data-form-factor="phone"] .planner-panel { border-radius: 20px; }
-    [data-form-factor="phone"] .source-field .trek-textarea { font-size: 16px; }
-    [data-form-factor="phone"] .choice { width: 22px; height: 22px; }
 
     [data-reduce-motion] .route-line,
     [data-reduce-motion] .progress > i,
@@ -1001,87 +938,91 @@
   </style>
   <!-- trek:ui -->
   <style id="ai-guide-overrides">
-    /* TREK phone layout keys on [data-form-factor="phone"], not viewport width. */
-    [data-form-factor="phone"] .hero { display: none !important; }
-    [data-form-factor="phone"] .page { padding: 8px 12px 16px !important; }
-    [data-form-factor="phone"] .app-shell.trek-scroll {
-      padding-bottom: calc(20px + var(--trek-inset-bottom, 96px) + env(safe-area-inset-bottom, 0px)) !important;
+    /*
+     * Phone layout must match TREK's formFactor AND wide phone iframes (>720px).
+     * html.layout-phone is toggled from trek.onContext + matchMedia fallback.
+     */
+    :is(html.layout-phone, html[data-form-factor="phone"]) .hero { display: none !important; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .page { padding: 8px 12px 16px !important; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .app-shell.trek-scroll {
+      padding-bottom: calc(24px + var(--trek-inset-bottom, 88px) + env(safe-area-inset-bottom, 0px)) !important;
       box-sizing: border-box;
     }
-    [data-form-factor="phone"] .workspace-grid { margin-top: 0 !important; gap: 12px !important; grid-template-columns: minmax(0, 1fr) !important; }
-    [data-form-factor="phone"] .preview-layout,
-    [data-form-factor="phone"] .guide-rail { grid-template-columns: minmax(0, 1fr) !important; }
-    [data-form-factor="phone"] .field-grid,
-    [data-form-factor="phone"] .field-grid--travel { grid-template-columns: minmax(0, 1fr) !important; }
-    [data-form-factor="phone"] .field-grid--travel .date-field,
-    [data-form-factor="phone"] .field-grid--travel .small-field { grid-column: auto !important; }
-    [data-form-factor="phone"] .panel-header {
+    :is(html.layout-phone, html[data-form-factor="phone"]) .workspace-grid,
+    :is(html.layout-phone, html[data-form-factor="phone"]) .preview-layout {
+      margin-top: 0 !important;
+      gap: 12px !important;
+      grid-template-columns: minmax(0, 1fr) !important;
+    }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .field-grid,
+    :is(html.layout-phone, html[data-form-factor="phone"]) .field-grid--travel {
+      grid-template-columns: minmax(0, 1fr) !important;
+    }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .field-grid--travel .date-field,
+    :is(html.layout-phone, html[data-form-factor="phone"]) .field-grid--travel .small-field {
+      grid-column: auto !important;
+    }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .submit-zone {
+      grid-template-columns: minmax(0, 1fr) !important;
+      gap: 12px !important;
+    }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .generate-btn { width: 100% !important; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-header {
       display: flex !important;
       flex-wrap: wrap;
       align-items: center;
       gap: 10px;
       padding: 16px 16px 12px !important;
     }
-    [data-form-factor="phone"] .panel-kicker,
-    [data-form-factor="phone"] .panel-header .desktop-title,
-    [data-form-factor="phone"] .panel-header p,
-    [data-form-factor="phone"] .panel-header .trek-chip,
-    [data-form-factor="phone"] .section-heading p,
-    [data-form-factor="phone"] .guide-rail { display: none !important; }
-    [data-form-factor="phone"] .phone-title { display: block !important; font-size: 22px !important; margin: 0 !important; letter-spacing: -.03em; }
-    [data-form-factor="phone"] .panel-header-tools { width: 100%; justify-content: space-between; }
-    [data-form-factor="phone"] .panel-settings-btn { display: inline-flex !important; min-height: 40px; }
-    [data-form-factor="phone"] .form-body { padding: 0 16px 20px !important; }
-    [data-form-factor="phone"] .form-section { padding: 16px 0 !important; }
-    [data-form-factor="phone"] .section-heading { margin-bottom: 12px !important; }
-    [data-form-factor="phone"] .place-row {
+    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-kicker,
+    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-header .desktop-title,
+    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-header p,
+    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-header .trek-chip,
+    :is(html.layout-phone, html[data-form-factor="phone"]) .section-heading p,
+    :is(html.layout-phone, html[data-form-factor="phone"]) .guide-rail { display: none !important; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .phone-title {
+      display: block !important;
+      font-size: 22px !important;
+      margin: 0 !important;
+      letter-spacing: -.03em;
+    }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-header-tools {
+      width: 100%;
+      justify-content: space-between;
+    }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-settings-btn {
+      display: inline-flex !important;
+      min-height: 40px;
+    }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .form-body { padding: 0 16px 20px !important; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .form-section { padding: 16px 0 !important; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .section-heading { margin-bottom: 12px !important; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .preview-heading { display: block !important; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .preview-heading p { margin-top: 8px !important; text-align: left !important; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .day-header { grid-template-columns: auto 34px minmax(0, 1fr) !important; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .day-total { display: none !important; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .place-row {
+      grid-template-columns: auto 28px 44px minmax(0, 1fr) !important;
       grid-template-areas:
         "check marker photo copy"
         ". . . meta";
     }
-    [data-form-factor="phone"] .place-check { grid-area: check; }
-    [data-form-factor="phone"] .place-marker { grid-area: marker; }
-    [data-form-factor="phone"] .place-photo { grid-area: photo; width: 44px; height: 44px; }
-    [data-form-factor="phone"] .place-copy { grid-area: copy; }
-    [data-form-factor="phone"] .place-meta { grid-area: meta; grid-column: auto; justify-content: flex-start; max-width: none; }
-    @media (max-width: 720px) {
-      .hero { display: none !important; }
-      .page { padding: 8px 12px 16px !important; }
-      .app-shell.trek-scroll {
-        padding-bottom: calc(20px + var(--trek-inset-bottom, 96px) + env(safe-area-inset-bottom, 0px)) !important;
-        box-sizing: border-box;
-      }
-      .workspace-grid { margin-top: 0 !important; gap: 12px !important; }
-      .field-grid,
-      .field-grid--travel { grid-template-columns: minmax(0, 1fr) !important; }
-      .field-grid--travel .date-field,
-      .field-grid--travel .small-field { grid-column: auto !important; }
-      .panel-kicker,
-      .panel-header .desktop-title,
-      .panel-header p,
-      .panel-header .trek-chip,
-      .section-heading p,
-      .guide-rail { display: none !important; }
-      .phone-title { display: block !important; font-size: 22px !important; margin: 0 !important; }
-      .panel-header-tools { width: 100%; justify-content: space-between; }
-      .panel-settings-btn { display: inline-flex !important; min-height: 40px; }
-      .form-body { padding: 0 16px 20px !important; }
-      .form-section { padding: 16px 0 !important; }
-      .place-row {
-        grid-template-areas:
-          "check marker photo copy"
-          ". . . meta";
-      }
-      .place-check { grid-area: check; }
-      .place-marker { grid-area: marker; }
-      .place-photo { grid-area: photo; width: 44px; height: 44px; }
-      .place-copy { grid-area: copy; }
-      .place-meta { grid-area: meta; grid-column: auto; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .place-check { grid-area: check; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .place-marker { grid-area: marker; width: 28px; height: 28px; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .place-photo { grid-area: photo; width: 44px; height: 44px; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .place-copy { grid-area: copy; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .place-meta {
+      grid-area: meta;
+      grid-column: auto;
+      justify-content: flex-start;
+      max-width: none;
     }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .commit-column { position: static !important; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .commit-card { display: block !important; padding: 20px !important; }
     .planner-panel.trek-glass,
-    [data-form-factor="phone"] .planner-panel.trek-glass { padding: 0; }
-    [data-form-factor="phone"] .source-field .trek-textarea { font-size: 16px; }
-    [data-form-factor="phone"] .choice { width: 22px; height: 22px; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .planner-panel.trek-glass { padding: 0; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .source-field .trek-textarea { font-size: 16px; }
+    :is(html.layout-phone, html[data-form-factor="phone"]) .choice { width: 22px; height: 22px; }
     .source-field { display: grid; width: 100%; min-width: 0; }
     .source-field .trek-textarea {
       display: block;
@@ -1622,7 +1563,28 @@
       refreshCommitAvailability();
     }
 
+    function isPhoneLayout(ctx) {
+      var vp = ctx && ctx.viewport;
+      if (vp && vp.formFactor === 'phone') return true;
+      if (vp && vp.formFactor === 'desktop') return false;
+      try { return window.matchMedia('(max-width: 860px)').matches; } catch (_) { return false; }
+    }
+
+    function applyLayoutMode(ctx) {
+      var phone = isPhoneLayout(ctx);
+      document.documentElement.classList.toggle('layout-phone', phone);
+      document.documentElement.classList.toggle('layout-desktop', !phone);
+    }
+
+    applyLayoutMode(null);
+    try {
+      window.matchMedia('(max-width: 860px)').addEventListener('change', function () {
+        applyLayoutMode(typeof trek !== 'undefined' && trek.context ? trek.context : null);
+      });
+    } catch (_) {}
+
     trek.onContext(function (ctx) {
+      applyLayoutMode(ctx);
       locale = resolveLocale(ctx.locale);
       translate();
       loadPrefs();
