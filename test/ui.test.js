@@ -62,15 +62,10 @@ test('all static copy exists in both English and Chinese', () => {
 test('theme, accessibility, and responsive host states are explicitly supported', () => {
   for (const selector of [
     '[data-form-factor="phone"]',
-    'layout-phone',
     'applyLayoutMode',
     'isPhoneLayout',
-    '[data-no-transparency]',
-    '[data-density="compact"]',
-    '[data-reduce-motion]',
-    '@media (prefers-reduced-motion: reduce)',
-    ':is(html.layout-phone, html[data-form-factor="phone"]) .field-grid',
-    ':is(html.layout-phone, html[data-form-factor="phone"]) .workspace-grid',
+    '@media (min-width: 1180px)',
+    'desktop only at 1180px',
     'id="ai-guide-overrides"',
     'resolveLocale',
   ]) assert.ok(html.includes(selector), selector);

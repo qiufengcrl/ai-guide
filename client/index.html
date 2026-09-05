@@ -52,13 +52,13 @@
     .page {
       width: min(100%, 1180px);
       margin: 0 auto;
-      padding: 34px 32px 72px;
+      padding: 8px 12px 16px;
     }
 
-    /* Hero — the same oversized type, route imagery and liquid glass used by TREK. */
+    /* Hero — desktop only at 1180px+; mobile uses panel header. */
     .hero {
       position: relative;
-      display: grid;
+      display: none;
       grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr);
       min-height: 360px;
       padding: 42px 44px;
@@ -227,10 +227,10 @@
 
     .workspace-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 290px;
-      gap: 22px;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
       align-items: start;
-      margin-top: 22px;
+      margin-top: 0;
     }
     .planner-panel {
       overflow: visible;
@@ -251,8 +251,8 @@
       gap: 10px;
       flex: none;
     }
-    .panel-settings-btn { display: none; }
-    .phone-title { display: none; }
+    .panel-settings-btn { display: inline-flex; min-height: 40px; }
+    .phone-title { display: block; font-size: 22px; margin: 0; letter-spacing: -.03em; }
     .panel-kicker {
       display: flex;
       align-items: center;
@@ -319,12 +319,12 @@
     }
     .field-grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: minmax(0, 1fr);
       gap: 16px;
     }
-    .field-grid--travel { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-    .field-grid--travel .date-field { grid-column: span 2; }
-    .field-grid--travel .small-field { grid-column: span 1; }
+    .field-grid--travel { grid-template-columns: minmax(0, 1fr); }
+    .field-grid--travel .date-field,
+    .field-grid--travel .small-field { grid-column: auto; }
     .field { display: grid; gap: 8px; width: 100%; min-width: 0; }
     .field--full { grid-column: 1 / -1; }
     .field-label {
@@ -460,9 +460,9 @@
     }
 
     .guide-rail {
+      display: none;
       position: sticky;
       top: 22px;
-      display: grid;
       gap: 14px;
     }
     .rail-card { padding: 22px; border-radius: 20px; }
@@ -899,33 +899,103 @@
     [data-density="compact"] .form-section { padding-block: 20px; }
     [data-density="compact"] .place-row { min-height: 60px; }
 
-    @media (max-width: 980px) {
-      .hero { grid-template-columns: minmax(0, 1fr) 280px; padding: 36px; }
-      .hero h1 { font-size: clamp(44px, 7vw, 64px); }
-      .hero-map { margin-left: 22px; }
-      .workspace-grid, .preview-layout { grid-template-columns: minmax(0, 1fr); }
-      .guide-rail { position: static; grid-template-columns: 1fr 1fr; }
-      .commit-column { position: static; }
-      .commit-card { display: grid; grid-template-columns: minmax(0, .6fr) minmax(260px, 1fr); column-gap: 24px; align-items: end; }
-      .commit-route, .selection-number { grid-column: 1; }
-      .commit-card .field, .commit-card .commit-button, .commit-hint { grid-column: 2; }
-      .commit-card .field { grid-row: 1 / span 2; align-self: end; }
+    .panel-settings-btn { display: inline-flex; min-height: 40px; }
+    .phone-title { display: block; font-size: 22px; margin: 0; letter-spacing: -.03em; }
+    .panel-header { padding: 16px 16px 12px; flex-wrap: wrap; }
+    .panel-header-tools { width: 100%; justify-content: space-between; }
+    .panel-kicker,
+    .panel-header .desktop-title,
+    .panel-header p,
+    .panel-header .trek-chip,
+    .section-heading p { display: none; }
+    .form-body { padding: 0 16px 20px; }
+    .form-section { padding: 16px 0; }
+    .section-heading { margin-bottom: 12px; }
+    .submit-zone { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .generate-btn { width: 100%; }
+    .app-shell.trek-scroll {
+      padding-bottom: calc(24px + var(--trek-inset-bottom, 88px) + env(safe-area-inset-bottom, 0px));
+      box-sizing: border-box;
     }
-    @media (max-width: 720px) {
-      .workspace-grid, .preview-layout { grid-template-columns: minmax(0, 1fr); }
-      .guide-rail { grid-template-columns: minmax(0, 1fr); }
-      .place-row {
-        grid-template-columns: auto 28px 44px minmax(0, 1fr);
-        grid-template-areas:
-          "check marker photo copy"
-          ". . . meta";
+    .preview-layout { grid-template-columns: minmax(0, 1fr); }
+    .commit-column { position: static; }
+    .commit-card { display: block; padding: 20px; }
+    .place-row {
+      grid-template-columns: auto 28px 44px minmax(0, 1fr);
+      grid-template-areas:
+        "check marker photo copy"
+        ". . . meta";
+    }
+    .place-check { grid-area: check; }
+    .place-marker { grid-area: marker; width: 28px; height: 28px; }
+    .place-photo { grid-area: photo; width: 44px; height: 44px; }
+    .place-copy { grid-area: copy; }
+    .place-meta { grid-area: meta; justify-content: flex-start; max-width: none; margin-top: 0; }
+
+    @media (min-width: 1180px) {
+      .page { padding: 34px 32px 72px; }
+      .app-shell.trek-scroll { padding-bottom: 0; }
+      .hero { display: grid; }
+      .guide-rail { display: grid; }
+      .workspace-grid {
+        grid-template-columns: minmax(0, 1fr) 290px;
+        gap: 22px;
+        margin-top: 22px;
       }
-      .place-check { grid-area: check; }
-      .place-marker { grid-area: marker; width: 28px; height: 28px; }
-      .place-photo { grid-area: photo; width: 44px; height: 44px; }
-      .place-copy { grid-area: copy; }
-      .place-meta { grid-area: meta; justify-content: flex-start; max-width: none; margin-top: 0; }
-      .commit-card { display: block; padding: 22px; }
+      .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .field-grid--travel { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+      .field-grid--travel .date-field { grid-column: span 2; }
+      .field-grid--travel .small-field { grid-column: span 1; }
+      .phone-title { display: none; }
+      .panel-settings-btn { display: none; }
+      .panel-kicker { display: flex; }
+      .panel-header .desktop-title { display: block; }
+      .panel-header p { display: block; }
+      .panel-header .trek-chip { display: inline-flex; }
+      .section-heading p { display: block; }
+      .panel-header { padding: 28px 30px 24px; flex-wrap: nowrap; }
+      .panel-header-tools { width: auto; }
+      .form-body { padding: 4px 30px 30px; }
+      .form-section { padding: 26px 0; }
+      .section-heading { margin-bottom: 18px; }
+      .submit-zone { grid-template-columns: minmax(210px, auto) 1fr; gap: 16px; }
+      .generate-btn { width: auto; }
+      .preview-layout { grid-template-columns: minmax(0, 1fr) 290px; gap: 22px; }
+      .commit-column { position: sticky; top: 22px; }
+      .commit-card {
+        display: block;
+        padding: 24px;
+      }
+      .place-row {
+        grid-template-columns: auto 30px 52px minmax(0, 1fr) auto;
+        grid-template-areas: none;
+      }
+      .place-check,
+      .place-marker,
+      .place-photo,
+      .place-copy,
+      .place-meta { grid-area: auto; }
+      .place-marker { width: 30px; height: 30px; }
+      .place-photo { width: 52px; height: 52px; }
+      .place-meta { justify-content: flex-end; max-width: 190px; }
+      .hero { grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr); padding: 42px 44px; }
+      .hero h1 { font-size: clamp(46px, 7vw, 76px); }
+      .hero-map { display: block; margin-left: 32px; }
+      .guide-rail { position: sticky; grid-template-columns: 1fr; }
+      .preview-section { margin-top: 56px; }
+      .preview-heading { display: flex; align-items: flex-start; justify-content: space-between; }
+      .day-header { grid-template-columns: auto 38px minmax(0, 1fr) auto; }
+      .day-total { display: inline-flex; }
+      .place-list { padding: 4px 20px 8px 64px; }
+    }
+
+    @media (max-width: 1179px) {
+      .preview-heading { display: block; }
+      .preview-heading p { margin-top: 8px; text-align: left; }
+      .day-header { grid-template-columns: auto 34px minmax(0, 1fr); padding: 16px; }
+      .day-total { display: none; }
+      .place-list { padding: 3px 16px 6px; }
+      .place-row::before { left: 33px; }
     }
 
     [data-reduce-motion] .route-line,
@@ -938,91 +1008,8 @@
   </style>
   <!-- trek:ui -->
   <style id="ai-guide-overrides">
-    /*
-     * Phone layout must match TREK's formFactor AND wide phone iframes (>720px).
-     * html.layout-phone is toggled from trek.onContext + matchMedia fallback.
-     */
-    :is(html.layout-phone, html[data-form-factor="phone"]) .hero { display: none !important; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .page { padding: 8px 12px 16px !important; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .app-shell.trek-scroll {
-      padding-bottom: calc(24px + var(--trek-inset-bottom, 88px) + env(safe-area-inset-bottom, 0px)) !important;
-      box-sizing: border-box;
-    }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .workspace-grid,
-    :is(html.layout-phone, html[data-form-factor="phone"]) .preview-layout {
-      margin-top: 0 !important;
-      gap: 12px !important;
-      grid-template-columns: minmax(0, 1fr) !important;
-    }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .field-grid,
-    :is(html.layout-phone, html[data-form-factor="phone"]) .field-grid--travel {
-      grid-template-columns: minmax(0, 1fr) !important;
-    }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .field-grid--travel .date-field,
-    :is(html.layout-phone, html[data-form-factor="phone"]) .field-grid--travel .small-field {
-      grid-column: auto !important;
-    }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .submit-zone {
-      grid-template-columns: minmax(0, 1fr) !important;
-      gap: 12px !important;
-    }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .generate-btn { width: 100% !important; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-header {
-      display: flex !important;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px;
-      padding: 16px 16px 12px !important;
-    }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-kicker,
-    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-header .desktop-title,
-    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-header p,
-    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-header .trek-chip,
-    :is(html.layout-phone, html[data-form-factor="phone"]) .section-heading p,
-    :is(html.layout-phone, html[data-form-factor="phone"]) .guide-rail { display: none !important; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .phone-title {
-      display: block !important;
-      font-size: 22px !important;
-      margin: 0 !important;
-      letter-spacing: -.03em;
-    }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-header-tools {
-      width: 100%;
-      justify-content: space-between;
-    }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .panel-settings-btn {
-      display: inline-flex !important;
-      min-height: 40px;
-    }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .form-body { padding: 0 16px 20px !important; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .form-section { padding: 16px 0 !important; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .section-heading { margin-bottom: 12px !important; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .preview-heading { display: block !important; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .preview-heading p { margin-top: 8px !important; text-align: left !important; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .day-header { grid-template-columns: auto 34px minmax(0, 1fr) !important; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .day-total { display: none !important; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .place-row {
-      grid-template-columns: auto 28px 44px minmax(0, 1fr) !important;
-      grid-template-areas:
-        "check marker photo copy"
-        ". . . meta";
-    }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .place-check { grid-area: check; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .place-marker { grid-area: marker; width: 28px; height: 28px; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .place-photo { grid-area: photo; width: 44px; height: 44px; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .place-copy { grid-area: copy; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .place-meta {
-      grid-area: meta;
-      grid-column: auto;
-      justify-content: flex-start;
-      max-width: none;
-    }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .commit-column { position: static !important; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .commit-card { display: block !important; padding: 20px !important; }
-    .planner-panel.trek-glass,
-    :is(html.layout-phone, html[data-form-factor="phone"]) .planner-panel.trek-glass { padding: 0; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .source-field .trek-textarea { font-size: 16px; }
-    :is(html.layout-phone, html[data-form-factor="phone"]) .choice { width: 22px; height: 22px; }
+    /* Kit lands above; keep form controls full-width and panel padding neutral. */
+    .planner-panel.trek-glass { padding: 0; }
     .source-field { display: grid; width: 100%; min-width: 0; }
     .source-field .trek-textarea {
       display: block;
@@ -1046,6 +1033,10 @@
       text-align: left;
       min-height: 1.25em;
     }
+    html[data-form-factor="phone"] .source-field .trek-textarea,
+    html.layout-phone .source-field .trek-textarea { font-size: 16px; }
+    html[data-form-factor="phone"] .choice,
+    html.layout-phone .choice { width: 22px; height: 22px; }
   </style>
 </head>
 <body>
