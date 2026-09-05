@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, destinationSeeds, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting } = require('../server/pipeline');
+const { gateAndSchedule, normalizeCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, destinationSeeds, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message } = require('../server/pipeline');
 const { normalizeXhsCookie } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces } = require('../server/geo/nominatim');
@@ -488,7 +488,7 @@ test('零个 evidenceId 不能 commit，空 Cookie testXhs 失败', async () => 
   assert.equal(committed.status, 400);
   assert.deepEqual(await fixture.app.action('testXhs'), {
     ok: false,
-    message: '未配置小红书 Cookie',
+    message: '【认证失败】未配置小红书 Cookie',
   });
 });
 
@@ -637,4 +637,122 @@ test('Prefs 接口返回管理员是否允许关键词搜索', async () => {
   await blocked.app.load();
   const denied = await blocked.app.route({ method: 'GET', path: '/prefs' }, {});
   assert.deepEqual(denied.body, { xhsSearchAllowed: false });
+});
+
+test('extract prompt 强调预约、避坑与中英名称', () => {
+  const instruction = extractionInstruction({ destination: '京都', dayCount: 3 }, true);
+  assert.match(instruction, /nameZh/);
+  assert.match(instruction, /reservationRequired/);
+  assert.match(instruction, /reason/);
+  const text = extractionText([{ id: 'g_1', title: '测试', text: '需要提前预约故宫' }], {
+    destination: '北京',
+    dayCount: 2,
+    pace: 'balanced',
+    interests: ['历史'],
+    mustSee: [],
+  });
+  assert.match(text, /reservationTips/);
+  assert.match(text, /pitfalls/);
+});
+
+test('勾选搜索时会与链接和粘贴正文合并', async () => {
+  const fixture = buildHost({
+    config: { xhs_enabled: true, max_notes: 4 },
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+  });
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures/note.html'), 'utf8');
+  const xhsFallback = (url) => {
+    const href = String(url);
+    if (href.includes('edith.xiaohongshu.com') && href.includes('search/notes')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() {
+          return {
+            success: true,
+            data: {
+              items: [{
+                model_type: 'note',
+                id: '64f000000000000000000002',
+                xsec_token: 'tok2',
+                note_card: { display_title: '搜索笔记' },
+              }],
+            },
+          };
+        },
+      };
+    }
+    if (href.includes('edith.xiaohongshu.com') && href.includes('/feed')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() {
+          return {
+            success: true,
+            data: { items: [{ note_card: { display_title: '搜索笔记', desc: '搜索正文内容' } }] },
+          };
+        },
+      };
+    }
+    if (href.includes('xiaohongshu.com')) {
+      return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
+    }
+    throw new Error(`Unexpected fetch: ${href}`);
+  };
+  const { state } = await makeReady(fixture, {
+    destination: '京都',
+    urls: 'https://www.xiaohongshu.com/explore/64f000000000000000000001',
+    sourceText: '清水寺值得清晨前往。',
+    xhsKeywordSearch: true,
+  }, xhsFallback);
+  assert.deepEqual(state.guides.map((guide) => guide.via).sort(), ['paste', 'search', 'url']);
+});
+
+test('461 与 Cookie 失效会返回分级警告', async () => {
+  const fixture = buildHost({
+    config: { xhs_enabled: true },
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+  });
+  const authFallback = (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() { return { success: false, code: 300011, msg: '账号异常' }; },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  const { state: authState } = await makeReady(fixture, {
+    destination: '京都',
+    xhsKeywordSearch: true,
+  }, authFallback);
+  assert.ok(authState.warnings.some((warning) => /【认证失败】/.test(warning)));
+
+  const verifyFixture = buildHost({
+    config: { xhs_enabled: true },
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+  });
+  const verifyFallback = (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      return { ok: false, status: 461, headers: { get() { return null; } }, async json() { return {}; } };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  const { state: verifyState } = await makeReady(verifyFixture, {
+    destination: '京都',
+    xhsKeywordSearch: true,
+  }, verifyFallback);
+  assert.ok(verifyState.warnings.some((warning) => /【需要验证】/.test(warning)));
+});
+
+test('remainingXhsNoteSlots 会扣除已有笔记名额', () => {
+  assert.equal(remainingXhsNoteSlots(
+    [{ noteId: 'a' }, { noteId: 'b' }],
+    [{ noteId: 'c' }],
+    4,
+  ), 1);
 });

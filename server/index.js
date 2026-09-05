@@ -18,9 +18,19 @@ const {
   geoSearchOptions,
   resolveXhsKeywordSearch,
   truthySetting,
+  remainingXhsNoteSlots,
+  collectXhsNoteIds,
 } = require('./pipeline');
 const { fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
-const { normalizeXhsCookie, searchNotes, searchNotesDetailed, fetchSessionNote } = require('./xhs/session');
+const {
+  normalizeXhsCookie,
+  searchNotes,
+  searchNotesDetailed,
+  fetchSessionNote,
+  formatXhsWarning,
+  isXhsAuthError,
+  isXhsVerificationError,
+} = require('./xhs/session');
 const { searchPlaces } = require('./geo/nominatim');
 
 const JOB_FIELDS = 'id, user_id, status, stage, payload_json, draft_json, work_json, error, committed_trip_id, created_at, updated_at';
@@ -75,6 +85,75 @@ async function saveJob(ctx, job) {
 function addWarning(job, text) {
   job.draft.warnings ||= [];
   if (!job.draft.warnings.includes(text)) job.draft.warnings.push(text);
+}
+
+async function runKeywordSearch(job, work, cookie, limits, locale) {
+  const wantsKeywordSearch = limits.xhsEnabled
+    && resolveXhsKeywordSearch(job.payload.xhsKeywordSearch);
+  if (!wantsKeywordSearch) return;
+  if (!limits.xhsEnabled && truthySetting(job.payload.xhsKeywordSearch)) {
+    addWarning(job, message(locale,
+      '管理员已关闭小红书关键词搜索；已继续使用表单、链接或粘贴内容',
+      'Xiaohongshu keyword search is disabled by the admin; continuing with form, links, or pasted text'));
+    return;
+  }
+  if (!cookie) {
+    addWarning(job, message(locale,
+      '未配置小红书 Cookie，已跳过关键词搜索',
+      'No Xiaohongshu Cookie is configured; keyword search was skipped'));
+    return;
+  }
+  if (!job.draft.intent.destination) return;
+
+  const hasUserSources = (job.draft.guides || []).length > 0
+    || (work.pendingNotes || []).length > 0;
+  const remaining = remainingXhsNoteSlots(job.draft.guides, work.pendingNotes, limits.maxNotes);
+  if (remaining <= 0) {
+    if (hasUserSources) {
+      addWarning(job, message(locale,
+        '已有足够攻略来源，未再额外搜索小红书',
+        'Enough guide sources already; skipped extra Xiaohongshu search'));
+    }
+    return;
+  }
+
+  const queries = (job.draft.intent.searchQueries || [job.draft.intent.guideQuery]).slice(0, 2);
+  const seen = collectXhsNoteIds(job.draft.guides, work.pendingNotes);
+  const beforePending = work.pendingNotes.length;
+  let lastError = null;
+  for (const query of queries) {
+    try {
+      await pauseForXhs();
+      const { notes: automatic } = await searchNotesDetailed(query, cookie, remaining);
+      work.lastSearchQuery = query;
+      work.lastSearchCount = automatic.length;
+      if (automatic.length) {
+        for (const item of automatic) {
+          if (seen.has(item.noteId) || seen.size >= limits.maxNotes) continue;
+          seen.add(item.noteId);
+          work.pendingNotes.push({ ...item, via: 'search' });
+        }
+        lastError = null;
+        break;
+      }
+    } catch (error) {
+      lastError = error;
+      if (isXhsAuthError(error) || isXhsVerificationError(error)) break;
+      if (/461|429|频繁|风控/.test(String(error.message || ''))) break;
+    }
+  }
+
+  const added = work.pendingNotes.length - beforePending;
+  if (added > 0) return;
+  if (lastError) {
+    addWarning(job, formatXhsWarning(lastError, locale, message));
+    return;
+  }
+  if (!hasUserSources) {
+    addWarning(job, message(locale,
+      `小红书搜索没有返回笔记（关键词：${work.lastSearchQuery || job.draft.intent.guideQuery}）。已按目的地生成具体景点。`,
+      `Xiaohongshu search returned no notes (query: ${work.lastSearchQuery || job.draft.intent.guideQuery}). Places were proposed from the destination.`));
+  }
 }
 
 async function advance(job, ctx) {
@@ -139,6 +218,7 @@ async function advance(job, ctx) {
               url: publicError.resolvedUrl || resolved.url || `https://www.xiaohongshu.com/explore/${noteId}`,
               via: 'url',
             });
+            work.urlIndex += 1;
             return;
           }
           job.draft.guides.push({
@@ -151,57 +231,17 @@ async function advance(job, ctx) {
       } catch (error) {
         work.resolvedNote = null;
         if (!consumed) work.urlIndex += 1;
-        addWarning(job, message(locale, `链接读取失败：${error.message}`, `Could not read link: ${error.message}`));
+        const detail = error instanceof Error ? error.message : String(error || '');
+        const warning = error?.name === 'XhsSessionError' || isXhsAuthError(error) || isXhsVerificationError(error)
+          ? formatXhsWarning(error, locale, message)
+          : message(locale, `链接读取失败：${detail}`, `Could not read link: ${detail}`);
+        addWarning(job, warning);
       }
       return;
     }
     if (!work.searchAttempted) {
       work.searchAttempted = true;
-      const hasUserSources = (job.draft.guides || []).length > 0
-        || (work.pendingNotes || []).length > 0
-        || (work.urls || []).length > 0;
-      if (hasUserSources) return;
-      const wantsKeywordSearch = limits.xhsEnabled
-        && resolveXhsKeywordSearch(job.payload.xhsKeywordSearch);
-      if (wantsKeywordSearch && cookie && job.draft.intent.destination) {
-        const queries = (job.draft.intent.searchQueries || [job.draft.intent.guideQuery]).slice(0, 2);
-        let lastError = null;
-        for (const query of queries) {
-          try {
-            await pauseForXhs();
-            const { notes: automatic } = await searchNotesDetailed(query, cookie, limits.maxNotes);
-            work.lastSearchQuery = query;
-            work.lastSearchCount = automatic.length;
-            if (automatic.length) {
-              const seen = new Set(work.pendingNotes.map((item) => item.noteId));
-              work.pendingNotes.push(...automatic.filter((item) => !seen.has(item.noteId)));
-              work.pendingNotes = work.pendingNotes.slice(0, limits.maxNotes);
-              lastError = null;
-              break;
-            }
-          } catch (error) {
-            lastError = error;
-            if (/461|429|频繁|风控/.test(String(error.message || ''))) break;
-          }
-        }
-        if (!work.pendingNotes.length) {
-          if (lastError) {
-            addWarning(job, message(locale,
-              `小红书搜索失败：${lastError.message}`,
-              `Xiaohongshu search failed: ${lastError.message}`));
-          } else {
-            addWarning(job, message(locale,
-              `小红书搜索没有返回笔记（关键词：${work.lastSearchQuery || job.draft.intent.guideQuery}）。已按目的地生成具体景点。`,
-              `Xiaohongshu search returned no notes (query: ${work.lastSearchQuery || job.draft.intent.guideQuery}). Places were proposed from the destination.`));
-          }
-        }
-      } else if (wantsKeywordSearch && !cookie) {
-        addWarning(job, message(locale, '未配置小红书 Cookie；已继续使用表单、链接或粘贴内容', 'No Xiaohongshu Cookie is configured; continuing with form, links, or pasted text'));
-      } else if (!limits.xhsEnabled && truthySetting(job.payload.xhsKeywordSearch)) {
-        addWarning(job, message(locale,
-          '管理员已关闭小红书关键词搜索；已继续使用表单、链接或粘贴内容',
-          'Xiaohongshu keyword search is disabled by the admin; continuing with form, links, or pasted text'));
-      }
+      await runKeywordSearch(job, work, cookie, limits, locale);
       return;
     }
     if (work.noteIndex < work.pendingNotes.length) {
@@ -216,8 +256,8 @@ async function advance(job, ctx) {
           title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
           text: note.text.slice(0, 4000),
         });
-      } catch {
-        addWarning(job, message(locale, `「${item.title || item.noteId}」正文读取失败`, `Could not read "${item.title || item.noteId}"`));
+      } catch (error) {
+        addWarning(job, formatXhsWarning(error, locale, message));
       }
       return;
     }
@@ -329,7 +369,12 @@ async function advance(job, ctx) {
 
 async function testXhs(ctx, locale = 'en', keyword = '旅行') {
   const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
-  if (!cookie) return { ok: false, message: message(locale, '未配置小红书 Cookie', 'Xiaohongshu Cookie is not configured') };
+  if (!cookie) {
+    return {
+      ok: false,
+      message: message(locale, '【认证失败】未配置小红书 Cookie', '【Auth failed】Xiaohongshu Cookie is not configured'),
+    };
+  }
   try {
     const { notes, debug } = await searchNotesDetailed(String(keyword || '旅行').trim() || '旅行', cookie, 4);
     if (!notes.length) {
@@ -347,7 +392,7 @@ async function testXhs(ctx, locale = 'en', keyword = '旅行') {
       message: message(locale, `小红书会话可用，搜到 ${notes.length} 篇`, `Xiaohongshu session is available (${notes.length} notes)`),
     };
   } catch (error) {
-    return { ok: false, message: message(locale, `小红书会话不可用：${error.message}`, `Xiaohongshu session unavailable: ${error.message}`) };
+    return { ok: false, message: formatXhsWarning(error, locale, message) };
   }
 }
 

@@ -250,6 +250,7 @@ function extractionText(guides, intent) {
     intent.mustSee.length ? `Must see: ${intent.mustSee.join(', ')}` : '',
     `Propose about ${target} specific visitable places (attractions, museums, temples, parks, historic sites, neighborhoods, food streets).`,
     'Do not list the destination itself, a province, city, country, or administrative region as a place.',
+    'For each place include nameZh (Simplified Chinese official name), nameEn (English official name when known), reason (real user tips or pitfalls from the notes), durationMinutes, reservationRequired, and reservationTips when notes mention 预约/抢票/提前预约.',
     `Spread places across days with dayHint from 1 to ${intent.dayCount}.`,
   ].filter(Boolean).join('\n');
   const guideText = guides
@@ -257,7 +258,7 @@ function extractionText(guides, intent) {
     .join('\n\n')
     .slice(0, 12000);
   if (guideText) {
-    return `${header}\n\nExtract named places from these notes first; if they are thin, supplement with well-known places in the destination.\n\n${guideText}`;
+    return `${header}\n\nExtract named places from these notes first; preserve booking tips and user warnings from the notes. If they are thin, supplement with well-known places in the destination.\n\n${guideText}`;
   }
   return `${header}\n\nNo travel notes were supplied. Propose well-known visitable places in the destination that match the interests.`;
 }
@@ -265,10 +266,26 @@ function extractionText(guides, intent) {
 function extractionInstruction(intent, hasGuides) {
   const target = targetPlaceCount(intent);
   const dest = intent.destination || 'the destination';
+  const fields = 'Each candidate must include name, nameZh, nameEn, reason, durationMinutes, reservationRequired, reservationTips, dayHint, and guideId when sourced from a note. Use reservationRequired=true when notes mention 预约, 抢票, 提前预约, or 约满.';
   if (hasGuides) {
-    return `Extract specific visitable places from the notes. Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}. Target about ${target} places. Do not invent coordinates.`;
+    return `Extract specific visitable places from the notes. ${fields} Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Keep real user tips in reason. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}. Target about ${target} places. Do not invent coordinates.`;
   }
-  return `No notes were supplied. Propose well-known visitable places in ${dest}. Each name must be a specific attraction or neighborhood, not the destination, province, city, or country. Spread across ${intent.dayCount} days with dayHint. Target ${target} places. Do not invent coordinates.`;
+  return `No notes were supplied. Propose well-known visitable places in ${dest}. ${fields} Each name must be a specific attraction or neighborhood, not the destination, province, city, or country. Spread across ${intent.dayCount} days with dayHint. Target ${target} places. Do not invent coordinates.`;
+}
+
+function collectXhsNoteIds(guides, pendingNotes) {
+  const ids = new Set();
+  for (const guide of guides || []) {
+    if (guide?.noteId) ids.add(String(guide.noteId));
+  }
+  for (const item of pendingNotes || []) {
+    if (item?.noteId) ids.add(String(item.noteId));
+  }
+  return ids;
+}
+
+function remainingXhsNoteSlots(guides, pendingNotes, maxNotes) {
+  return Math.max(0, maxNotes - collectXhsNoteIds(guides, pendingNotes).size);
 }
 
 function toCandidate(item, intent, fallbackName) {
@@ -531,6 +548,8 @@ module.exports = {
   geoSearchOptions,
   resolveXhsKeywordSearch,
   truthySetting,
+  collectXhsNoteIds,
+  remainingXhsNoteSlots,
   isZh,
   message,
   normalizeInput,

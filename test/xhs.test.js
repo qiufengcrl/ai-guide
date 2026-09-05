@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
-const { searchNotes, fetchSessionNote } = require('../server/xhs/session');
+const { searchNotes, fetchSessionNote, formatXhsWarning, isXhsAuthError, isXhsVerificationError, XhsSessionError } = require('../server/xhs/session');
 const { createSignedPost, parseCookieHeader } = require('../server/xhs/signature');
 const { extractXhsUrls, fetchPublicNote } = require('../server/xhs/url');
 
@@ -71,7 +71,28 @@ test('300011 或异常文案被识别为会话失效', async () => {
   const originalFetch = global.fetch;
   global.fetch = async () => response({ success: false, code: 300011, msg: '账号异常' });
   try {
-    await assert.rejects(searchNotes('旅行', VALID_COOKIE, 1), /signed session.*300011/);
+    await assert.rejects(searchNotes('旅行', VALID_COOKIE, 1), (error) => {
+      assert.match(error.message, /signed session.*300011/);
+      assert.equal(error.code, 'auth');
+      return true;
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('461 被识别为验证错误并格式化警告', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({ ok: false, status: 461, headers: { get() { return null; } }, async json() { return {}; } });
+  try {
+    await assert.rejects(searchNotes('旅行', VALID_COOKIE, 1), (error) => {
+      assert.equal(error.code, 'verification');
+      return true;
+    });
+    const warning = formatXhsWarning(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification'), 'zh', (locale, zh) => zh);
+    assert.match(warning, /【需要验证】/);
+    assert.ok(isXhsVerificationError(new XhsSessionError('461', 'verification')));
+    assert.ok(isXhsAuthError(new XhsSessionError('bad cookie', 'auth')));
   } finally {
     global.fetch = originalFetch;
   }

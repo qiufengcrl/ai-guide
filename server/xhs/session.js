@@ -3,7 +3,13 @@ const { createSearchId, createSignedPost } = require('./signature');
 
 const SEARCH_PAGE_SIZE = 20;
 
-class XhsSessionError extends Error {}
+class XhsSessionError extends Error {
+  constructor(message, code = 'fetch') {
+    super(message);
+    this.name = 'XhsSessionError';
+    this.code = code;
+  }
+}
 
 function normalizeXhsCookie(value) {
   let normalized = String(value || '').trim();
@@ -26,13 +32,40 @@ function normalizeXhsCookie(value) {
   return normalized;
 }
 
+function isXhsAuthError(error) {
+  if (!(error instanceof XhsSessionError)) {
+    return /300011|signed session|missing the a1|missing the web_session|cookie is empty/i.test(String(error?.message || error || ''));
+  }
+  return error.code === 'auth';
+}
+
+function isXhsVerificationError(error) {
+  if (error instanceof XhsSessionError && error.code === 'verification') return true;
+  return /461|471|verification/i.test(String(error?.message || error || ''));
+}
+
+function formatXhsWarning(error, locale, messageFn) {
+  const text = error instanceof Error ? error.message : String(error || '');
+  if (isXhsAuthError(error)) {
+    return messageFn(locale,
+      '【认证失败】小红书 Cookie 无效、不完整或已过期，请在插件设置中更新 Cookie',
+      '【Auth failed】Your Xiaohongshu Cookie is invalid, incomplete, or expired. Update it in plugin settings.');
+  }
+  if (isXhsVerificationError(error)) {
+    return messageFn(locale,
+      '【需要验证】小红书要求验证码（461），请在本机浏览器登录后更新 Cookie',
+      '【Verification required】Xiaohongshu requested captcha (461). Log in locally and update your Cookie.');
+  }
+  return messageFn(locale, `小红书请求失败：${text}`, `Xiaohongshu request failed: ${text}`);
+}
+
 function assertSessionResponse(data) {
   const code = Number(data?.code);
-  const message = String(data?.msg || '');
-  if (code === 300011 || message.includes('异常')) {
-    throw new XhsSessionError(`Xiaohongshu rejected the signed session (code=${code || 'unknown'}): ${message || 'account risk control'}`);
+  const msg = String(data?.msg || '');
+  if (code === 300011 || msg.includes('异常')) {
+    throw new XhsSessionError(`Xiaohongshu rejected the signed session (code=${code || 'unknown'}): ${msg || 'account risk control'}`, 'auth');
   }
-  if (data?.success === false) throw new XhsSessionError(message || `Xiaohongshu returned code ${code || 'unknown'}`);
+  if (data?.success === false) throw new XhsSessionError(msg || `Xiaohongshu returned code ${code || 'unknown'}`, 'fetch');
   return data;
 }
 
@@ -41,17 +74,24 @@ async function post(path, body, cookie) {
   try {
     signed = createSignedPost(path, body, cookie);
   } catch (error) {
-    throw new XhsSessionError(error instanceof Error ? error.message : 'Xiaohongshu request signing failed');
+    const detail = error instanceof Error ? error.message : 'Xiaohongshu request signing failed';
+    const code = /missing the a1|missing the web_session|cookie is empty/i.test(detail) ? 'auth' : 'fetch';
+    throw new XhsSessionError(detail, code);
   }
-  const response = await fetchWithTimeout(`https://edith.xiaohongshu.com${path}`, {
-    method: 'POST',
-    headers: signed.headers,
-    body: signed.body,
-  }, 12000);
+  let response;
+  try {
+    response = await fetchWithTimeout(`https://edith.xiaohongshu.com${path}`, {
+      method: 'POST',
+      headers: signed.headers,
+      body: signed.body,
+    }, 12000);
+  } catch (error) {
+    throw new XhsSessionError(error instanceof Error ? error.message : 'Xiaohongshu network error', 'fetch');
+  }
   if (response.status === 461 || response.status === 471) {
-    throw new XhsSessionError(`Xiaohongshu requested verification (${response.status})`);
+    throw new XhsSessionError(`Xiaohongshu requested verification (${response.status})`, 'verification');
   }
-  if (!response.ok) throw new XhsSessionError(`Xiaohongshu returned ${response.status}`);
+  if (!response.ok) throw new XhsSessionError(`Xiaohongshu returned ${response.status}`, 'fetch');
   return assertSessionResponse(await response.json());
 }
 
@@ -74,6 +114,7 @@ function parseSearchNotes(data, maxNotes = 4) {
       xsecToken,
       title: String(card.display_title || card.title || item?.display_title || ''),
       url: exploreNoteUrl(noteId, xsecToken, 'pc_search'),
+      via: 'search',
     });
     if (notes.length >= maxNotes) break;
   }
@@ -86,7 +127,7 @@ async function searchNotes(keyword, cookie, maxNotes = 4) {
 }
 
 async function searchNotesDetailed(keyword, cookie, maxNotes = 4) {
-  if (!cookie) throw new XhsSessionError('Xiaohongshu Cookie is empty');
+  if (!cookie) throw new XhsSessionError('Xiaohongshu Cookie is empty', 'auth');
   const data = await post('/api/sns/web/v1/search/notes', {
     keyword: String(keyword || '').trim(),
     page: 1,
@@ -141,8 +182,9 @@ async function fetchSessionNote(item, cookie) {
         via: item.via || 'search',
       };
     }
-  } catch {
-    // Public SSR is the intentional detail fallback.
+  } catch (error) {
+    if (isXhsAuthError(error) || isXhsVerificationError(error)) throw error;
+    // Public SSR is the intentional detail fallback for fetch/network failures.
   }
   const note = await fetchPublicNote(item.url);
   return { ...note, via: item.via || 'search' };
@@ -153,6 +195,9 @@ module.exports = {
   XhsSessionError,
   normalizeXhsCookie,
   assertSessionResponse,
+  isXhsAuthError,
+  isXhsVerificationError,
+  formatXhsWarning,
   searchNotes,
   searchNotesDetailed,
   fetchSessionNote,
