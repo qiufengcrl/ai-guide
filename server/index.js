@@ -25,7 +25,11 @@ const {
   collectXhsNoteIds,
   mapConcurrent,
   resolveCandidateEvidence,
+  MAX_FROM_DESTINATION_KM,
+  filterMarketingGuides,
 } = require('./pipeline');
+const { isMarketingGuide } = require('./guide-quality');
+const { loadTrekCategoryMap, buildTrekPlacePayload } = require('./trek-handoff');
 const { fetchPublicNote, fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const {
   normalizeXhsCookie,
@@ -156,19 +160,30 @@ function addWarning(job, text) {
   if (!job.draft.warnings.includes(text)) job.draft.warnings.push(text);
 }
 
+function appendGuide(job, guide, locale) {
+  if (isMarketingGuide(guide)) {
+    addWarning(job, message(locale,
+      `已跳过疑似营销帖「${noteDisplayTitle(guide, '小红书笔记')}」`,
+      `Skipped suspected marketing post "${noteDisplayTitle(guide, 'Xiaohongshu note')}"`));
+    return false;
+  }
+  job.draft.guides.push(guide);
+  return true;
+}
+
 async function ingestPendingNoteFromPublic(job, item, locale, userId) {
   if (!item?.url) return;
   try {
     await xhsThrottle.wait(null, userId);
     const note = await fetchPublicNote(item.url);
     if (!String(note?.text || '').trim() && !String(note?.title || '').trim()) return;
-    job.draft.guides.push({
+    appendGuide(job, {
       ...note,
       id: `g_${job.draft.guides.length + 1}`,
       via: item.via || note.via || 'url',
       title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
       text: String(note.text || '').slice(0, 4000),
-    });
+    }, locale);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error || '');
     addWarning(job, message(locale, `链接读取失败：${detail}`, `Could not read link: ${detail}`));
@@ -257,14 +272,14 @@ async function advance(job, ctx) {
     const intent = normalizeInput(job.payload, limits);
     job.draft = { intent, guides: [], warnings: [], days: [] };
     if (intent.sourceText && !looksLikeShareCard(intent.sourceText)) {
-      job.draft.guides.push({
+      appendGuide(job, {
         id: 'g_1',
         noteId: null,
         title: message(locale, '粘贴的攻略正文', 'Pasted guide text'),
         url: null,
         text: intent.sourceText.slice(0, 4000),
         via: 'paste',
-      });
+      }, locale);
     }
     job.work = { urls: intent.urls, urlIndex: 0, searchAttempted: false, pendingNotes: [], noteIndex: 0 };
     job.stage = 'fetch_guides';
@@ -319,12 +334,12 @@ async function advance(job, ctx) {
             });
             return;
           }
-          job.draft.guides.push({
+          appendGuide(job, {
             ...note,
             id: `g_${job.draft.guides.length + 1}`,
             title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
             text: note.text.slice(0, 4000),
-          });
+          }, locale);
         }
       } catch (error) {
         work.resolvedNote = null;
@@ -354,22 +369,22 @@ async function advance(job, ctx) {
       }
       try {
         const note = await fetchSessionNote(item, cookie);
-        job.draft.guides.push({
+        appendGuide(job, {
           ...note,
           id: `g_${job.draft.guides.length + 1}`,
           via: item.via || note.via || 'search',
           title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
           text: note.text.slice(0, 4000),
-        });
+        }, locale);
       } catch (error) {
         if (error.fallbackNote) {
-          job.draft.guides.push({
+          appendGuide(job, {
             ...error.fallbackNote,
             id: `g_${job.draft.guides.length + 1}`,
             via: item.via || error.fallbackNote.via || 'search',
             title: noteDisplayTitle(error.fallbackNote, message(locale, '小红书笔记', 'Xiaohongshu note')),
             text: String(error.fallbackNote.text || '').slice(0, 4000),
-          });
+          }, locale);
         }
         addWarning(job, formatXhsWarning(error, locale, message, { scene: 'signed' }));
         if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
@@ -384,6 +399,13 @@ async function advance(job, ctx) {
 
   if (job.stage === 'extract') {
     job.draft.guides = mergeGuideTexts(job.draft.guides);
+    const filteredGuides = filterMarketingGuides(job.draft.guides);
+    if (filteredGuides.skipped > 0) {
+      addWarning(job, message(locale,
+        `已过滤 ${filteredGuides.skipped} 篇疑似营销帖`,
+        `Filtered ${filteredGuides.skipped} suspected marketing posts`));
+    }
+    job.draft.guides = filteredGuides.guides;
     if (!job.draft.intent.destination) {
       const inferred = inferDestinationFromGuides(job.draft.guides);
       if (inferred) {
@@ -497,7 +519,15 @@ async function advance(job, ctx) {
       for (const item of resolved) {
         if (item?.evidence) {
           job.work.evidence.push(item.evidence);
-        } else if (item?.query) {
+          continue;
+        }
+        if (item?.boundaryRejected) {
+          addWarning(job, message(locale,
+            `「${item.query}」距目的地超过 ${MAX_FROM_DESTINATION_KM} 公里，已跳过`,
+            `"${item.query}" is more than ${MAX_FROM_DESTINATION_KM} km from the destination and was skipped`));
+          continue;
+        }
+        if (item?.query) {
           addWarning(job, message(locale,
             `「${item.query}」无法匹配坐标，已跳过`,
             `"${item.query}" could not be matched to coordinates and was skipped`));
@@ -764,21 +794,17 @@ module.exports = definePlugin({
         });
         const tripId = Number(trip.id);
         const days = await ctx.trips.getDays(tripId);
+        const categoryMap = await loadTrekCategoryMap(ctx);
         const createdPlaceIds = [];
         try {
           for (const item of selected) {
             const dayIndex = job.draft.days.indexOf(item.day);
             const day = days[dayIndex];
             if (!day) continue;
-            const place = await ctx.places.create(tripId, {
-              name: item.name,
-              lat: item.lat,
-              lng: item.lng,
-              address: item.address || '',
-              notes: item.notes || '',
-            });
+            const placeInput = buildTrekPlacePayload(item, job.draft.guides, categoryMap, job.payload.locale || 'en');
+            const place = await ctx.places.create(tripId, placeInput);
             createdPlaceIds.push(Number(place.id));
-            await ctx.itinerary.assign(tripId, Number(day.id), Number(place.id), item.notes || null);
+            await ctx.itinerary.assign(tripId, Number(day.id), Number(place.id), placeInput.notes || null);
           }
           if (!createdPlaceIds.length) return response(500, {
             error: message(job.payload.locale, '没有地点成功写入', 'No places could be written'),

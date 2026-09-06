@@ -26,12 +26,14 @@ const {
   MAX_INTERVAL_MS,
 } = require('../server/xhs/throttle');
 const { readXhsCookieUpdatedAt } = require('../server/xhs/freshness');
+const { isMarketingGuide, filterMarketingGuides, buildTrekPlaceNotes } = require('../server/guide-quality');
+const { buildTrekPlacePayload } = require('../server/trek-handoff');
 
 setGeoThrottleInterval(0);
 setXhsThrottleForTests({ baseIntervalMs: 0, jitterMs: 0, backoffDelayMs: 0 });
 
 const GRANTS = [
-  'ai:invoke', 'db:own', 'db:create:trips', 'db:read:trips',
+  'ai:invoke', 'db:own', 'db:create:trips', 'db:read:trips', 'db:read:categories',
   'db:write:places', 'db:write:itinerary', 'db:meta', 'hook:user-data',
 ];
 
@@ -107,7 +109,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.32');
+  assert.equal(manifest.version, '1.1.33');
 });
 
 function memoryDb() {
@@ -206,6 +208,7 @@ function buildHost(options = {}) {
     actingUserId: 7,
     config: { max_days: 8, max_places_per_day: 6, max_notes: 4, xhs_enabled: false, ...options.config },
     userSettings: options.userSettings || {},
+    categories: options.categories,
     aiResults: options.aiResults || [{
       intent: { destination: '京都' },
       candidates: [
@@ -415,7 +418,7 @@ test('地图证据会丢掉远离目的地的误匹配', () => {
   assert.equal(labeled.name, '北极镇');
   const near = evidenceFromSearch(candidate, {
     source: 'nominatim',
-    places: [{ name: '洛古河村', lat: 53.3, lng: 122.35, types: ['village'] }],
+    places: [{ name: '洛古河村', lat: 53.3, lng: 122.35, types: ['village'], address: '洛古河村, 漠河市, 大兴安岭地区' }],
   }, 0, '大兴安岭', bias);
   assert.equal(near.name, '洛古河村');
 });
@@ -1540,5 +1543,82 @@ test('deleteUserData 清除该用户 cookie clock', async () => {
   await fixture.app.deleteUserData(7);
   assert.equal(fixture.db.cookieClock.size, 0);
   assert.equal(fixture.db.userMeta.size, 0);
+});
+
+test('营销帖过滤与 TREK 地点备注构建', () => {
+  assert.equal(isMarketingGuide({ title: '云南跟团私信定制', text: '加微信' }), true);
+  assert.equal(isMarketingGuide({ title: '京都三日', text: '伏见稻荷清晨人少' }), false);
+  const filtered = filterMarketingGuides([
+    { title: '真实体验', text: '很好玩' },
+    { title: '加微信定制游', text: '价格优惠' },
+  ]);
+  assert.equal(filtered.skipped, 1);
+  assert.equal(filtered.guides.length, 1);
+  const notes = buildTrekPlaceNotes({
+    reason: '清晨人少',
+    reservationRequired: true,
+    reservationTips: '需提前预约',
+    fromGuideIds: ['g_1'],
+  }, [{
+    id: 'g_1',
+    title: '京都攻略',
+    url: 'https://www.xiaohongshu.com/explore/abc',
+    text: '门票需提前预约，周一闭馆',
+  }], 'zh');
+  assert.match(notes, /清晨人少/);
+  assert.match(notes, /预约/);
+  assert.match(notes, /出发前提示/);
+  assert.match(notes, /来源/);
+  const payload = buildTrekPlacePayload({
+    name: '清水寺',
+    lat: 35,
+    lng: 135,
+    address: '京都',
+    reason: '清晨人少',
+    photoUrl: 'https://example.test/photo.jpg',
+    categoryHint: 'sight',
+    stayMinutes: 90,
+  }, [], { food: 5, sight: 2 }, 'zh');
+  assert.equal(payload.category_id, 2);
+  assert.equal(payload.image_url, 'https://example.test/photo.jpg');
+  assert.equal(payload.duration_minutes, 90);
+  assert.equal(payload.description, '清晨人少');
+});
+
+test('营销景点候选会被过滤', () => {
+  const intent = { destination: '京都', dayCount: 2, pace: 'balanced', interests: [], mustSee: [] };
+  const candidates = normalizeCandidates({
+    candidates: [{ name: '清水寺', reason: '加微信报名跟团', dayHint: 1 }],
+  }, intent);
+  assert.equal(candidates.length, 0);
+});
+
+test('commit 写入 TREK 分类与配图字段', async () => {
+  const fixture = buildHost({
+    categories: [
+      { id: 2, name: 'Sightseeing', icon: 'MapPin' },
+      { id: 5, name: 'Food', icon: 'Utensils' },
+    ],
+    aiResults: [{
+      intent: { destination: '京都' },
+      candidates: [
+        { name: 'Near A', nameZh: '近点A', dayHint: 1, durationMinutes: 60, reason: '清晨人少，适合拍照' },
+        { name: 'Near B', nameZh: '近点B', dayHint: 1, durationMinutes: 75 },
+        { name: 'Far', nameZh: '远点', dayHint: 1, durationMinutes: 90 },
+        { name: 'Missing', nameZh: '无坐标店', dayHint: 1 },
+      ],
+    }, { candidates: [{ name: 'MUST NOT USE' }] }],
+  });
+  const { jobId, state } = await makeReady(fixture);
+  const place = state.days.flatMap((day) => day.places).find((item) => !item.tooFar);
+  const evidenceId = place.evidenceId;
+  const committed = await fixture.app.route({ method: 'POST', path: '/commit' }, {
+    body: { jobId, title: '京都测试', evidenceIds: [evidenceId] },
+  });
+  assert.equal(committed.status, 200);
+  const created = fixture.trips[committed.body.tripId].places[0];
+  assert.equal(created.category_id, 2);
+  assert.match(String(created.notes || ''), /清晨人少/);
+  assert.equal(created.description, '清晨人少，适合拍照');
 });
 
