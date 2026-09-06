@@ -1,8 +1,9 @@
 const { extractXhsUrls } = require('./xhs/url');
 const { scoreRow: geoScoreRow } = require('./geo/nominatim');
+const { isMarketingCandidate, filterMarketingGuides } = require('./guide-quality');
 
 const TOO_FAR_KM = 40;
-const MAX_FROM_DESTINATION_KM = 500;
+const MAX_FROM_DESTINATION_KM = 150;
 const REGION_CLUSTER_KM = 80;
 const REGION_SPLIT_MIN_SPAN_KM = 80;
 
@@ -389,6 +390,7 @@ function normalizeCandidates(raw, intent) {
   const unique = [];
   const pushUnique = (item) => {
     if (!item?.name || isWeakPlaceName(item.name, intent)) return;
+    if (isMarketingCandidate(item)) return;
     const key = foldName(item.name);
     if (!key || seen.has(key)) return;
     seen.add(key);
@@ -480,14 +482,18 @@ async function resolveCandidateEvidence(candidate, index, intent, searchPlacesFn
   const destination = intent.destination;
   const queries = placeSearchNames(candidate, destination);
   let lastError = null;
+  let boundaryRejected = false;
   for (const query of queries) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const result = await searchPlacesFn(query, options);
+        const places = (result?.places || []).filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
+        const nearby = places.filter((item) => nearDestination(item, destination, bias));
+        if (places.length && !nearby.length) boundaryRejected = true;
         const evidence = result
           ? evidenceFromSearch(candidate, result, index, destination, bias)
           : null;
-        if (evidence) return { evidence, query };
+        if (evidence) return { evidence, query, boundaryRejected: false };
         break;
       } catch (error) {
         lastError = error;
@@ -504,6 +510,7 @@ async function resolveCandidateEvidence(candidate, index, intent, searchPlacesFn
     evidence: null,
     query: queries[queries.length - 1] || String(candidate.name || ''),
     error: lastError,
+    boundaryRejected,
   };
 }
 
@@ -533,6 +540,13 @@ function progressForJob(job, locale) {
   }
   if (stage === 'extract') {
     return message(locale, '正在从攻略提取景点…', 'Extracting places from guides…');
+  }
+  if (stage === 'enrich_comments') {
+    const total = Math.min(2, (job.draft?.guides || []).filter((guide) => guide.noteId).length);
+    const done = work.commentGuideIndex || 0;
+    return message(locale,
+      `正在读取评论区提示（${done}/${total || 1}）…`,
+      `Reading comment tips (${done}/${total || 1})…`);
   }
   if (stage === 'gather_evidence') {
     if (!work.bias && !work.biasFailed && destination) {
@@ -968,10 +982,13 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
       osmId: item.osmId,
       categoryHint: item.categoryHint,
       stayMinutes: item.stayHintMinutes,
+      reason: item.reason || '',
+      fromGuideIds: item.fromGuideIds || [],
       notes: item.reason || item.reservationHint || '',
       reservationRequired: item.reservationRequired === true,
       reservationTips: item.reservationHint || '',
       photoUrl: item.photoUrl || '',
+      commentTips: item.commentTips || [],
       tooFar: false,
       selected: true,
     });
@@ -999,7 +1016,7 @@ function publicDraft(job) {
     status: job.status,
     stage: job.stage,
     intent: intent || null,
-    guides: guides.map(({ text, ...guide }) => guide),
+    guides: guides.map(({ text, commentInsights, ...guide }) => guide),
     sourceSummary: {
       basis: guides.length ? 'guides' : 'destination',
       query: intent.guideQuery || '',
@@ -1062,6 +1079,8 @@ module.exports = {
   splitRegions,
   publicDraft,
   haversineKm,
+  filterMarketingGuides,
+  isMarketingCandidate,
   isMultiCityDestination,
   REGION_CLUSTER_KM,
   REGION_SPLIT_MIN_SPAN_KM,

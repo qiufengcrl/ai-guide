@@ -5,6 +5,10 @@ const { test } = require('node:test');
 const { searchNotes, fetchSessionNote, formatXhsWarning, isXhsAuthError, isXhsVerificationError, XhsSessionError } = require('../server/xhs/session');
 const { createSignedPost, parseCookieHeader } = require('../server/xhs/signature');
 const { extractXhsUrls, fetchPublicNote } = require('../server/xhs/url');
+const { setXhsThrottleForTests, isXhsRateLimitError, xhsThrottle } = require('../server/xhs/throttle');
+const { getXhsPhoto, resetXhsPhotoCacheForTests } = require('../server/xhs/photos');
+
+setXhsThrottleForTests({ baseIntervalMs: 0, jitterMs: 0, backoffDelayMs: 0 });
 
 const fixture = (name) => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8'));
 const VALID_COOKIE = `a1=${'a'.repeat(52)}; web_session=fixture-session; xsecappid=xhs-pc-web`;
@@ -108,6 +112,39 @@ test('签名请求绑定同一 payload、时间戳和完整 Cookie', () => {
   assert.ok(signed.headers['x-s-common'].length > 100);
   assert.match(signed.headers.cookie, /web_session=fixture-session/);
   assert.deepEqual(parseCookieHeader('a=1; token=x=y=z'), { __proto__: null, a: '1', token: 'x=y=z' });
+});
+
+test('评论区 API 解析实用提示', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    assert.match(String(url), /comment\/page/);
+    assert.equal(init.method, 'GET');
+    return response(fixture('comments.json'));
+  };
+  try {
+    const { fetchNoteComments, parseCommentTexts } = require('../server/xhs/comments');
+    const texts = await fetchNoteComments('64f000000000000000000001', VALID_COOKIE, { maxComments: 10 });
+    assert.ok(texts.some((line) => /门票/.test(line)));
+    assert.ok(texts.some((line) => /闭馆/.test(line)));
+    const insights = require('../server/guide-quality').extractCommentInsights(texts);
+    assert.ok(insights.length >= 2);
+    assert.equal(insights.some((line) => /加微信/.test(line)), false);
+    const parsed = parseCommentTexts(fixture('comments.json'), 10);
+    assert.equal(parsed.length, 4);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET 签名请求包含查询参数签名', () => {
+  const timestamp = 1788490800456;
+  const { createSignedGet } = require('../server/xhs/signature');
+  const signed = createSignedGet('/api/sns/web/v2/comment/page', {
+    note_id: '64f000000000000000000001',
+    cursor: '',
+  }, VALID_COOKIE, { timestamp });
+  assert.equal(signed.headers['x-t'], String(timestamp));
+  assert.match(signed.headers['x-s'], /^XYS_/);
 });
 
 test('缺少 a1 或 web_session 时在发出网络请求前拒绝', async () => {
@@ -222,5 +259,96 @@ test('xhslink 不跟随到 egress 外域名', async () => {
     await assert.rejects(fetchPublicNote('https://xhslink.com/a/test'), /left the allowed hosts/);
   } finally {
     global.fetch = originalFetch;
+  }
+});
+
+test('session 笔记 429 会重试 signed feed，并保留公开页兜底', async () => {
+  const originalFetch = global.fetch;
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures', 'note.html'), 'utf8');
+  let signedCalls = 0;
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes('edith.xiaohongshu.com')) {
+      signedCalls += 1;
+      return { ok: false, status: 429, headers: { get() { return null; } }, async json() { return {}; } };
+    }
+    return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
+  };
+  try {
+    await assert.rejects(
+      fetchSessionNote({
+        noteId: '64f000000000000000000001',
+        xsecToken: 'tok',
+        url: 'https://www.xiaohongshu.com/explore/64f000000000000000000001',
+      }, VALID_COOKIE),
+      (error) => {
+        assert.equal(isXhsRateLimitError(error), true);
+        assert.equal(error.fallbackNote.noteId, '64f000000000000000000001');
+        return true;
+      },
+    );
+    assert.ok(signedCalls >= 2);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('配图 429 不写入空缓存，且不按进程级 signedBlocked 跳过', async () => {
+  resetXhsPhotoCacheForTests();
+  const originalFetch = global.fetch;
+  let signedCalls = 0;
+  global.fetch = async (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      signedCalls += 1;
+      return { ok: false, status: 429, headers: { get() { return null; } }, async json() { return {}; } };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  try {
+    await assert.rejects(getXhsPhoto('清水寺', VALID_COOKIE, '京都'), isXhsRateLimitError);
+    const afterFirst = signedCalls;
+    assert.ok(afterFirst >= 2);
+    await assert.rejects(getXhsPhoto('清水寺', VALID_COOKIE, '京都'), isXhsRateLimitError);
+    assert.ok(signedCalls > afterFirst);
+    assert.equal(xhsThrottle.isSignedBlocked(VALID_COOKIE), true);
+  } finally {
+    global.fetch = originalFetch;
+    resetXhsPhotoCacheForTests();
+  }
+});
+
+test('配图缓存按 Cookie 隔离，成功 URL 不串到其他用户', async () => {
+  resetXhsPhotoCacheForTests();
+  const otherCookie = `a1=${'b'.repeat(52)}; web_session=other-session; xsecappid=xhs-pc-web`;
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    const href = String(url);
+    if (href.includes('/search/notes')) {
+      return response(fixture('search.json'));
+    }
+    if (href.includes('/feed')) {
+      const cookie = String(init?.headers?.cookie || '');
+      const cover = cookie.includes('other-session') ? 'https://example.test/other.jpg' : 'https://example.test/owner.jpg';
+      return response({
+        success: true,
+        data: {
+          items: [{
+            note_card: {
+              image_list: [{ info_list: [{ url: cover }, { url: cover }] }],
+            },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected fetch: ${href}`);
+  };
+  try {
+    const owner = await getXhsPhoto('清水寺', VALID_COOKIE, '京都');
+    const other = await getXhsPhoto('清水寺', otherCookie, '京都');
+    assert.equal(owner, 'https://example.test/owner.jpg');
+    assert.equal(other, 'https://example.test/other.jpg');
+  } finally {
+    global.fetch = originalFetch;
+    resetXhsPhotoCacheForTests();
   }
 });

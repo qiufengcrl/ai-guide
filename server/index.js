@@ -25,8 +25,12 @@ const {
   collectXhsNoteIds,
   mapConcurrent,
   resolveCandidateEvidence,
+  MAX_FROM_DESTINATION_KM,
+  filterMarketingGuides,
 } = require('./pipeline');
-const { fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
+const { isMarketingGuide, commentTipsForPlace, extractCommentInsights } = require('./guide-quality');
+const { loadTrekCategoryMap, buildTrekPlacePayload } = require('./trek-handoff');
+const { fetchPublicNote, fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const {
   normalizeXhsCookie,
   searchNotes,
@@ -36,7 +40,15 @@ const {
   isXhsAuthError,
   isXhsVerificationError,
 } = require('./xhs/session');
+const { withXhsRetry, xhsThrottle, isXhsRateLimitError } = require('./xhs/throttle');
+const {
+  XHS_COOKIE_STALE_MS,
+  resolveActingUserId,
+  readXhsCookieUpdatedAt,
+  writeXhsCookieUpdatedAt,
+} = require('./xhs/freshness');
 const { getXhsPhoto } = require('./xhs/photos');
+const { fetchNoteComments } = require('./xhs/comments');
 const { searchPlaces } = require('./geo/nominatim');
 
 const JOB_FIELDS = 'id, user_id, status, stage, payload_json, draft_json, work_json, error, committed_trip_id, created_at, updated_at';
@@ -47,7 +59,42 @@ const json = (value, fallback) => {
   try { return JSON.parse(String(value || '')); } catch { return fallback; }
 };
 const response = (status, body) => ({ status, headers: { 'content-type': 'application/json' }, body });
-const pauseForXhs = () => new Promise((resolve) => setTimeout(resolve, 800));
+
+function blockSignedXhs(work, cookie) {
+  if (work) work.xhsSignedApiBlocked = true;
+  if (cookie) xhsThrottle.markSignedBlocked(cookie);
+}
+
+async function warnIfXhsCookieStale(job, ctx, cookie, locale) {
+  const work = job.work || {};
+  if (!cookie || work.xhsCookieAgeChecked) return;
+  work.xhsCookieAgeChecked = true;
+  const updatedAt = await readXhsCookieUpdatedAt(ctx, job.userId, cookie);
+  if (!updatedAt) return;
+  if (Date.now() - updatedAt <= XHS_COOKIE_STALE_MS) return;
+  addWarning(job, message(locale,
+    '小红书 Cookie 已超过 7 天未更新，可能已过期。建议重新登录 www.xiaohongshu.com 后在插件设置中更新 Cookie。生成不会因此中断。',
+    'Your Xiaohongshu Cookie was last updated more than 7 days ago and may have expired. Log in at www.xiaohongshu.com and update it in plugin settings. Planning will continue.'));
+}
+
+async function ensureXhsSignedAccess(job, work, cookie, locale, ctx) {
+  if (!cookie) return false;
+  if (work.xhsSignedApiBlocked) return false;
+  if (work.xhsHealthChecked) return true;
+  work.xhsHealthChecked = true;
+  try {
+    await withXhsRetry(() => searchNotesDetailed('旅行', cookie, 1), { cookie });
+    await writeXhsCookieUpdatedAt(ctx, job.userId, cookie);
+    return true;
+  } catch (error) {
+    addWarning(job, formatXhsWarning(error, locale, message, { scene: 'search' }));
+    if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+      blockSignedXhs(work, cookie);
+      return false;
+    }
+    return true;
+  }
+}
 
 function isTransientTickError(error) {
   if (!error) return false;
@@ -114,7 +161,37 @@ function addWarning(job, text) {
   if (!job.draft.warnings.includes(text)) job.draft.warnings.push(text);
 }
 
-async function runKeywordSearch(job, work, cookie, limits, locale) {
+function appendGuide(job, guide, locale) {
+  if (isMarketingGuide(guide)) {
+    addWarning(job, message(locale,
+      `已跳过疑似营销帖「${noteDisplayTitle(guide, '小红书笔记')}」`,
+      `Skipped suspected marketing post "${noteDisplayTitle(guide, 'Xiaohongshu note')}"`));
+    return false;
+  }
+  job.draft.guides.push(guide);
+  return true;
+}
+
+async function ingestPendingNoteFromPublic(job, item, locale, userId) {
+  if (!item?.url) return;
+  try {
+    await xhsThrottle.wait(null, userId);
+    const note = await fetchPublicNote(item.url);
+    if (!String(note?.text || '').trim() && !String(note?.title || '').trim()) return;
+    appendGuide(job, {
+      ...note,
+      id: `g_${job.draft.guides.length + 1}`,
+      via: item.via || note.via || 'url',
+      title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
+      text: String(note.text || '').slice(0, 4000),
+    }, locale);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error || '');
+    addWarning(job, message(locale, `链接读取失败：${detail}`, `Could not read link: ${detail}`));
+  }
+}
+
+async function runKeywordSearch(job, work, cookie, limits, locale, ctx) {
   const wantsKeywordSearch = limits.xhsEnabled
     && resolveXhsKeywordSearch(job.payload.xhsKeywordSearch);
   if (!wantsKeywordSearch) return;
@@ -130,6 +207,7 @@ async function runKeywordSearch(job, work, cookie, limits, locale) {
       'No Xiaohongshu Cookie is configured; keyword search was skipped'));
     return;
   }
+  if (work.xhsSignedApiBlocked) return;
   if (!job.draft.intent.destination) return;
 
   const hasUserSources = (job.draft.guides || []).length > 0
@@ -144,14 +222,15 @@ async function runKeywordSearch(job, work, cookie, limits, locale) {
     return;
   }
 
+  if (!(await ensureXhsSignedAccess(job, work, cookie, locale, ctx))) return;
+
   const queries = (job.draft.intent.searchQueries || [job.draft.intent.guideQuery]).slice(0, 2);
   const seen = collectXhsNoteIds(job.draft.guides, work.pendingNotes);
   const beforePending = work.pendingNotes.length;
   let lastError = null;
   for (const query of queries) {
     try {
-      await pauseForXhs();
-      const { notes: automatic } = await searchNotesDetailed(query, cookie, remaining);
+      const { notes: automatic } = await withXhsRetry(() => searchNotesDetailed(query, cookie, remaining), { cookie });
       work.lastSearchQuery = query;
       work.lastSearchCount = automatic.length;
       if (automatic.length) {
@@ -165,15 +244,17 @@ async function runKeywordSearch(job, work, cookie, limits, locale) {
       }
     } catch (error) {
       lastError = error;
-      if (isXhsAuthError(error) || isXhsVerificationError(error)) break;
-      if (/461|429|频繁|风控/.test(String(error.message || ''))) break;
+      if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+        blockSignedXhs(work, cookie);
+        break;
+      }
     }
   }
 
   const added = work.pendingNotes.length - beforePending;
   if (added > 0) return;
   if (lastError) {
-    addWarning(job, formatXhsWarning(lastError, locale, message));
+    addWarning(job, formatXhsWarning(lastError, locale, message, { scene: 'search' }));
     return;
   }
   if (!hasUserSources) {
@@ -192,14 +273,14 @@ async function advance(job, ctx) {
     const intent = normalizeInput(job.payload, limits);
     job.draft = { intent, guides: [], warnings: [], days: [] };
     if (intent.sourceText && !looksLikeShareCard(intent.sourceText)) {
-      job.draft.guides.push({
+      appendGuide(job, {
         id: 'g_1',
         noteId: null,
         title: message(locale, '粘贴的攻略正文', 'Pasted guide text'),
         url: null,
         text: intent.sourceText.slice(0, 4000),
         via: 'paste',
-      });
+      }, locale);
     }
     job.work = { urls: intent.urls, urlIndex: 0, searchAttempted: false, pendingNotes: [], noteIndex: 0 };
     job.stage = 'fetch_guides';
@@ -209,6 +290,7 @@ async function advance(job, ctx) {
   if (job.stage === 'fetch_guides') {
     const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
     const work = job.work;
+    await warnIfXhsCookieStale(job, ctx, cookie, locale);
     if (work.urlIndex < work.urls.length) {
       const value = work.urls[work.urlIndex];
       let consumed = false;
@@ -218,10 +300,10 @@ async function advance(job, ctx) {
           consumed = true;
           work.urlIndex += 1;
           if (!cookie) throw new Error(message(locale, '搜索结果链接需要用户 Cookie', 'A search-result link requires the user Cookie'));
-          await pauseForXhs();
+          if (!(await ensureXhsSignedAccess(job, work, cookie, locale, ctx))) return;
           const remaining = remainingXhsNoteSlots(job.draft.guides, work.pendingNotes, limits.maxNotes);
           const seen = collectXhsNoteIds(job.draft.guides, work.pendingNotes);
-          for (const item of await searchNotes(keyword, cookie, remaining || limits.maxNotes)) {
+          for (const item of await withXhsRetry(() => searchNotes(keyword, cookie, remaining || limits.maxNotes), { cookie })) {
             if (seen.has(item.noteId) || seen.size >= limits.maxNotes) continue;
             seen.add(item.noteId);
             work.pendingNotes.push(item);
@@ -229,7 +311,7 @@ async function advance(job, ctx) {
         } else {
           const host = (() => { try { return new URL(value).hostname; } catch { return ''; } })();
           if (isShortLinkHost(host) && !work.resolvedNote) {
-            await pauseForXhs();
+            await xhsThrottle.wait(cookie, job.userId);
             work.resolvedNote = await resolveNoteUrl(value);
             return;
           }
@@ -239,7 +321,7 @@ async function advance(job, ctx) {
           work.urlIndex += 1;
           let note;
           try {
-            await pauseForXhs();
+            await xhsThrottle.wait(cookie, job.userId);
             note = await fetchPublicNoteFromResolved(resolved);
           } catch (publicError) {
             const noteId = publicError.noteId || resolved.noteId || noteIdFromUrl(resolved.url || value);
@@ -253,43 +335,62 @@ async function advance(job, ctx) {
             });
             return;
           }
-          job.draft.guides.push({
+          appendGuide(job, {
             ...note,
             id: `g_${job.draft.guides.length + 1}`,
             title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
             text: note.text.slice(0, 4000),
-          });
+          }, locale);
         }
       } catch (error) {
         work.resolvedNote = null;
         if (!consumed) work.urlIndex += 1;
         const detail = error instanceof Error ? error.message : String(error || '');
-        const warning = error?.name === 'XhsSessionError' || isXhsAuthError(error) || isXhsVerificationError(error)
-          ? formatXhsWarning(error, locale, message)
+        const warning = error?.name === 'XhsSessionError' || isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)
+          ? formatXhsWarning(error, locale, message, { scene: 'signed' })
           : message(locale, `链接读取失败：${detail}`, `Could not read link: ${detail}`);
         addWarning(job, warning);
+        if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+          blockSignedXhs(work, cookie);
+        }
       }
       return;
     }
     if (!work.searchAttempted) {
       work.searchAttempted = true;
-      await runKeywordSearch(job, work, cookie, limits, locale);
+      await runKeywordSearch(job, work, cookie, limits, locale, ctx);
       return;
     }
     if (work.noteIndex < work.pendingNotes.length) {
+      const signedOk = await ensureXhsSignedAccess(job, work, cookie, locale, ctx);
       const item = work.pendingNotes[work.noteIndex++];
+      if (!signedOk) {
+        await ingestPendingNoteFromPublic(job, item, locale, job.userId);
+        return;
+      }
       try {
-        await pauseForXhs();
         const note = await fetchSessionNote(item, cookie);
-        job.draft.guides.push({
+        appendGuide(job, {
           ...note,
           id: `g_${job.draft.guides.length + 1}`,
           via: item.via || note.via || 'search',
           title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
           text: note.text.slice(0, 4000),
-        });
+        }, locale);
       } catch (error) {
-        addWarning(job, formatXhsWarning(error, locale, message));
+        if (error.fallbackNote) {
+          appendGuide(job, {
+            ...error.fallbackNote,
+            id: `g_${job.draft.guides.length + 1}`,
+            via: item.via || error.fallbackNote.via || 'search',
+            title: noteDisplayTitle(error.fallbackNote, message(locale, '小红书笔记', 'Xiaohongshu note')),
+            text: String(error.fallbackNote.text || '').slice(0, 4000),
+          }, locale);
+        }
+        addWarning(job, formatXhsWarning(error, locale, message, { scene: 'signed' }));
+        if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+          blockSignedXhs(work, cookie);
+        }
       }
       return;
     }
@@ -299,6 +400,13 @@ async function advance(job, ctx) {
 
   if (job.stage === 'extract') {
     job.draft.guides = mergeGuideTexts(job.draft.guides);
+    const filteredGuides = filterMarketingGuides(job.draft.guides);
+    if (filteredGuides.skipped > 0) {
+      addWarning(job, message(locale,
+        `已过滤 ${filteredGuides.skipped} 篇疑似营销帖`,
+        `Filtered ${filteredGuides.skipped} suspected marketing posts`));
+    }
+    job.draft.guides = filteredGuides.guides;
     if (!job.draft.intent.destination) {
       const inferred = inferDestinationFromGuides(job.draft.guides);
       if (inferred) {
@@ -382,7 +490,41 @@ async function advance(job, ctx) {
     job.work.bias = null;
     job.work.geocodeDone = false;
     job.work.photosDone = false;
-    job.stage = 'gather_evidence';
+    job.work.commentGuideIndex = 0;
+    job.stage = 'enrich_comments';
+    return;
+  }
+
+  if (job.stage === 'enrich_comments') {
+    const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
+    const work = job.work;
+    const maxGuides = 2;
+    const guidesWithNotes = (job.draft.guides || []).filter((guide) => guide.noteId);
+    const shouldSkip = !cookie || work.xhsSignedApiBlocked || !guidesWithNotes.length || !limits.xhsEnabled;
+    if (shouldSkip) {
+      job.stage = 'gather_evidence';
+      return;
+    }
+    const index = work.commentGuideIndex || 0;
+    if (index >= Math.min(guidesWithNotes.length, maxGuides)) {
+      job.stage = 'gather_evidence';
+      return;
+    }
+    const guide = guidesWithNotes[index];
+    work.commentGuideIndex = index + 1;
+    try {
+      await xhsThrottle.wait(cookie, job.userId);
+      const comments = await withXhsRetry(
+        () => fetchNoteComments(guide.noteId, cookie, { maxComments: 24, timeoutMs: 10000 }),
+        { cookie, maxRetries: 1 },
+      );
+      const insights = extractCommentInsights(comments, 6);
+      if (insights.length) guide.commentInsights = insights;
+    } catch (error) {
+      if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+        blockSignedXhs(work, cookie);
+      }
+    }
     return;
   }
 
@@ -409,10 +551,28 @@ async function advance(job, ctx) {
       const resolved = await mapConcurrent(candidates, 3, (candidate, index) =>
         resolveCandidateEvidence(candidate, index, job.draft.intent, searchPlaces, geoOpts, job.work.bias));
       job.work.evidence = [];
-      for (const item of resolved) {
+      for (let index = 0; index < resolved.length; index += 1) {
+        const item = resolved[index];
+        const candidate = candidates[index];
         if (item?.evidence) {
+          const guideIds = candidate?.guideId
+            ? [candidate.guideId]
+            : (item.evidence.fromGuideIds || []);
+          item.evidence.commentTips = commentTipsForPlace(
+            item.evidence.name,
+            job.draft.guides,
+            guideIds,
+          );
           job.work.evidence.push(item.evidence);
-        } else if (item?.query) {
+          continue;
+        }
+        if (item?.boundaryRejected) {
+          addWarning(job, message(locale,
+            `「${item.query}」距目的地超过 ${MAX_FROM_DESTINATION_KM} 公里，已跳过`,
+            `"${item.query}" is more than ${MAX_FROM_DESTINATION_KM} km from the destination and was skipped`));
+          continue;
+        }
+        if (item?.query) {
           addWarning(job, message(locale,
             `「${item.query}」无法匹配坐标，已跳过`,
             `"${item.query}" could not be matched to coordinates and was skipped`));
@@ -429,15 +589,19 @@ async function advance(job, ctx) {
     if (!job.work.photosDone) {
       job.work.photosDone = true;
       const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
-      if (cookie && job.work.evidence?.length) {
+      if (cookie && job.work.evidence?.length && !job.work.xhsSignedApiBlocked) {
         const destination = job.draft.intent.destination || '';
-        await mapConcurrent(job.work.evidence, 3, async (item) => {
+        for (const item of job.work.evidence) {
+          if (job.work.xhsSignedApiBlocked) break;
           try {
             item.photoUrl = await getXhsPhoto(item.name, cookie, destination);
-          } catch {
+          } catch (error) {
             item.photoUrl = '';
+            if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+              blockSignedXhs(job.work, cookie);
+            }
           }
-        });
+        }
       }
       return;
     }
@@ -475,8 +639,9 @@ async function advance(job, ctx) {
   }
 }
 
-async function testXhs(ctx, locale = 'en', keyword = '旅行') {
+async function testXhs(ctx, locale = 'en', keyword = '旅行', userId = null) {
   const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
+  const uid = await resolveActingUserId(ctx, userId);
   if (!cookie) {
     return {
       ok: false,
@@ -484,7 +649,13 @@ async function testXhs(ctx, locale = 'en', keyword = '旅行') {
     };
   }
   try {
-    const { notes, debug } = await searchNotesDetailed(String(keyword || '旅行').trim() || '旅行', cookie, 4);
+    const searchKeyword = String(keyword || '旅行').trim() || '旅行';
+    // TREK settings actions time out at 15s; keep health checks single-shot and fast.
+    const { notes, debug } = await withXhsRetry(
+      () => searchNotesDetailed(searchKeyword, cookie, 4, { timeoutMs: 8000 }),
+      { cookie, maxRetries: 0, wait: false },
+    );
+    await writeXhsCookieUpdatedAt(ctx, uid, cookie);
     if (!notes.length) {
       return {
         ok: false,
@@ -500,7 +671,7 @@ async function testXhs(ctx, locale = 'en', keyword = '旅行') {
       message: message(locale, `小红书会话可用，搜到 ${notes.length} 篇`, `Xiaohongshu session is available (${notes.length} notes)`),
     };
   } catch (error) {
-    return { ok: false, message: formatXhsWarning(error, locale, message) };
+    return { ok: false, message: formatXhsWarning(error, locale, message, { scene: 'search' }) };
   }
 }
 
@@ -523,6 +694,16 @@ module.exports = definePlugin({
       '002_one_active_job',
       "CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_user ON jobs(user_id) WHERE status IN ('queued', 'running')",
     );
+    await ctx.db.migrate('003_user_meta', `CREATE TABLE IF NOT EXISTS user_meta (
+      user_id INTEGER PRIMARY KEY,
+      xhs_cookie_updated_at INTEGER
+    )`);
+    await ctx.db.migrate('004_xhs_cookie_clock', `CREATE TABLE IF NOT EXISTS xhs_cookie_clock (
+      fp TEXT PRIMARY KEY,
+      user_id INTEGER,
+      updated_at INTEGER NOT NULL
+    )`);
+    await ctx.db.migrate('005_xhs_cookie_clock_drop_orphans', 'DELETE FROM xhs_cookie_clock WHERE user_id IS NULL');
   },
   routes: [
     {
@@ -658,21 +839,17 @@ module.exports = definePlugin({
         });
         const tripId = Number(trip.id);
         const days = await ctx.trips.getDays(tripId);
+        const categoryMap = await loadTrekCategoryMap(ctx);
         const createdPlaceIds = [];
         try {
           for (const item of selected) {
             const dayIndex = job.draft.days.indexOf(item.day);
             const day = days[dayIndex];
             if (!day) continue;
-            const place = await ctx.places.create(tripId, {
-              name: item.name,
-              lat: item.lat,
-              lng: item.lng,
-              address: item.address || '',
-              notes: item.notes || '',
-            });
+            const placeInput = buildTrekPlacePayload(item, job.draft.guides, categoryMap, job.payload.locale || 'en');
+            const place = await ctx.places.create(tripId, placeInput);
             createdPlaceIds.push(Number(place.id));
-            await ctx.itinerary.assign(tripId, Number(day.id), Number(place.id), item.notes || null);
+            await ctx.itinerary.assign(tripId, Number(day.id), Number(place.id), placeInput.notes || null);
           }
           if (!createdPlaceIds.length) return response(500, {
             error: message(job.payload.locale, '没有地点成功写入', 'No places could be written'),
@@ -701,7 +878,7 @@ module.exports = definePlugin({
     {
       method: 'POST', path: '/xhs/test', auth: true,
       async handler(req, ctx) {
-        return response(200, await testXhs(ctx, req.body?.locale || 'en', req.body?.keyword));
+        return response(200, await testXhs(ctx, req.body?.locale || 'en', req.body?.keyword, req.user?.id));
       },
     },
   ],
@@ -710,6 +887,8 @@ module.exports = definePlugin({
   },
   async deleteUserData({ userId }, ctx) {
     await ctx.db.exec('DELETE FROM jobs WHERE user_id = ?', userId);
+    await ctx.db.exec('DELETE FROM user_meta WHERE user_id = ?', userId);
+    await ctx.db.exec('DELETE FROM xhs_cookie_clock WHERE user_id = ?', userId);
   },
   async exportUserData({ userId }, ctx) {
     const rows = await ctx.db.query(`SELECT ${JOB_FIELDS} FROM jobs WHERE user_id = ? ORDER BY created_at`, userId);

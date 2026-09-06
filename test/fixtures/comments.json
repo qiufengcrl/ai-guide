@@ -1,0 +1,30 @@
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "comments": [
+      {
+        "id": "c1",
+        "content": "现在门票涨到 60 了，建议提前预约",
+        "user_info": { "nickname": "旅行者A" }
+      },
+      {
+        "id": "c2",
+        "content": "周一闭馆，别白跑一趟",
+        "user_info": { "nickname": "本地人" }
+      },
+      {
+        "id": "c3",
+        "content": "加微信跟团更便宜",
+        "user_info": { "nickname": "广告" }
+      },
+      {
+        "id": "c4",
+        "content": "清水寺早上人少，拍照好看",
+        "user_info": { "nickname": "摄影党" }
+      }
+    ],
+    "cursor": "",
+    "has_more": false
+  }
+}

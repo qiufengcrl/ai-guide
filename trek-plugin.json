@@ -1,7 +1,7 @@
 {
   "id": "ai-guide",
   "name": "AI 攻略",
-  "version": "1.1.30",
+  "version": "1.1.34",
   "apiVersion": 1,
   "author": "Your Name",
   "description": "把小红书旅行攻略转换为可编辑的 TREK 地图行程",
@@ -93,13 +93,20 @@
       "scope": "user",
       "secret": true,
       "hint": "登录 www.xiaohongshu.com 后粘贴完整 Cookie，须含 a1 和 web_session。仅服务端使用，不会进页面或 AI。"
+    },
+    {
+      "key": "xhs_cookie_updated_at",
+      "label": "Cookie 最近验证时间",
+      "input_type": "text",
+      "scope": "user",
+      "hint": "毫秒时间戳，由插件在 Cookie 验证成功时自动记录；超过 7 天会在生成前非阻断提醒。无需手动填写，请勿把 Cookie 贴到这里。"
     }
   ],
   "actions": [
     {
       "key": "testXhs",
       "label": "测试小红书会话",
-      "hint": "使用你的 Cookie 执行一次最小关键词搜索。"
+      "hint": "请先保存 Cookie，再点测试。执行一次最小关键词搜索（约数秒）。"
     }
   ]
 }
