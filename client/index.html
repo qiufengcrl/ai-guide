@@ -1985,7 +1985,12 @@
           var placeName = document.createElement('strong');
           placeName.textContent = place.name || '';
           var notes = document.createElement('small');
-          notes.textContent = place.notes || place.address || '';
+          var noteParts = [];
+          if (place.notes) noteParts.push(place.notes);
+          if (place.commentTips && place.commentTips.length) {
+            noteParts.push((locale === 'zh' ? '评论区：' : 'Comments: ') + place.commentTips.join('；'));
+          }
+          notes.textContent = noteParts.join('\n\n') || place.address || '';
           placeCopy.appendChild(placeName);
           if (notes.textContent) placeCopy.appendChild(notes);
 

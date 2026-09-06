@@ -26,7 +26,7 @@ const {
   MAX_INTERVAL_MS,
 } = require('../server/xhs/throttle');
 const { readXhsCookieUpdatedAt } = require('../server/xhs/freshness');
-const { isMarketingGuide, filterMarketingGuides, buildTrekPlaceNotes } = require('../server/guide-quality');
+const { isMarketingGuide, filterMarketingGuides, buildTrekPlaceNotes, extractCommentInsights, commentTipsForPlace } = require('../server/guide-quality');
 const { buildTrekPlacePayload } = require('../server/trek-handoff');
 
 setGeoThrottleInterval(0);
@@ -109,7 +109,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.33');
+  assert.equal(manifest.version, '1.1.34');
 });
 
 function memoryDb() {
@@ -1569,6 +1569,17 @@ test('营销帖过滤与 TREK 地点备注构建', () => {
   assert.match(notes, /预约/);
   assert.match(notes, /出发前提示/);
   assert.match(notes, /来源/);
+  const commentInsights = extractCommentInsights([
+    '现在门票 60，建议提前预约',
+    '加微信跟团',
+    '周一闭馆别白跑',
+  ]);
+  assert.equal(commentInsights.length, 2);
+  const placeTips = commentTipsForPlace('清水寺', [{
+    id: 'g_1',
+    commentInsights: ['清水寺早上人少', '京都巴士一日券划算'],
+  }], ['g_1']);
+  assert.ok(placeTips.length >= 1);
   const payload = buildTrekPlacePayload({
     name: '清水寺',
     lat: 35,

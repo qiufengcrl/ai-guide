@@ -33,6 +33,41 @@ function randomHex(length) {
  * Build the same signed browser-shaped POST used by TripStar, backed by the
  * small MIT-licensed xhshow-js engine rather than TripStar's GPL bundle.
  */
+function createSignedGet(path, params, cookie, options = {}) {
+  const cookies = parseCookieHeader(cookie);
+  if (!cookies.a1) throw new Error('Xiaohongshu Cookie is missing the a1 value');
+  if (!cookies.web_session) throw new Error('Xiaohongshu Cookie is missing the web_session value');
+
+  const timestamp = Number.isFinite(options.timestamp) ? options.timestamp : Date.now();
+  const client = options.signer || signer;
+  const appId = cookies.xsecappid || XSEC_APP_ID;
+  const query = params && typeof params === 'object' ? params : {};
+
+  return {
+    headers: {
+      accept: 'application/json, text/plain, */*',
+      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'cache-control': 'no-cache',
+      cookie: serializeCookies(cookies),
+      pragma: 'no-cache',
+      referer: `${XHS_ORIGIN}/`,
+      'sec-ch-ua': '"Chromium";v="142", "Not_A Brand";v="99"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-site',
+      'user-agent': PUBLIC_USER_AGENT,
+      'x-b3-traceid': client.getB3TraceId(),
+      'x-mns': 'unload',
+      'x-s': client.signXS('GET', path, cookies.a1, appId, query, timestamp),
+      'x-s-common': client.signXSCommon(cookies),
+      'x-t': String(timestamp),
+      'x-xray-traceid': client.getXrayTraceId(timestamp),
+    },
+  };
+}
+
 function createSignedPost(path, payload, cookie, options = {}) {
   const cookies = parseCookieHeader(cookie);
   if (!cookies.a1) throw new Error('Xiaohongshu Cookie is missing the a1 value');
@@ -78,6 +113,7 @@ function createSearchId() {
 module.exports = {
   XHS_ORIGIN,
   createSearchId,
+  createSignedGet,
   createSignedPost,
   parseCookieHeader,
 };

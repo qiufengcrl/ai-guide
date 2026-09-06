@@ -28,7 +28,7 @@ const {
   MAX_FROM_DESTINATION_KM,
   filterMarketingGuides,
 } = require('./pipeline');
-const { isMarketingGuide } = require('./guide-quality');
+const { isMarketingGuide, commentTipsForPlace, extractCommentInsights } = require('./guide-quality');
 const { loadTrekCategoryMap, buildTrekPlacePayload } = require('./trek-handoff');
 const { fetchPublicNote, fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const {
@@ -48,6 +48,7 @@ const {
   writeXhsCookieUpdatedAt,
 } = require('./xhs/freshness');
 const { getXhsPhoto } = require('./xhs/photos');
+const { fetchNoteComments } = require('./xhs/comments');
 const { searchPlaces } = require('./geo/nominatim');
 
 const JOB_FIELDS = 'id, user_id, status, stage, payload_json, draft_json, work_json, error, committed_trip_id, created_at, updated_at';
@@ -489,7 +490,41 @@ async function advance(job, ctx) {
     job.work.bias = null;
     job.work.geocodeDone = false;
     job.work.photosDone = false;
-    job.stage = 'gather_evidence';
+    job.work.commentGuideIndex = 0;
+    job.stage = 'enrich_comments';
+    return;
+  }
+
+  if (job.stage === 'enrich_comments') {
+    const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
+    const work = job.work;
+    const maxGuides = 2;
+    const guidesWithNotes = (job.draft.guides || []).filter((guide) => guide.noteId);
+    const shouldSkip = !cookie || work.xhsSignedApiBlocked || !guidesWithNotes.length || !limits.xhsEnabled;
+    if (shouldSkip) {
+      job.stage = 'gather_evidence';
+      return;
+    }
+    const index = work.commentGuideIndex || 0;
+    if (index >= Math.min(guidesWithNotes.length, maxGuides)) {
+      job.stage = 'gather_evidence';
+      return;
+    }
+    const guide = guidesWithNotes[index];
+    work.commentGuideIndex = index + 1;
+    try {
+      await xhsThrottle.wait(cookie, job.userId);
+      const comments = await withXhsRetry(
+        () => fetchNoteComments(guide.noteId, cookie, { maxComments: 24, timeoutMs: 10000 }),
+        { cookie, maxRetries: 1 },
+      );
+      const insights = extractCommentInsights(comments, 6);
+      if (insights.length) guide.commentInsights = insights;
+    } catch (error) {
+      if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
+        blockSignedXhs(work, cookie);
+      }
+    }
     return;
   }
 
@@ -516,8 +551,18 @@ async function advance(job, ctx) {
       const resolved = await mapConcurrent(candidates, 3, (candidate, index) =>
         resolveCandidateEvidence(candidate, index, job.draft.intent, searchPlaces, geoOpts, job.work.bias));
       job.work.evidence = [];
-      for (const item of resolved) {
+      for (let index = 0; index < resolved.length; index += 1) {
+        const item = resolved[index];
+        const candidate = candidates[index];
         if (item?.evidence) {
+          const guideIds = candidate?.guideId
+            ? [candidate.guideId]
+            : (item.evidence.fromGuideIds || []);
+          item.evidence.commentTips = commentTipsForPlace(
+            item.evidence.name,
+            job.draft.guides,
+            guideIds,
+          );
           job.work.evidence.push(item.evidence);
           continue;
         }

@@ -114,6 +114,39 @@ test('签名请求绑定同一 payload、时间戳和完整 Cookie', () => {
   assert.deepEqual(parseCookieHeader('a=1; token=x=y=z'), { __proto__: null, a: '1', token: 'x=y=z' });
 });
 
+test('评论区 API 解析实用提示', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    assert.match(String(url), /comment\/page/);
+    assert.equal(init.method, 'GET');
+    return response(fixture('comments.json'));
+  };
+  try {
+    const { fetchNoteComments, parseCommentTexts } = require('../server/xhs/comments');
+    const texts = await fetchNoteComments('64f000000000000000000001', VALID_COOKIE, { maxComments: 10 });
+    assert.ok(texts.some((line) => /门票/.test(line)));
+    assert.ok(texts.some((line) => /闭馆/.test(line)));
+    const insights = require('../server/guide-quality').extractCommentInsights(texts);
+    assert.ok(insights.length >= 2);
+    assert.equal(insights.some((line) => /加微信/.test(line)), false);
+    const parsed = parseCommentTexts(fixture('comments.json'), 10);
+    assert.equal(parsed.length, 4);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET 签名请求包含查询参数签名', () => {
+  const timestamp = 1788490800456;
+  const { createSignedGet } = require('../server/xhs/signature');
+  const signed = createSignedGet('/api/sns/web/v2/comment/page', {
+    note_id: '64f000000000000000000001',
+    cursor: '',
+  }, VALID_COOKIE, { timestamp });
+  assert.equal(signed.headers['x-t'], String(timestamp));
+  assert.match(signed.headers['x-s'], /^XYS_/);
+});
+
 test('缺少 a1 或 web_session 时在发出网络请求前拒绝', async () => {
   await assert.rejects(searchNotes('旅行', 'web_session=fixture', 1), /missing the a1 value/);
   await assert.rejects(searchNotes('旅行', `a1=${'a'.repeat(52)}`, 1), /missing the web_session value/);

@@ -541,6 +541,13 @@ function progressForJob(job, locale) {
   if (stage === 'extract') {
     return message(locale, '正在从攻略提取景点…', 'Extracting places from guides…');
   }
+  if (stage === 'enrich_comments') {
+    const total = Math.min(2, (job.draft?.guides || []).filter((guide) => guide.noteId).length);
+    const done = work.commentGuideIndex || 0;
+    return message(locale,
+      `正在读取评论区提示（${done}/${total || 1}）…`,
+      `Reading comment tips (${done}/${total || 1})…`);
+  }
   if (stage === 'gather_evidence') {
     if (!work.bias && !work.biasFailed && destination) {
       return message(locale, `正在定位「${destination}」…`, `Locating “${destination}”…`);
@@ -981,6 +988,7 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
       reservationRequired: item.reservationRequired === true,
       reservationTips: item.reservationHint || '',
       photoUrl: item.photoUrl || '',
+      commentTips: item.commentTips || [],
       tooFar: false,
       selected: true,
     });
@@ -1008,7 +1016,7 @@ function publicDraft(job) {
     status: job.status,
     stage: job.stage,
     intent: intent || null,
-    guides: guides.map(({ text, ...guide }) => guide),
+    guides: guides.map(({ text, commentInsights, ...guide }) => guide),
     sourceSummary: {
       basis: guides.length ? 'guides' : 'destination',
       query: intent.guideQuery || '',
