@@ -106,13 +106,9 @@
     }
     .stage-tab:disabled { opacity: .42; cursor: not-allowed; }
     .stage-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    .studio-tools {
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 8px;
-    }
-    .studio-tools .trek-btn { min-height: 34px; padding-inline: 10px; }
+    .studio-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+    .studio-tools .trek-btn { min-height: 34px; padding-inline: 8px; }
+    .studio-tools .trek-btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
     .status-line {
       display: none;
@@ -454,8 +450,8 @@
       border-bottom-color: var(--accent);
     }
     .inspector-body {
-      min-height: 180px;
-      max-height: 42vh;
+      min-height: 140px;
+      max-height: 32vh;
       overflow: auto;
       padding: 14px 16px 18px;
     }
@@ -572,7 +568,8 @@
 
     /* desktop only at 1180px — board layout, not a long marketing page */
     @media (min-width: 1180px) {
-      .studio-bar { padding: 12px 22px; }
+      .studio-tools .trek-btn span { position: static; width: auto; height: auto; clip: auto; overflow: visible; }
+      .studio-tools .trek-btn { min-height: 34px; padding-inline: 10px; }
       .studio-brand span {
         display: block;
         color: var(--text-muted);
@@ -1925,7 +1922,8 @@
       renderDays(data.days || []);
       renderDayRail();
       setActiveDay(0);
-      showInspector(activeInspector || 'prep');
+      if (normalizePrepTips(data.prepTips).length) showInspector('prep');
+      else showInspector('place');
 
       var intent = data.intent || {};
       document.getElementById('trip-title').value = intent.destination
@@ -1934,12 +1932,6 @@
       document.getElementById('stage-preview').disabled = false;
       showStage('preview');
       updateSelection();
-
-      if (revealOnReady) {
-        revealOnReady = false;
-        if (normalizePrepTips(data.prepTips).length) showInspector('prep');
-        else showInspector('place');
-      }
     }
 
     document.getElementById('commit').addEventListener('click', async function () {
