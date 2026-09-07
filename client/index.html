@@ -620,7 +620,7 @@
         grid-template-columns: 168px minmax(0, 1fr);
         min-height: 0;
       }
-      .day-chip { min-width: 0; width: 100%; }
+      .day-chip { min-width: 0; width: 100%; cursor: pointer; }
       .days-list { padding: 8px 10px 12px; }
       .place-row {
         grid-template-columns: auto 30px 52px minmax(0, 1fr) auto;
@@ -700,7 +700,7 @@
           <span data-i18n="eyebrow">Notes to mapped itinerary</span>
         </div>
       </div>
-      <nav class="stage-tabs" role="tablist" aria-label="Workspace">
+      <nav class="stage-tabs" role="tablist" data-i18n-aria-label="workspaceTabs">
         <button type="button" class="stage-tab" id="stage-plan" role="tab" aria-selected="true" data-i18n="stagePlan">Plan</button>
         <button type="button" class="stage-tab" id="stage-preview" role="tab" aria-selected="false" disabled data-i18n="stagePreview">Itinerary</button>
       </nav>
@@ -839,15 +839,15 @@
 
         <div class="board-split">
           <div class="days-wrap">
-            <nav class="day-rail" id="day-rail" aria-label="Days" data-i18n-aria-label="dayRail"></nav>
+            <nav class="day-rail" id="day-rail" role="tablist" aria-label="Days" data-i18n-aria-label="dayRail"></nav>
             <div id="days" class="days-list trek-stagger"></div>
           </div>
           <aside class="inspector" id="inspector">
             <div class="inspector-tabs" role="tablist">
-              <button type="button" class="inspector-tab" id="tab-place" data-pane="place" aria-selected="true" data-i18n="inspectorPlace">Place</button>
-              <button type="button" class="inspector-tab" id="tab-prep" data-pane="prep" aria-selected="false" data-i18n="inspectorPrep">Before you go</button>
-              <button type="button" class="inspector-tab" id="tab-sources" data-pane="sources" aria-selected="false" data-i18n="inspectorSources">Sources</button>
-              <button type="button" class="inspector-tab" id="tab-commit" data-pane="commit" aria-selected="false" data-i18n="inspectorCommit">Create trip</button>
+              <button type="button" class="inspector-tab" id="tab-place" role="tab" data-pane="place" aria-selected="true" data-i18n="inspectorPlace">Place</button>
+              <button type="button" class="inspector-tab" id="tab-prep" role="tab" data-pane="prep" aria-selected="false" data-i18n="inspectorPrep">Before you go</button>
+              <button type="button" class="inspector-tab" id="tab-sources" role="tab" data-pane="sources" aria-selected="false" data-i18n="inspectorSources">Sources</button>
+              <button type="button" class="inspector-tab" id="tab-commit" role="tab" data-pane="commit" aria-selected="false" data-i18n="inspectorCommit">Create trip</button>
             </div>
             <div class="inspector-body">
               <div class="inspector-pane" id="pane-place">
@@ -940,8 +940,8 @@
       var checkbox = document.getElementById('xhs-keyword-search');
       if (!field || !checkbox) return;
       field.classList.toggle('hidden', !xhsSearchAllowed);
-      checkbox.checked = false;
       checkbox.disabled = !xhsSearchAllowed;
+      if (!xhsSearchAllowed) checkbox.checked = false;
     }
 
     async function loadPrefs() {
@@ -976,6 +976,7 @@
         cookieHelpIpTitle: 'IP mismatch and 461',
         cookieHelpIp: 'The Cookie is used from the TREK server’s public IP, not your laptop’s. A home/phone login (IP1) reused on a cloud host (IP2) often triggers 461. Run “Test Xiaohongshu session” after saving. If it 461s, skip keyword search and paste links or note text instead — those paths do not need a Cookie.',
         cookieHelpClose: 'Got it',
+        workspaceTabs: 'Workspace',
         mapReady: 'Map evidence ready',
         plannerKicker: 'Build your route',
         plannerTitle: 'Start with the shape of your trip',
@@ -1097,6 +1098,7 @@
         cookieHelpIpTitle: '换 IP 会不会 461？',
         cookieHelpIp: 'Cookie 实际是从 TREK 服务器的公网 IP 发出去的，不是你笔记本的 IP。家宽/手机登录（IP1）拿到的会话，拿到云主机（IP2）上用，很容易触发 461。保存后先点「测试小红书会话」。若测试就是 461，就不要开关键词搜索，改粘贴链接或正文——这两条路径不需要 Cookie。',
         cookieHelpClose: '知道了',
+        workspaceTabs: '工作区',
         mapReady: '地图证据就绪',
         plannerKicker: '规划你的路线',
         plannerTitle: '先勾勒这趟旅行的样子',
@@ -1245,8 +1247,19 @@
       });
     }
 
-    function setCookieHelpOpen(open) {
-      document.getElementById('cookie-help').classList.toggle('hidden', !open);
+    var cookieHelpOpener = null;
+
+    function setCookieHelpOpen(open, opener) {
+      var overlay = document.getElementById('cookie-help');
+      overlay.classList.toggle('hidden', !open);
+      if (open) {
+        cookieHelpOpener = opener || document.activeElement;
+        var close = document.getElementById('close-cookie-help');
+        if (close && close.focus) close.focus();
+      } else if (cookieHelpOpener && cookieHelpOpener.focus) {
+        try { cookieHelpOpener.focus(); } catch (_) {}
+        cookieHelpOpener = null;
+      }
     }
 
     function translate() {
@@ -1392,11 +1405,17 @@
     document.getElementById('open-settings').addEventListener('click', openPluginSettings);
     var mobileSettings = document.getElementById('open-settings-mobile');
     if (mobileSettings) mobileSettings.addEventListener('click', openPluginSettings);
-    document.getElementById('open-cookie-help').addEventListener('click', function () { setCookieHelpOpen(true); });
-    document.getElementById('open-cookie-help-form').addEventListener('click', function () { setCookieHelpOpen(true); });
+    document.getElementById('open-cookie-help').addEventListener('click', function () { setCookieHelpOpen(true, this); });
+    document.getElementById('open-cookie-help-form').addEventListener('click', function () { setCookieHelpOpen(true, this); });
     document.getElementById('close-cookie-help').addEventListener('click', function () { setCookieHelpOpen(false); });
     document.getElementById('cookie-help').addEventListener('click', function (event) {
       if (event.target === this) setCookieHelpOpen(false);
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !document.getElementById('cookie-help').classList.contains('hidden')) {
+        event.preventDefault();
+        setCookieHelpOpen(false);
+      }
     });
     document.getElementById('stage-plan').addEventListener('click', function () { showStage('plan'); });
     document.getElementById('stage-preview').addEventListener('click', function () {
@@ -1523,6 +1542,14 @@
       }
     }
 
+    function safeExternalUrl(value) {
+      try {
+        var url = new URL(String(value || '').trim());
+        if (url.protocol === 'https:' || url.protocol === 'http:') return url.href;
+      } catch (_) {}
+      return '';
+    }
+
     function safePhotoUrl(value) {
       try {
         var url = new URL(String(value || '').trim());
@@ -1587,8 +1614,9 @@
         row.className = 'source-item';
         if (guide.url) {
           row.type = 'button';
+          var href = safeExternalUrl(guide.url);
           row.setAttribute('aria-label', t('sourceOpen') + ': ' + (guide.title || guide.noteId || t('untitledSource')));
-          row.addEventListener('click', function () { trek.openExternal(guide.url); });
+          if (href) row.addEventListener('click', function () { trek.openExternal(href); });
         }
 
         var iconWrap = document.createElement('span');
@@ -1732,10 +1760,11 @@
       var days = (currentDraft && currentDraft.days) || [];
       root.innerHTML = '';
       days.forEach(function (day, dayIndex) {
-        var chip = document.createElement('button');
-        chip.type = 'button';
+        var chip = document.createElement('div');
         chip.className = 'day-chip';
         chip.dataset.day = String(dayIndex);
+        chip.setAttribute('role', 'tab');
+        chip.tabIndex = 0;
         chip.setAttribute('aria-selected', dayIndex === activeDayIndex ? 'true' : 'false');
         var check = document.createElement('input');
         check.type = 'checkbox';
@@ -1744,6 +1773,7 @@
         var cardCheck = document.querySelector('.day-card[data-day="' + dayIndex + '"] .day-check');
         check.checked = cardCheck ? cardCheck.checked : day.selected !== false;
         check.indeterminate = cardCheck ? cardCheck.indeterminate : false;
+        check.setAttribute('aria-label', day.title || String(dayIndex + 1));
         check.addEventListener('click', function (event) { event.stopPropagation(); });
         check.addEventListener('change', function () {
           var places = document.querySelectorAll('.place-check[data-day="' + dayIndex + '"]');
@@ -1767,6 +1797,13 @@
           if (event.target === check) return;
           setActiveDay(dayIndex);
         });
+        chip.addEventListener('keydown', function (event) {
+          if (event.target === check) return;
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            setActiveDay(dayIndex);
+          }
+        });
         root.appendChild(chip);
       });
     }
@@ -1774,12 +1811,12 @@
     function syncDayState(dayIndex) {
       var root = document.getElementById('days');
       var places = Array.prototype.slice.call(root.querySelectorAll('.place-check[data-day="' + dayIndex + '"]'));
-      var dayCheck = root.querySelector('.day-check[data-day="' + dayIndex + '"]');
-      if (!dayCheck) return;
       var selected = places.filter(function (place) { return place.checked; }).length;
-      dayCheck.disabled = places.length === 0;
-      dayCheck.checked = selected > 0;
-      dayCheck.indeterminate = selected > 0 && selected < places.length;
+      document.querySelectorAll('.day-check[data-day="' + dayIndex + '"]').forEach(function (dayCheck) {
+        dayCheck.disabled = places.length === 0;
+        dayCheck.checked = selected > 0;
+        dayCheck.indeterminate = selected > 0 && selected < places.length;
+      });
     }
 
     function renderDays(days) {
@@ -1794,11 +1831,13 @@
 
         var heading = document.createElement('label');
         heading.className = 'day-header';
+        heading.setAttribute('aria-hidden', 'true');
         var dayCheck = document.createElement('input');
         dayCheck.type = 'checkbox';
         dayCheck.className = 'choice day-check';
         dayCheck.dataset.day = String(dayIndex);
         dayCheck.checked = day.selected !== false;
+        dayCheck.tabIndex = -1;
         dayCheck.setAttribute('aria-label', day.title || String(dayIndex + 1));
         heading.appendChild(dayCheck);
         section.appendChild(heading);
@@ -1813,7 +1852,7 @@
         }
 
         places.forEach(function (place, placeIndex) {
-          var row = document.createElement('label');
+          var row = document.createElement('div');
           row.className = 'place-row';
           row.dataset.evidence = place.evidenceId || '';
 
@@ -1886,12 +1925,16 @@
             meta.appendChild(reserve);
           }
 
+          check.addEventListener('click', function (event) { event.stopPropagation(); });
           row.appendChild(check);
           row.appendChild(marker);
           row.appendChild(photoEl);
           row.appendChild(placeCopy);
           row.appendChild(meta);
-          row.addEventListener('click', function () { selectPlace(place.evidenceId, { open: true }); });
+          row.addEventListener('click', function (event) {
+            if (event.target === check) return;
+            selectPlace(place.evidenceId, { open: true });
+          });
           placeList.appendChild(row);
         });
 

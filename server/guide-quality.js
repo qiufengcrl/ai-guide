@@ -103,7 +103,10 @@ function extractPrepTips(guides, limit = 8) {
   const seen = new Set();
   for (const guide of guides || []) {
     for (const line of String(guide?.text || '').split(/\n/)) {
-      const text = line.replace(/https?:\/\/\S+/g, '').replace(/^[▪️•\-\*\d.\s]+/, '').trim();
+      const text = line.replace(/https?:\/\/\S+/g, '')
+        .replace(/^[▪️•*\-\s]+/, '')
+        .replace(/^\d+[.\u3001、]\s*/, '')
+        .trim();
       if (text.length < 6 || text.length > 160) continue;
       if (!PREP_LINE_RE.test(text)) continue;
       if (isMarketingText(text)) continue;

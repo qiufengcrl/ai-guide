@@ -1273,8 +1273,11 @@ test('限流降级文案区分认证与请求过快（中英），并说明继�
   assert.match(verifyZh, /【需要验证】/);
   assert.match(verifyZh, /出口 IP|IP/);
   assert.match(verifyZh, /链接|粘贴|表单/);
-  assert.match(verifyEn, /different IP|cloud host/i);
-  assert.match(verifyEn, /skipped|links|pasted/i);
+  assert.doesNotMatch(verifyZh, /已跳过关键词搜索/);
+  assert.match(verifyEn, /IP mismatch/i);
+  assert.match(verifyEn, /links|pasted/i);
+  const verifySearchZh = formatXhsWarning(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification'), 'zh', message, { scene: 'search' });
+  assert.match(verifySearchZh, /跳过搜索/);
 });
 
 test('关键词搜索遇 429 会退避重试并降级继续表单路径', async () => {
@@ -1618,6 +1621,9 @@ test('预览草稿会带上分类后的出发前提示', () => {
   assert.ok(draft.days[0].places[0].prepTips.length >= 1);
   const extracted = extractPrepTips(draft.guides, 8);
   assert.ok(extracted.length >= 3);
+  const numbered = extractPrepTips([{ text: '1. 门票需提前预约\n3天内需要提前预约' }], 8);
+  assert.ok(numbered.some((tip) => /门票需提前预约/.test(tip)));
+  assert.ok(numbered.some((tip) => /3天内需要提前预约/.test(tip)));
 });
 
 test('粘贴攻略生成的预览会带上 prepTips', async () => {

@@ -34,6 +34,13 @@ test('redesign covers the complete planning and preview workflow', () => {
     'invokeErrorMessage', 'conflict', 'isTransientInvokeError', 'stillWorking',
     'sourceSummary', 'sourcesEmpty',
   ]) assert.ok(appScript.includes(hook), hook);
+  assert.match(appScript, /if \(!xhsSearchAllowed\) checkbox\.checked = false/);
+  assert.doesNotMatch(appScript, /checkbox\.checked = false;\s*checkbox\.disabled/);
+  assert.match(appScript, /event\.key === 'Escape'/);
+  assert.match(appScript, /function safeExternalUrl/);
+  assert.match(appScript, /function safePhotoUrl/);
+  assert.match(appScript, /createElement\('div'\)/);
+  assert.doesNotMatch(appScript, /createElement\('button'\);\s*chip\.type = 'button'/);
   assert.doesNotMatch(appScript, /source-card'\)\.classList\.toggle\('hidden', guides\.length === 0\)/);
 });
 
