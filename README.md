@@ -48,10 +48,15 @@ resolves places with its own Nominatim client — no map API key and no changes
 to TREK's core are required.
 
 Optional keyword search uses each user's own secret `xhs_cookie`, entered under
-Settings → Plugins. Paste the full web Cookie after login; it must include `a1`
-and `web_session`. The Cookie never enters the iframe, logs, AI prompts, drafts,
-or user-data exports. Public note URLs are read without the Cookie. URL,
-pasted-text, and form-only planning work without it.
+Settings → Plugins. **Do not log into Xiaohongshu on the Linux TREK server.**
+Copy the Cookie from Chrome/Firefox on your own computer or phone after login;
+it must include `a1` and `web_session`. Keyword search is sent from the TREK
+server IP, so a home-login Cookie on a cloud host often gets Xiaohongshu 461 —
+run “Test Xiaohongshu session” after saving; if it fails, use links or pasted
+text instead. Step-by-step: [docs/xiaohongshu-login.md](./docs/xiaohongshu-login.md).
+The Cookie never enters the iframe, logs, AI prompts, drafts, or user-data
+exports. Public note URLs are read without the Cookie. URL, pasted-text, and
+form-only planning work without it.
 
 The signing engine is a bundled build of the MIT-licensed `xhshow-js` package.
 Its license and the bundled `crypto-js` notice are preserved in

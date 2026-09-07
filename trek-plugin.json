@@ -1,7 +1,7 @@
 {
   "id": "ai-guide",
   "name": "AI 攻略",
-  "version": "1.1.34",
+  "version": "1.1.35",
   "apiVersion": 1,
   "author": "Your Name",
   "description": "把小红书旅行攻略转换为可编辑的 TREK 地图行程",
@@ -92,7 +92,7 @@
       "input_type": "password",
       "scope": "user",
       "secret": true,
-      "hint": "登录 www.xiaohongshu.com 后粘贴完整 Cookie，须含 a1 和 web_session。仅服务端使用，不会进页面或 AI。"
+      "hint": "在自己的电脑/手机浏览器登录后粘贴完整 Cookie（须含 a1、web_session）。请求从 TREK 服务器 IP 发出，家宽 Cookie 用在云主机上常会 461。保存后先点测试；失败则改用链接或粘贴正文。"
     },
     {
       "key": "xhs_cookie_updated_at",
@@ -106,7 +106,7 @@
     {
       "key": "testXhs",
       "label": "测试小红书会话",
-      "hint": "请先保存 Cookie，再点测试。执行一次最小关键词搜索（约数秒）。"
+      "hint": "请先保存 Cookie，再点测试。用 TREK 服务器出口打一次最小搜索。若返回 461，说明这份 Cookie 与当前 IP 不匹配，请改用链接或粘贴正文。"
     }
   ]
 }

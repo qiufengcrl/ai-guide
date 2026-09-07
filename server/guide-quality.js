@@ -1,6 +1,6 @@
 const MARKETING_TEXT_RE = /跟团|定制游|私信|加微信|加[Vv]|微信号|旅社|旅行社|包车游|一日游套餐|点击链接|代购|推广|商务合作|合作微信|报名咨询|vx[:：]|扫码咨询|纯玩团|当地向导|免费咨询/i;
 
-const PREP_LINE_RE = /避坑|提前预约|预约|穿衣|签证|换汇|交通卡|门票|开放时间|注意事项|携带|旺季|淡季|排队|抢票|限流|闭馆|周一闭馆|周二闭馆/i;
+const PREP_LINE_RE = /避坑|提前预约|预约|穿衣|签证|换汇|交通卡|交通|地铁|门票|开放时间|注意事项|携带|旺季|淡季|排队|抢票|限流|闭馆|周一闭馆|周二闭馆/i;
 
 const COMMENT_INSIGHT_RE = /避坑|排队|闭馆|周[一二三四五六日]|门票|价格|涨价|降价|人均|开放时间|营业时间|人少|拥挤|预约|抢票|注意事项|别去|不值得|推荐|必去|最新|更新|现在|目前|改到|调整到/i;
 
@@ -81,12 +81,29 @@ function commentTipsForPlace(placeName, guides, guideIds) {
   return tips;
 }
 
-function extractPrepTips(guides, limit = 3) {
+function categorizePrepTip(text) {
+  const value = String(text || '');
+  if (/签证|换汇|货币|护照|入境|海关/.test(value)) return 'docs';
+  if (/穿衣|衣服|防晒|雨具|气温|天气|鞋子|外套/.test(value)) return 'packing';
+  if (/交通|地铁|公交|巴士|一日券|电车|打车|出租|交通卡|JR/.test(value)) return 'transit';
+  if (/预约|抢票|约满|提前预约/.test(value)) return 'booking';
+  if (/门票|开放时间|营业时间|闭馆|周一|排队|限流/.test(value)) return 'hours';
+  return 'pitfall';
+}
+
+function toPrepTipItems(texts) {
+  return (texts || []).map((text) => ({
+    text: String(text),
+    category: categorizePrepTip(text),
+  }));
+}
+
+function extractPrepTips(guides, limit = 8) {
   const tips = [];
   const seen = new Set();
   for (const guide of guides || []) {
     for (const line of String(guide?.text || '').split(/\n/)) {
-      const text = line.replace(/https?:\/\/\S+/g, '').trim();
+      const text = line.replace(/https?:\/\/\S+/g, '').replace(/^[▪️•\-\*\d.\s]+/, '').trim();
       if (text.length < 6 || text.length > 160) continue;
       if (!PREP_LINE_RE.test(text)) continue;
       if (isMarketingText(text)) continue;
@@ -99,6 +116,19 @@ function extractPrepTips(guides, limit = 3) {
     if (tips.length >= limit) break;
   }
   return tips;
+}
+
+function attachPreviewTips(draft, limit = 8) {
+  const next = draft || {};
+  const guides = next.guides || [];
+  next.prepTips = toPrepTipItems(extractPrepTips(guides, limit));
+  for (const day of next.days || []) {
+    for (const place of day.places || []) {
+      const related = guidesForItem(guides, place.fromGuideIds);
+      place.prepTips = toPrepTipItems(extractPrepTips(related, 3));
+    }
+  }
+  return next;
 }
 
 function formatGuideSources(fromGuideIds, guides, locale) {
@@ -129,7 +159,7 @@ function buildTrekPlaceNotes(item, guides, locale = 'zh') {
     parts.push(locale === 'zh' ? `预约：${tip}` : `Reservation: ${tip}`);
   }
   const relatedGuides = guidesForItem(guides, item?.fromGuideIds);
-  const prep = extractPrepTips(relatedGuides, 2);
+  const prep = extractPrepTips(relatedGuides, 3);
   if (prep.length) {
     const label = locale === 'zh' ? '出发前提示' : 'Before you go';
     parts.push(`${label}：${prep.join('；')}`);
@@ -151,6 +181,9 @@ module.exports = {
   isMarketingCandidate,
   filterMarketingGuides,
   extractPrepTips,
+  categorizePrepTip,
+  toPrepTipItems,
+  attachPreviewTips,
   extractCommentInsights,
   commentTipsForPlace,
   guidesForItem,

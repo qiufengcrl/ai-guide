@@ -26,7 +26,7 @@ const {
   MAX_INTERVAL_MS,
 } = require('../server/xhs/throttle');
 const { readXhsCookieUpdatedAt } = require('../server/xhs/freshness');
-const { isMarketingGuide, filterMarketingGuides, buildTrekPlaceNotes, extractCommentInsights, commentTipsForPlace } = require('../server/guide-quality');
+const { isMarketingGuide, filterMarketingGuides, buildTrekPlaceNotes, extractCommentInsights, commentTipsForPlace, attachPreviewTips, extractPrepTips, categorizePrepTip } = require('../server/guide-quality');
 const { buildTrekPlacePayload } = require('../server/trek-handoff');
 
 setGeoThrottleInterval(0);
@@ -109,7 +109,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.34');
+  assert.equal(manifest.version, '1.1.35');
 });
 
 function memoryDb() {
@@ -457,6 +457,7 @@ test('公开草稿始终带上来源说明', () => {
   assert.equal(draft.sourceSummary.basis, 'destination');
   assert.match(draft.sourceSummary.query, /河南/);
   assert.deepEqual(draft.guides, []);
+  assert.deepEqual(draft.prepTips, []);
 });
 
 test('无 Cookie 的纯表单仍形成地图预览，并只使用 extract.results[0]', async () => {
@@ -1270,8 +1271,10 @@ test('限流降级文案区分认证与请求过快（中英），并说明继�
   const verifyZh = formatXhsDegradedWarning(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification'), 'zh', message);
   const verifyEn = formatXhsDegradedWarning(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification'), 'en', message);
   assert.match(verifyZh, /【需要验证】/);
-  assert.match(verifyZh, /已降级继续/);
-  assert.match(verifyEn, /Degraded and continuing/i);
+  assert.match(verifyZh, /出口 IP|IP/);
+  assert.match(verifyZh, /链接|粘贴|表单/);
+  assert.match(verifyEn, /different IP|cloud host/i);
+  assert.match(verifyEn, /skipped|links|pasted/i);
 });
 
 test('关键词搜索遇 429 会退避重试并降级继续表单路径', async () => {
@@ -1594,6 +1597,47 @@ test('营销帖过滤与 TREK 地点备注构建', () => {
   assert.equal(payload.image_url, 'https://example.test/photo.jpg');
   assert.equal(payload.duration_minutes, 90);
   assert.equal(payload.description, '清晨人少');
+});
+
+test('预览草稿会带上分类后的出发前提示', () => {
+  assert.equal(categorizePrepTip('清水寺需提前预约'), 'booking');
+  assert.equal(categorizePrepTip('穿衣建议带薄外套'), 'packing');
+  assert.equal(categorizePrepTip('地铁交通卡很方便'), 'transit');
+  const draft = attachPreviewTips({
+    guides: [{
+      id: 'g_1',
+      text: '避坑：周一闭馆别白跑\n门票需提前预约\n穿衣建议带薄外套防晒\n地铁一日券划算\n签证和换汇提前准备',
+    }],
+    days: [{
+      places: [{ name: '清水寺', fromGuideIds: ['g_1'] }],
+    }],
+  });
+  assert.ok(draft.prepTips.length >= 3);
+  assert.ok(draft.prepTips.some((tip) => tip.category === 'booking'));
+  assert.ok(draft.prepTips.some((tip) => /闭馆|预约|穿衣|交通|签证/.test(tip.text)));
+  assert.ok(draft.days[0].places[0].prepTips.length >= 1);
+  const extracted = extractPrepTips(draft.guides, 8);
+  assert.ok(extracted.length >= 3);
+});
+
+test('粘贴攻略生成的预览会带上 prepTips', async () => {
+  const fixture = buildHost({
+    aiResults: [{
+      intent: { destination: '京都' },
+      candidates: [
+        { name: 'Near A', nameZh: '近点A', dayHint: 1, durationMinutes: 60, reason: '清晨人少', guideId: 'g_1' },
+        { name: 'Near B', nameZh: '近点B', dayHint: 1, durationMinutes: 75, guideId: 'g_1' },
+      ],
+    }],
+  });
+  const { state } = await makeReady(fixture, {
+    destination: '京都',
+    sourceText: '避坑：周一闭馆别白跑\n门票需提前预约\n穿衣建议带薄外套',
+    locale: 'zh',
+  });
+  assert.ok(Array.isArray(state.prepTips));
+  assert.ok(state.prepTips.length >= 2);
+  assert.ok(state.prepTips.some((tip) => /闭馆|预约|穿衣/.test(tip.text)));
 });
 
 test('营销景点候选会被过滤', () => {

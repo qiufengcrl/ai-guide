@@ -21,6 +21,7 @@ test('redesign covers the complete planning and preview workflow', () => {
     'plan-form', 'destination', 'interests', 'must-see', 'start-date', 'end-date', 'day-count',
     'pace', 'urls', 'source-text', 'xhs-keyword-search', 'xhs-search-field', 'generate', 'status', 'progress', 'warnings',
     'warning-list', 'preview', 'sources', 'days', 'trip-title', 'commit',
+    'prep-tips', 'stage-plan', 'stage-preview', 'cookie-help', 'day-rail', 'inspector',
   ];
   for (const id of requiredIds) assert.match(html, new RegExp(`id=["']${id}["']`), id);
 
@@ -29,6 +30,7 @@ test('redesign covers the complete planning and preview workflow', () => {
     "progress.message", "place-photo", "photoUrl",
     "trek.navigate('/settings?tab=plugins')", "trek.openExternal",
     'renderWarnings', 'renderSources', 'renderDays', 'syncDayState',
+    'showStage', 'renderPrepTips', 'renderPlaceDetail', 'setActiveDay',
     'invokeErrorMessage', 'conflict', 'isTransientInvokeError', 'stillWorking',
     'sourceSummary', 'sourcesEmpty',
   ]) assert.ok(appScript.includes(hook), hook);

@@ -14,425 +14,112 @@
     .hidden { display: none !important; }
     .icon-library { position: absolute; width: 0; height: 0; overflow: hidden; }
     .icon {
-      width: 18px;
-      height: 18px;
-      flex: none;
-      fill: none;
-      stroke: currentColor;
-      stroke-width: 1.8;
-      stroke-linecap: round;
-      stroke-linejoin: round;
+      width: 18px; height: 18px; flex: none;
+      fill: none; stroke: currentColor; stroke-width: 1.8;
+      stroke-linecap: round; stroke-linejoin: round;
     }
     .icon--sm { width: 15px; height: 15px; }
     .icon--lg { width: 22px; height: 22px; }
 
     .app-shell {
       position: relative;
+      height: 100%;
       min-height: 100%;
       isolation: isolate;
+      display: flex;
+      flex-direction: column;
       color: var(--text-primary);
       background:
-        radial-gradient(circle at 8% 0%, color-mix(in oklch, var(--accent) 8%, transparent) 0, transparent 31rem),
-        radial-gradient(circle at 96% 21%, color-mix(in oklch, var(--info) 6%, transparent) 0, transparent 26rem),
-        linear-gradient(180deg, color-mix(in oklch, var(--bg-secondary) 94%, transparent), var(--bg-secondary));
+        radial-gradient(1200px 420px at 0% -10%, color-mix(in oklch, var(--accent) 10%, transparent), transparent 58%),
+        radial-gradient(900px 380px at 100% 0%, color-mix(in oklch, var(--info) 8%, transparent), transparent 52%),
+        var(--bg-secondary);
     }
     .app-shell::before {
       content: "";
-      position: fixed;
+      position: absolute;
       inset: 0;
       z-index: -1;
       pointer-events: none;
-      opacity: .28;
+      opacity: .22;
       background-image:
-        linear-gradient(color-mix(in oklch, var(--border-faint) 68%, transparent) 1px, transparent 1px),
-        linear-gradient(90deg, color-mix(in oklch, var(--border-faint) 68%, transparent) 1px, transparent 1px);
-      background-size: 72px 72px;
-      mask-image: linear-gradient(to bottom, black, transparent 64%);
-    }
-    .page {
-      width: min(100%, 1180px);
-      margin: 0 auto;
-      padding: 8px 12px calc(32px + var(--ai-guide-dock, 152px) + env(safe-area-inset-bottom, 0px));
+        linear-gradient(color-mix(in oklch, var(--border-faint) 70%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in oklch, var(--border-faint) 70%, transparent) 1px, transparent 1px);
+      background-size: 56px 56px;
+      mask-image: linear-gradient(to bottom, black, transparent 72%);
     }
 
-    /* Hero — desktop only at 1180px+; mobile uses panel header. */
-    .hero {
-      position: relative;
-      display: none;
-      grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr);
-      min-height: 360px;
-      padding: 42px 44px;
-      overflow: hidden;
-      border-radius: var(--r-xl, 28px);
-    }
-    .hero::after {
-      content: "";
-      position: absolute;
-      width: 340px;
-      height: 340px;
-      right: -125px;
-      bottom: -220px;
-      border-radius: 50%;
-      border: 1px solid color-mix(in oklch, var(--accent) 14%, transparent);
-      box-shadow:
-        0 0 0 34px color-mix(in oklch, var(--accent) 3%, transparent),
-        0 0 0 78px color-mix(in oklch, var(--accent) 2%, transparent);
-      pointer-events: none;
-    }
-    .hero-copy {
-      position: relative;
-      z-index: 2;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      justify-content: center;
-      min-width: 0;
-    }
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 20px;
-      color: var(--text-muted);
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: .16em;
-      text-transform: uppercase;
-    }
-    .live-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent) 12%, transparent);
-    }
-    .hero h1 {
-      margin: 0;
-      max-width: 700px;
-      font-size: clamp(46px, 7vw, 76px);
-      font-weight: 600;
-      line-height: .94;
-      letter-spacing: -.055em;
-    }
-    .title-mark { color: var(--accent); }
-    .hero-subtitle {
-      max-width: 620px;
-      margin: 22px 0 0;
-      color: var(--text-secondary);
-      font-size: 16px;
-      line-height: 1.75;
-    }
-    .hero-actions {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
+    /* Studio chrome — always visible, no marketing hero. */
+    .studio-bar {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
       gap: 12px;
-      margin-top: 30px;
+      align-items: center;
+      flex: none;
+      padding: 10px 12px;
+      border-bottom: 1px solid color-mix(in oklch, var(--border-primary) 78%, transparent);
+      background: color-mix(in oklch, var(--bg-card) 88%, transparent);
     }
-    .hero-actions .trek-btn { min-height: 42px; }
-    .hero-note {
-      display: inline-flex;
+    .studio-brand {
+      display: flex;
       align-items: center;
       gap: 8px;
-      color: var(--text-muted);
-      font-size: 12px;
+      min-width: 0;
     }
-    .hero-map {
-      position: relative;
-      z-index: 1;
-      min-height: 276px;
-      margin-left: 32px;
-      overflow: hidden;
-      border: 1px solid color-mix(in oklch, var(--border-primary) 72%, var(--text-faint));
-      border-radius: 24px;
-      background-color: var(--bg-tertiary, var(--bg-card));
-      background-image:
-        radial-gradient(circle at 67% 30%, color-mix(in oklch, var(--accent) 12%, transparent), transparent 27%),
-        linear-gradient(145deg, color-mix(in oklch, var(--bg-card) 72%, transparent), color-mix(in oklch, var(--bg-tertiary) 78%, var(--bg-card)));
-      box-shadow: var(--shadow-md), inset 0 1px 0 color-mix(in oklch, white 55%, transparent);
-      transform: rotate(2deg);
-    }
-    .hero-map::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      opacity: .52;
-      background-image:
-        radial-gradient(circle, color-mix(in oklch, var(--text-faint) 44%, transparent) 1px, transparent 1.5px);
-      background-size: 18px 18px;
-      mask-image: linear-gradient(140deg, black, transparent 78%);
-    }
-    .route-canvas { position: absolute; inset: 12px; width: calc(100% - 24px); height: calc(100% - 24px); }
-    .contour {
-      fill: none;
-      stroke: color-mix(in oklch, var(--text-faint) 22%, transparent);
-      stroke-width: 1;
-    }
-    .route-shadow, .route-line {
-      fill: none;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-    }
-    .route-shadow { stroke: color-mix(in oklch, var(--accent) 14%, transparent); stroke-width: 11; }
-    .route-line {
-      stroke: var(--accent);
-      stroke-width: 2.5;
-      stroke-dasharray: 7 7;
-      animation: route-dash 18s linear infinite;
-    }
-    .route-node { fill: var(--bg-card); stroke: var(--accent); stroke-width: 3; }
-    .route-node--end { fill: var(--accent); }
-    .map-badge {
-      position: absolute;
-      top: 17px;
-      left: 17px;
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      padding: 8px 11px;
-      border: 1px solid color-mix(in oklch, var(--border-primary) 75%, transparent);
-      border-radius: 999px;
-      background: color-mix(in oklch, var(--bg-card) 78%, transparent);
-      color: var(--text-secondary);
-      box-shadow: var(--shadow-sm);
-      backdrop-filter: blur(16px) saturate(1.4);
-      -webkit-backdrop-filter: blur(16px) saturate(1.4);
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: .1em;
-      text-transform: uppercase;
-    }
-    .map-badge i {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--success);
-    }
-    .map-place {
-      position: absolute;
+    .studio-mark {
       display: grid;
       place-items: center;
-      width: 38px;
-      height: 38px;
-      border: 1px solid color-mix(in oklch, var(--border-primary) 75%, transparent);
-      border-radius: 50%;
-      background: color-mix(in oklch, var(--bg-card) 82%, transparent);
-      color: var(--accent);
-      box-shadow: var(--shadow-md);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-    }
-    .map-place--one { top: 33%; right: 16%; }
-    .map-place--two { left: 24%; bottom: 16%; }
-
-    .workspace-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      gap: 12px;
-      align-items: start;
-      margin-top: 0;
-    }
-    .planner-panel {
-      overflow: visible;
-      padding: 0;
-      border-radius: var(--r-xl, 28px);
-    }
-    .panel-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 24px;
-      padding: 28px 30px 24px;
-      border-bottom: 1px solid color-mix(in oklch, var(--border-primary) 74%, transparent);
-    }
-    .panel-header-tools {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex: none;
-    }
-    .panel-settings-btn { display: inline-flex; min-height: 40px; }
-    .phone-title { display: block; font-size: 22px; margin: 0; letter-spacing: -.03em; }
-    .panel-kicker {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      color: var(--text-muted);
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: .14em;
-      text-transform: uppercase;
-    }
-    .panel-kicker .number {
-      display: grid;
-      place-items: center;
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
+      width: 28px; height: 28px;
+      border-radius: 9px;
       background: var(--accent);
       color: var(--accent-text);
-      font-size: 10px;
-      letter-spacing: 0;
     }
-    .panel-header h2 {
-      margin: 11px 0 0;
-      font-size: 25px;
-      font-weight: 600;
-      letter-spacing: -.035em;
-    }
-    .panel-header p {
-      max-width: 450px;
-      margin: 7px 0 0;
-      color: var(--text-muted);
-      font-size: 13px;
-      line-height: 1.6;
-    }
-    .form-body { padding: 4px 30px 30px; }
-    .form-section { padding: 26px 0; border-bottom: 1px solid var(--border-faint); }
-    .form-section:last-of-type { border-bottom: 0; }
-    .section-heading {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      margin-bottom: 18px;
-    }
-    .section-icon {
-      display: grid;
-      place-items: center;
-      flex: none;
-      width: 36px;
-      height: 36px;
-      border-radius: 12px;
-      background: var(--accent-subtle);
-      color: var(--accent);
-    }
-    .section-icon .icon { width: 18px; height: 18px; }
-    .section-heading h3 {
-      margin: 0;
+    .studio-brand strong {
       font-size: 14px;
-      font-weight: 600;
-      letter-spacing: -.01em;
+      font-weight: 650;
+      letter-spacing: -.03em;
     }
-    .section-heading p {
-      margin: 3px 0 0;
+    .studio-brand span { display: none; }
+    .stage-tabs {
+      display: inline-flex;
+      justify-self: center;
+      padding: 3px;
+      border: 1px solid var(--border-primary);
+      border-radius: 999px;
+      background: var(--bg-tertiary);
+    }
+    .stage-tab {
+      appearance: none;
+      border: 0;
+      background: transparent;
       color: var(--text-muted);
-      font-size: 11px;
-      line-height: 1.5;
-    }
-    .field-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      gap: 16px;
-    }
-    .field-grid--travel { grid-template-columns: minmax(0, 1fr); }
-    .field-grid--travel .date-field,
-    .field-grid--travel .small-field { grid-column: auto; }
-    .field { display: grid; gap: 8px; width: 100%; min-width: 0; }
-    .field--full { grid-column: 1 / -1; }
-    .field-label {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      color: var(--text-secondary);
+      min-height: 32px;
+      padding: 0 14px;
+      border-radius: 999px;
       font-size: 12px;
       font-weight: 600;
-    }
-    .field-label-main { display: inline-flex; align-items: center; gap: 7px; }
-    .optional {
-      color: var(--text-faint);
-      font-family: var(--font-subtext, var(--font-system));
-      font-size: 10px;
-      font-weight: 500;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-    }
-    .trek-input, .trek-textarea, .trek-select { min-height: 44px; }
-    .trek-textarea {
-      line-height: 1.65;
-      resize: vertical;
-    }
-    .source-fields { display: grid; gap: 14px; min-width: 0; }
-    .source-field {
-      display: grid;
-      width: 100%;
-      min-width: 0;
-      padding: 16px;
-      border: 1px solid var(--border-primary);
-      border-radius: 16px;
-      background: color-mix(in oklch, var(--bg-input) 88%, transparent);
-      transition: border-color .18s, box-shadow .18s, background .18s;
-    }
-    .source-field:focus-within {
-      border-color: var(--accent);
-      background: var(--bg-input);
-      box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 10%, transparent);
-    }
-    .source-field .trek-textarea {
-      display: block;
-      width: 100%;
-      min-width: 0;
-      max-width: 100%;
-      min-height: 74px;
-      padding: 10px 0 0;
-      border: 0;
-      border-radius: 0;
-      background: transparent;
-      box-shadow: none;
-    }
-    .source-field--note .trek-textarea { min-height: 122px; }
-    .source-field--toggle { padding: 14px 16px; }
-    .toggle-row {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
-      gap: 12px;
-      align-items: start;
       cursor: pointer;
     }
-    .toggle-row input {
-      width: 18px;
-      height: 18px;
-      margin-top: 2px;
-      accent-color: var(--trek-accent, #2563eb);
+    .stage-tab[aria-selected="true"] {
+      background: var(--bg-card);
+      color: var(--text-primary);
+      box-shadow: var(--shadow-sm);
     }
-    .toggle-copy { display: grid; gap: 4px; min-width: 0; }
-    .toggle-copy strong { font-size: 14px; line-height: 1.35; }
-    .toggle-copy span { color: var(--trek-muted, #64748b); font-size: 12px; line-height: 1.45; }
-    .submit-zone {
-      display: grid;
-      grid-template-columns: minmax(210px, auto) 1fr;
-      gap: 18px;
-      align-items: center;
-      padding-top: 6px;
-    }
-    .generate-btn {
-      min-height: 50px;
-      padding-inline: 20px;
-      border-radius: 14px;
-      font-weight: 600;
-      box-shadow: var(--shadow-md);
-    }
-    .button-arrow {
-      display: grid;
-      place-items: center;
-      margin-left: 5px;
-      transition: transform .2s var(--trek-ease-quint);
-    }
-    .generate-btn:hover:not(:disabled) .button-arrow { transform: translateX(3px); }
-    .status-area { min-width: 0; }
+    .stage-tab:disabled { opacity: .42; cursor: not-allowed; }
+    .stage-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .studio-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+    .studio-tools .trek-btn { min-height: 34px; padding-inline: 8px; }
+    .studio-tools .trek-btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
     .status-line {
-      display: flex;
+      display: none;
       align-items: center;
-      gap: 9px;
-      min-height: 20px;
+      gap: 8px;
+      min-width: 0;
       color: var(--text-muted);
       font-size: 12px;
     }
     .status-dot {
-      width: 7px;
-      height: 7px;
-      flex: none;
-      border-radius: 50%;
+      width: 7px; height: 7px; flex: none; border-radius: 50%;
       background: var(--text-faint);
     }
     .status-line[data-state="working"] .status-dot {
@@ -445,10 +132,8 @@
     .status-line[data-state="error"] .status-dot { background: var(--danger); box-shadow: 0 0 0 4px var(--danger-soft); }
     .progress {
       position: relative;
-      height: 5px;
-      margin-top: 9px;
+      height: 3px;
       overflow: hidden;
-      border-radius: 999px;
       background: var(--bg-tertiary);
     }
     .progress > i {
@@ -456,663 +141,532 @@
       inset-block: 0;
       left: -38%;
       width: 38%;
-      border-radius: inherit;
       background: linear-gradient(90deg, transparent, var(--accent), transparent);
-      animation: progress-route 1.45s var(--trek-ease-quint) infinite;
+      animation: progress-route 1.45s var(--trek-ease-quint, ease) infinite;
     }
 
-    .guide-rail {
-      display: none;
-      position: sticky;
-      top: 22px;
-      gap: 14px;
-    }
-    .rail-card { padding: 22px; border-radius: 20px; }
-    .rail-title {
+    .stage-view {
+      flex: 1;
+      min-height: 0;
       display: flex;
-      align-items: center;
-      gap: 9px;
-      margin: 0 0 20px;
-      font-size: 13px;
-      font-weight: 600;
+      flex-direction: column;
     }
-    .workflow {
-      display: grid;
-      gap: 0;
-      margin: 0;
-      padding: 0;
-      list-style: none;
-    }
-    .workflow li {
-      position: relative;
-      display: grid;
-      grid-template-columns: 28px 1fr;
-      gap: 11px;
-      padding-bottom: 20px;
-    }
-    .workflow li:last-child { padding-bottom: 0; }
-    .workflow li:not(:last-child)::after {
-      content: "";
-      position: absolute;
-      top: 26px;
-      bottom: 2px;
-      left: 13px;
-      width: 1px;
-      background: var(--border-primary);
-    }
-    .workflow-number {
-      position: relative;
-      z-index: 1;
-      display: grid;
-      place-items: center;
-      width: 28px;
-      height: 28px;
-      border: 1px solid var(--border-primary);
-      border-radius: 50%;
-      background: var(--bg-card);
-      color: var(--text-muted);
-      font-size: 9px;
-      font-weight: 700;
-    }
-    .workflow strong { display: block; margin: 4px 0 2px; font-size: 12px; font-weight: 600; }
-    .workflow span:not(.workflow-number) { color: var(--text-muted); font-size: 10px; line-height: 1.55; }
-    .privacy-card {
-      position: relative;
-      padding: 20px;
-      overflow: hidden;
-      border: 1px solid color-mix(in oklch, var(--success) 19%, var(--border-primary));
-      border-radius: 20px;
-      background: color-mix(in oklch, var(--success-soft) 42%, var(--bg-card));
-    }
-    .privacy-card::after {
-      content: "";
-      position: absolute;
-      width: 90px;
-      height: 90px;
-      right: -35px;
-      bottom: -48px;
-      border: 1px solid color-mix(in oklch, var(--success) 24%, transparent);
-      border-radius: 50%;
-    }
-    .privacy-icon {
-      display: grid;
-      place-items: center;
-      width: 34px;
-      height: 34px;
-      margin-bottom: 13px;
-      border-radius: 11px;
-      background: var(--success);
-      color: white;
-    }
-    .privacy-card strong { display: block; font-size: 12px; }
-    .privacy-card p { margin: 6px 0 0; color: var(--text-muted); font-size: 10px; line-height: 1.6; }
+    .stage-view.hidden { display: none !important; }
 
-    .warning-panel {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
-      gap: 14px;
-      align-items: start;
-      margin-top: 22px;
-      padding: 19px 21px;
-      border-color: color-mix(in oklch, var(--warning) 25%, var(--border-primary));
-      background: color-mix(in oklch, var(--warning-soft) 64%, var(--bg-card));
-      border-radius: 18px;
+    .page {
+      width: min(100%, 1180px);
+      margin: 0 auto;
+      padding: 12px 12px calc(20px + var(--ai-guide-dock, 152px) + env(safe-area-inset-bottom, 0px));
     }
-    .warning-icon {
-      display: grid;
-      place-items: center;
-      width: 34px;
-      height: 34px;
-      border-radius: 11px;
-      background: var(--warning-soft);
-      color: var(--warning);
-    }
-    .warning-copy strong { display: block; margin-top: 1px; font-size: 12px; }
-    .warning-list {
-      display: grid;
-      gap: 5px;
-      margin: 6px 0 0;
-      padding: 0;
-      color: var(--text-secondary);
-      font-size: 11px;
-      line-height: 1.55;
-      list-style: none;
-    }
-    .warning-list li::before { content: "—"; margin-right: 7px; color: var(--warning); }
-    .warning-count { color: var(--warning); }
+    .plan-view .page { overflow: auto; height: 100%; box-sizing: border-box; }
 
-    .preview-section { margin-top: 24px; scroll-margin-top: 24px; }
-    .preview-heading {
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: 24px;
-      margin-bottom: 20px;
-      padding: 0 4px;
-    }
-    .preview-heading .eyebrow { margin-bottom: 10px; }
-    .preview-heading h2 {
-      margin: 0;
-      font-size: clamp(32px, 5vw, 46px);
-      font-weight: 600;
-      line-height: 1;
-      letter-spacing: -.045em;
-    }
-    .preview-heading p { max-width: 390px; margin: 0 0 2px; color: var(--text-muted); font-size: 12px; line-height: 1.6; text-align: right; }
-    .preview-layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 310px;
-      gap: 22px;
-      align-items: start;
-    }
-    .itinerary-column { display: grid; gap: 14px; min-width: 0; }
-    .source-card { padding: 20px; border-radius: 20px; }
-    .source-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 12px;
-    }
-    .source-head strong { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
-    .source-list { display: grid; gap: 7px; }
-    .source-item {
-      display: grid;
-      grid-template-columns: 34px minmax(0, 1fr) auto;
-      gap: 11px;
-      align-items: center;
-      width: 100%;
-      padding: 9px;
-      border: 0;
-      border-radius: 13px;
-      background: transparent;
-      color: inherit;
-      text-align: left;
-      transition: background .15s, transform .15s;
-    }
-    button.source-item { cursor: pointer; }
-    button.source-item:hover { background: var(--bg-hover); transform: translateX(2px); }
-    .source-item-icon {
-      display: grid;
-      place-items: center;
-      width: 34px;
-      height: 34px;
-      border-radius: 11px;
-      background: var(--accent-subtle);
-      color: var(--accent);
-    }
-    .source-item-copy { min-width: 0; }
-    .source-item-copy strong {
-      display: block;
-      overflow: hidden;
-      color: var(--text-secondary);
-      font-size: 11px;
-      font-weight: 600;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .source-item-copy span {
-      display: block;
-      margin-top: 2px;
-      overflow: hidden;
-      color: var(--text-faint);
-      font-size: 9px;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .source-empty {
-      padding: 4px 9px 2px;
-    }
-    .source-empty strong {
-      display: block;
-      color: var(--text-secondary);
-      font-size: 12px;
-      font-weight: 600;
-    }
-    .source-empty span {
-      display: block;
-      margin-top: 6px;
-      color: var(--text-faint);
-      font-size: 11px;
-      line-height: 1.55;
-      white-space: normal;
-    }
-    .days-list { display: grid; gap: 14px; }
-    .day-card {
-      padding: 0;
-      overflow: hidden;
-      border-radius: 20px;
-      transition: opacity .2s, transform .2s, border-color .2s;
-    }
-    .day-card.is-off { opacity: .58; }
-    .day-header {
-      display: grid;
-      grid-template-columns: auto 45px minmax(0, 1fr) auto;
-      gap: 13px;
-      align-items: center;
-      padding: 18px 20px;
-      cursor: pointer;
-      background: color-mix(in oklch, var(--bg-tertiary) 50%, transparent);
-      border-bottom: 1px solid var(--border-faint);
-    }
-    .day-index {
-      color: var(--text-faint);
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: .1em;
-    }
-    .day-title { min-width: 0; }
-    .day-title strong { display: block; font-size: 14px; font-weight: 600; }
-    .day-title span { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10px; }
-    .day-total {
-      padding: 5px 9px;
-      border-radius: 999px;
-      background: var(--bg-card);
-      color: var(--text-muted);
-      font-size: 9px;
-      font-weight: 600;
-      white-space: nowrap;
-      box-shadow: var(--shadow-sm);
-    }
-    .choice {
-      appearance: none;
-      display: inline-grid;
-      place-content: center;
-      width: 20px;
-      height: 20px;
-      margin: 0;
-      flex: none;
-      border: 1.5px solid var(--border-primary);
-      border-radius: 7px;
-      background: var(--bg-input);
-      cursor: pointer;
-      transition: border-color .14s, background .14s, transform .1s;
-    }
-    .choice::before {
-      content: "";
-      width: 9px;
-      height: 5px;
-      border: solid var(--accent-text);
-      border-width: 0 0 2px 2px;
-      opacity: 0;
-      transform: rotate(-45deg) translateY(-1px) scale(.6);
-      transition: opacity .12s, transform .14s var(--trek-ease-quint);
-    }
-    .choice:checked, .choice:indeterminate { border-color: var(--accent); background: var(--accent); }
-    .choice:checked::before { opacity: 1; transform: rotate(-45deg) translateY(-1px) scale(1); }
-    .choice:indeterminate::before {
-      width: 9px;
-      height: 0;
-      border-width: 0 0 2px;
-      opacity: 1;
-      transform: none;
-    }
-    .choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-    .choice:active { transform: scale(.9); }
-    .place-list { padding: 4px 20px 8px 64px; }
-    .place-row {
-      position: relative;
-      display: grid;
-      grid-template-columns: auto 30px 52px minmax(0, 1fr) auto;
-      gap: 12px;
-      align-items: center;
-      min-height: 70px;
-      padding: 11px 0;
-      cursor: pointer;
-      border-bottom: 1px solid var(--border-faint);
-    }
-    .place-row:last-child { border-bottom: 0; }
-    .place-row::before {
-      content: "";
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      left: 34px;
-      width: 1px;
-      background: var(--border-faint);
-    }
-    .place-row:first-child::before { top: 50%; }
-    .place-row:last-child::before { bottom: 50%; }
-    .place-marker {
-      position: relative;
-      z-index: 1;
-      display: grid;
-      place-items: center;
-      width: 30px;
-      height: 30px;
-      border: 1px solid var(--border-primary);
-      border-radius: 50%;
-      background: var(--bg-card);
-      color: var(--text-muted);
-      font-size: 9px;
-      font-weight: 700;
-      box-shadow: var(--shadow-sm);
-    }
-    .place-row:has(.place-check:checked) .place-marker {
-      border-color: color-mix(in oklch, var(--accent) 35%, var(--border-primary));
-      background: var(--accent-subtle);
-      color: var(--accent);
-    }
-    .place-row:has(.place-check:not(:checked)) .place-copy { opacity: .58; }
-    .place-photo {
-      width: 52px;
-      height: 52px;
-      border-radius: 14px;
-      object-fit: cover;
-      background: var(--bg-muted);
-      border: 1px solid var(--border-faint);
-      box-shadow: var(--shadow-sm);
-    }
-    .place-photo--empty {
-      display: block;
-      background: linear-gradient(145deg, var(--bg-muted), color-mix(in oklch, var(--accent) 8%, var(--bg-muted)));
-    }
-    .place-copy { min-width: 0; transition: opacity .18s; }
-    .place-copy strong { display: block; font-size: 12px; font-weight: 600; line-height: 1.4; }
-    .place-copy small {
-      display: -webkit-box;
-      margin-top: 4px;
-      overflow: hidden;
-      color: var(--text-muted);
-      font-family: var(--font-subtext, var(--font-system));
-      font-size: 10px;
-      line-height: 1.45;
-      -webkit-box-orient: vertical;
-      -webkit-line-clamp: 2;
-    }
-    .place-meta {
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      flex-wrap: wrap;
-      gap: 6px;
-      max-width: 190px;
-    }
-    .time-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      color: var(--text-faint);
-      font-size: 9px;
-      white-space: nowrap;
-    }
-    .distance-warning { max-width: 150px; white-space: normal; text-align: center; line-height: 1.3; }
-    .empty-day { padding: 20px 0; color: var(--text-faint); font-size: 11px; }
-
-    .commit-column { position: sticky; top: 22px; }
-    .commit-card {
-      position: relative;
-      padding: 24px;
-      overflow: hidden;
-      border-radius: 22px;
-    }
-    .commit-card::before {
-      content: "";
-      position: absolute;
-      width: 180px;
-      height: 180px;
-      top: -120px;
-      right: -72px;
-      border-radius: 50%;
-      background: color-mix(in oklch, var(--accent) 9%, transparent);
-      pointer-events: none;
-    }
-    .commit-route {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 20px;
-      color: var(--text-muted);
-      font-size: 9px;
-      font-weight: 700;
-      letter-spacing: .12em;
-      text-transform: uppercase;
-    }
-    .commit-route::after { content: ""; flex: 1; height: 1px; background: var(--border-primary); }
-    .selection-number {
-      display: flex;
-      align-items: baseline;
-      gap: 7px;
-      margin-bottom: 18px;
-    }
-    .selection-number strong { font-size: 38px; font-weight: 600; line-height: 1; letter-spacing: -.045em; }
-    .selection-number span { color: var(--text-muted); font-size: 10px; }
-    .commit-card .field { margin-bottom: 14px; }
-    .commit-button { width: 100%; min-height: 48px; border-radius: 14px; font-weight: 600; }
-    .commit-hint {
-      display: flex;
-      align-items: flex-start;
-      gap: 7px;
-      margin: 13px 2px 0;
-      color: var(--text-faint);
-      font-size: 9px;
-      line-height: 1.55;
-    }
-
-    @keyframes route-dash { to { stroke-dashoffset: -140; } }
-    @keyframes progress-route { from { transform: translateX(0); } to { transform: translateX(365%); } }
-    @keyframes status-pulse { 50% { transform: scale(.72); opacity: .62; } }
-
-    [data-no-transparency] .app-shell { background: var(--bg-secondary); }
-    [data-no-transparency] .hero-map,
-    [data-no-transparency] .source-field,
-    [data-no-transparency] .map-badge,
-    [data-no-transparency] .map-place { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg-card); }
-    [data-density="compact"] .form-section { padding-block: 20px; }
-    [data-density="compact"] .place-row { min-height: 60px; }
-
-    .panel-settings-btn { display: inline-flex; min-height: 40px; }
-    .phone-title { display: block; font-size: 22px; margin: 0; letter-spacing: -.03em; }
+    .planner-panel { padding: 0; border-radius: var(--r-xl, 22px); }
     .panel-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
       padding: 16px 16px 12px;
-      flex-wrap: nowrap;
     }
     .panel-header-main { flex: 1; min-width: 0; }
-    .panel-header-tools {
-      width: auto;
-      flex: none;
-      justify-content: flex-end;
-    }
+    .panel-header-tools { display: flex; gap: 8px; }
+    .phone-title { display: block; font-size: 20px; margin: 0; letter-spacing: -.03em; }
     .panel-kicker,
     .panel-header .desktop-title,
     .panel-header p,
-    .panel-header .trek-chip,
+    .panel-header .trek-chip { display: none; }
+    .panel-kicker {
+      align-items: center;
+      gap: 8px;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .panel-kicker .number {
+      display: grid; place-items: center;
+      width: 24px; height: 24px; border-radius: 50%;
+      background: var(--accent); color: var(--accent-text); font-size: 10px; letter-spacing: 0;
+    }
+    .form-body { padding: 0 16px 18px; }
+    .form-section { padding: 16px 0; border-bottom: 1px solid var(--border-faint); }
+    .form-section:last-of-type { border-bottom: 0; }
+    .section-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
     .section-heading p { display: none; }
+    .section-icon {
+      display: grid; place-items: center; flex: none;
+      width: 32px; height: 32px; border-radius: 10px;
+      background: var(--accent-subtle); color: var(--accent);
+    }
+    .section-heading h3 { margin: 0; font-size: 14px; font-weight: 600; }
+    .field-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+    .field-grid--travel { grid-template-columns: minmax(0, 1fr); }
+    .field { display: grid; gap: 8px; width: 100%; min-width: 0; }
+    .field-label {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      color: var(--text-secondary); font-size: 12px; font-weight: 600;
+    }
+    .field-label-main { display: inline-flex; align-items: center; gap: 0; }
     .field-label-main .icon { display: none; }
-    .field-label-main { gap: 0; }
-    .form-body { padding: 0 16px 20px; }
-    .form-section { padding: 16px 0; }
-    .section-heading { margin-bottom: 12px; align-items: center; }
-    .submit-zone { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 4px; }
-    .generate-btn { width: 100%; }
-    /* Compact route map card on phone (hero copy stays hidden). */
-    .hero {
-      display: block;
-      min-height: 0;
-      padding: 0;
-      margin: 0 0 12px;
-      overflow: visible;
-      border-radius: 0;
-      background: transparent;
-      box-shadow: none;
+    .optional {
+      color: var(--text-faint);
+      font-size: 10px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase;
     }
-    .hero::after { display: none; }
-    .hero-copy { display: none; }
-    .hero-map {
-      display: block;
-      min-height: 112px;
-      margin: 0;
-      transform: none;
+    .trek-input, .trek-textarea, .trek-select { min-height: 44px; }
+    .trek-textarea { line-height: 1.65; resize: vertical; }
+    .source-fields { display: grid; gap: 12px; }
+    .source-field {
+      display: grid; width: 100%; min-width: 0;
+      padding: 14px;
+      border: 1px solid var(--border-primary);
       border-radius: 16px;
+      background: color-mix(in oklch, var(--bg-input) 88%, transparent);
     }
-    .hero-map .map-badge,
-    .hero-map .map-place { display: inline-flex; }
-    .app-shell.trek-scroll { box-sizing: border-box; }
-    .preview-section { margin-top: 20px; }
-    .preview-heading { margin-bottom: 14px; padding: 0; }
-    .preview-heading .eyebrow { display: none; }
-    .preview-heading h2 {
-      font-size: 24px;
-      line-height: 1.12;
-      letter-spacing: -.03em;
+    .source-field:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 10%, transparent);
     }
-    .preview-heading p { margin-top: 8px; text-align: left; font-size: 11px; line-height: 1.55; }
-    .preview-layout { grid-template-columns: minmax(0, 1fr); gap: 14px; }
-    .itinerary-column { gap: 12px; }
-    .commit-column { position: static; order: 2; }
-    .commit-card { display: block; padding: 18px; margin-top: 4px; }
+    .source-field .trek-textarea {
+      display: block; width: 100%; min-width: 0; max-width: 100%;
+      min-height: 74px; padding: 10px 0 0; border: 0; border-radius: 0;
+      background: transparent; box-shadow: none;
+    }
+    .source-field--note .trek-textarea { min-height: 110px; }
+    .toggle-row {
+      display: grid; grid-template-columns: auto minmax(0, 1fr);
+      gap: 12px; align-items: start; cursor: pointer;
+    }
+    .toggle-row input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--trek-accent, #2563eb); }
+    .toggle-copy { display: grid; gap: 4px; }
+    .toggle-copy strong { font-size: 14px; }
+    .toggle-copy span { color: var(--trek-muted, #64748b); font-size: 12px; line-height: 1.45; }
+    .submit-zone { display: grid; gap: 12px; padding-top: 8px; }
+    .generate-btn { width: 100%; min-height: 48px; border-radius: 14px; font-weight: 600; }
+    .button-arrow { display: grid; place-items: center; margin-left: 4px; }
+    .status-area { min-width: 0; }
+    .plan-view .status-line { display: flex; min-height: 20px; }
+
+    .cookie-hint-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+      padding: 12px 14px;
+      border: 1px dashed color-mix(in oklch, var(--info) 28%, var(--border-primary));
+      border-radius: 14px;
+      background: color-mix(in oklch, var(--info-soft, var(--accent-subtle)) 40%, var(--bg-card));
+    }
+    .cookie-hint-row p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+    .cookie-hint-row strong { display: block; margin-bottom: 2px; font-size: 12px; }
+
+    /* Preview board — only the active pane scrolls. */
+    .preview-board {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      padding: 0 0 calc(12px + var(--ai-guide-dock, 152px) + env(safe-area-inset-bottom, 0px));
+    }
+    .warning-panel {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: start;
+      margin: 8px 12px 0;
+      padding: 12px 14px;
+      border-color: color-mix(in oklch, var(--warning) 25%, var(--border-primary));
+      background: color-mix(in oklch, var(--warning-soft) 64%, var(--bg-card));
+      border-radius: 14px;
+    }
+    .warning-icon {
+      display: grid; place-items: center;
+      width: 28px; height: 28px; border-radius: 9px;
+      background: var(--warning-soft); color: var(--warning);
+    }
+    .warning-copy strong { font-size: 12px; }
+    .warning-list {
+      display: grid; gap: 4px; margin: 4px 0 0; padding: 0;
+      color: var(--text-secondary); font-size: 11px; line-height: 1.5; list-style: none;
+    }
+    .warning-list li::before { content: "—"; margin-right: 6px; color: var(--warning); }
+    .warning-count { color: var(--warning); }
+
+    .day-rail {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 10px 12px;
+      scrollbar-width: thin;
+    }
+    .day-chip {
+      appearance: none;
+      flex: none;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 8px;
+      align-items: center;
+      min-width: 148px;
+      padding: 8px 10px;
+      border: 1px solid var(--border-primary);
+      border-radius: 14px;
+      background: var(--bg-card);
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .day-chip[aria-selected="true"] {
+      border-color: var(--accent);
+      background: var(--accent-subtle);
+    }
+    .day-chip .choice { pointer-events: auto; }
+    .day-chip-copy strong { display: block; font-size: 12px; }
+    .day-chip-copy span { color: var(--text-muted); font-size: 10px; }
+
+    .board-split {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      gap: 0;
+    }
+    .days-list { min-height: 0; overflow: auto; padding: 0 12px 12px; }
+    .day-card { display: none; padding: 0; overflow: hidden; border-radius: 18px; }
+    .day-card.is-active { display: block; }
+    .day-card.is-off { opacity: .62; }
+    .day-header { display: none; }
+    .place-list { padding: 4px 8px 8px; }
     .place-row {
+      display: grid;
       grid-template-columns: auto 28px 44px minmax(0, 1fr);
       grid-template-areas:
         "check marker photo copy"
         ". . . meta";
+      gap: 10px;
+      align-items: center;
+      min-height: 64px;
+      padding: 10px 8px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border-faint);
+      border-radius: 12px;
+    }
+    .place-row.is-active {
+      background: color-mix(in oklch, var(--accent) 8%, var(--bg-card));
     }
     .place-check { grid-area: check; }
-    .place-marker { grid-area: marker; width: 28px; height: 28px; }
-    .place-photo { grid-area: photo; width: 44px; height: 44px; }
-    .place-copy { grid-area: copy; }
-    .place-meta { grid-area: meta; justify-content: flex-start; max-width: none; margin-top: 0; }
+    .place-marker {
+      grid-area: marker;
+      display: grid; place-items: center;
+      width: 28px; height: 28px;
+      border: 1px solid var(--border-primary);
+      border-radius: 50%;
+      background: var(--bg-card);
+      color: var(--text-muted);
+      font-size: 9px; font-weight: 700;
+    }
+    .place-row:has(.place-check:checked) .place-marker {
+      border-color: color-mix(in oklch, var(--accent) 35%, var(--border-primary));
+      background: var(--accent-subtle); color: var(--accent);
+    }
+    .place-photo {
+      grid-area: photo;
+      width: 44px; height: 44px; border-radius: 12px;
+      object-fit: cover; background: var(--bg-muted);
+      border: 1px solid var(--border-faint);
+    }
+    .place-photo--empty {
+      display: block;
+      background: linear-gradient(145deg, var(--bg-muted), color-mix(in oklch, var(--accent) 8%, var(--bg-muted)));
+    }
+    .place-copy { grid-area: copy; min-width: 0; }
+    .place-copy strong { display: block; font-size: 13px; font-weight: 600; }
+    .place-copy small {
+      display: -webkit-box;
+      margin-top: 3px; overflow: hidden;
+      color: var(--text-muted); font-size: 11px; line-height: 1.4;
+      -webkit-box-orient: vertical; -webkit-line-clamp: 1;
+    }
+    .place-meta {
+      grid-area: meta;
+      display: flex; flex-wrap: wrap; gap: 6px;
+      justify-content: flex-start;
+    }
+    .time-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      color: var(--text-faint); font-size: 10px;
+    }
+    .empty-day { padding: 28px 12px; color: var(--text-faint); font-size: 12px; }
 
+    .choice {
+      appearance: none;
+      display: inline-grid; place-content: center;
+      width: 20px; height: 20px; margin: 0; flex: none;
+      border: 1.5px solid var(--border-primary);
+      border-radius: 7px; background: var(--bg-input); cursor: pointer;
+    }
+    .choice::before {
+      content: "";
+      width: 9px; height: 5px;
+      border: solid var(--accent-text);
+      border-width: 0 0 2px 2px;
+      opacity: 0;
+      transform: rotate(-45deg) translateY(-1px) scale(.6);
+    }
+    .choice:checked, .choice:indeterminate { border-color: var(--accent); background: var(--accent); }
+    .choice:checked::before { opacity: 1; transform: rotate(-45deg) translateY(-1px) scale(1); }
+    .choice:indeterminate::before {
+      width: 9px; height: 0; border-width: 0 0 2px; opacity: 1; transform: none;
+    }
+    .choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+    .inspector {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border-top: 1px solid var(--border-primary);
+      background: color-mix(in oklch, var(--bg-card) 92%, transparent);
+    }
+    .inspector-tabs {
+      display: flex;
+      gap: 0;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--border-faint);
+    }
+    .inspector-tab {
+      appearance: none;
+      flex: none;
+      border: 0;
+      background: transparent;
+      color: var(--text-muted);
+      min-height: 40px;
+      padding: 0 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+    }
+    .inspector-tab[aria-selected="true"] {
+      color: var(--text-primary);
+      border-bottom-color: var(--accent);
+    }
+    .inspector-body {
+      min-height: 140px;
+      max-height: 32vh;
+      overflow: auto;
+      padding: 14px 16px 18px;
+    }
+    .inspector-pane.hidden { display: none !important; }
+    .place-detail-title { margin: 0 0 6px; font-size: 16px; letter-spacing: -.02em; }
+    .place-detail-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .detail-block { margin: 0 0 12px; }
+    .detail-block h4 {
+      margin: 0 0 6px;
+      color: var(--text-muted);
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .detail-block p, .detail-block li {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .prep-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+    .prep-item {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-faint);
+    }
+    .prep-item .prep-cat {
+      display: inline-flex;
+      margin-bottom: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .source-list { display: grid; gap: 6px; }
+    .source-item {
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      width: 100%;
+      padding: 8px;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+    }
+    button.source-item { cursor: pointer; }
+    button.source-item:hover { background: var(--bg-hover); }
+    .source-item-icon {
+      display: grid; place-items: center;
+      width: 32px; height: 32px; border-radius: 10px;
+      background: var(--accent-subtle); color: var(--accent);
+    }
+    .source-item-copy strong {
+      display: block; overflow: hidden; font-size: 12px;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .source-item-copy span {
+      display: block; overflow: hidden; color: var(--text-faint); font-size: 10px;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .source-empty span { display: block; margin-top: 6px; color: var(--text-faint); font-size: 12px; line-height: 1.5; }
+    .commit-card { display: grid; gap: 12px; }
+    .selection-number { display: flex; align-items: baseline; gap: 6px; }
+    .selection-number strong { font-size: 32px; letter-spacing: -.04em; }
+    .selection-number span { color: var(--text-muted); font-size: 11px; }
+    .commit-button { width: 100%; min-height: 46px; border-radius: 14px; font-weight: 600; }
+    .commit-hint { display: flex; gap: 6px; margin: 0; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
+
+    .help-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: grid;
+      place-items: end center;
+      background: color-mix(in oklch, black 42%, transparent);
+    }
+    .help-sheet {
+      width: min(100%, 560px);
+      max-height: 86vh;
+      overflow: auto;
+      padding: 20px 18px 24px;
+      border-radius: 20px 20px 0 0;
+      background: var(--bg-card);
+      color: var(--text-primary);
+    }
+    .help-sheet h2 { margin: 0 0 8px; font-size: 20px; letter-spacing: -.03em; }
+    .help-sheet .lead { margin: 0 0 16px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+    .help-step { margin: 0 0 14px; padding: 12px 14px; border-radius: 14px; background: var(--bg-tertiary); }
+    .help-step strong { display: block; margin-bottom: 4px; font-size: 13px; }
+    .help-step p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
+    .help-code {
+      display: block;
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: var(--bg-secondary);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      word-break: break-all;
+    }
+    .help-close { width: 100%; margin-top: 8px; min-height: 44px; }
+
+    @keyframes progress-route { from { transform: translateX(0); } to { transform: translateX(365%); } }
+    @keyframes status-pulse { 50% { transform: scale(.72); opacity: .62; } }
+
+    [data-no-transparency] .app-shell { background: var(--bg-secondary); }
+    [data-density="compact"] .form-section { padding-block: 12px; }
+    [data-density="compact"] .place-row { min-height: 54px; }
+
+    /* desktop only at 1180px — board layout, not a long marketing page */
     @media (min-width: 1180px) {
-      .page { padding: 34px 32px 72px; }
-      .app-shell.trek-scroll { padding-bottom: 0; }
-      .hero {
-        display: grid;
-        min-height: 360px;
-        padding: 42px 44px;
-        margin: 0;
-        overflow: hidden;
-        border-radius: var(--r-xl, 28px);
-        background: unset;
-        box-shadow: unset;
+      .studio-tools .trek-btn span { position: static; width: auto; height: auto; clip: auto; overflow: visible; }
+      .studio-tools .trek-btn { min-height: 34px; padding-inline: 10px; }
+      .studio-brand span {
+        display: block;
+        color: var(--text-muted);
+        font-size: 11px;
       }
-      .hero::after { display: block; }
-      .hero-copy { display: flex; }
-      .guide-rail { display: grid; }
-      .workspace-grid {
-        grid-template-columns: minmax(0, 1fr) 290px;
-        gap: 22px;
-        margin-top: 22px;
-      }
+      .studio-tools .status-line { display: flex; max-width: 280px; }
+      .page { padding: 22px 28px 28px; width: min(100%, 1120px); }
+      .plan-view .page { padding-bottom: 36px; }
+      .phone-title, .panel-settings-btn { display: none; }
+      .panel-kicker, .panel-header .desktop-title, .panel-header p, .panel-header .trek-chip, .section-heading p { display: block; }
+      .panel-kicker { display: flex; }
+      .panel-header { padding: 24px 28px 18px; }
+      .panel-header h2 { margin: 8px 0 0; font-size: 26px; letter-spacing: -.035em; }
+      .panel-header p { max-width: 520px; margin: 6px 0 0; color: var(--text-muted); font-size: 13px; }
+      .form-body { padding: 0 28px 28px; }
+      .form-section { padding: 22px 0; }
       .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .field-grid--travel { grid-template-columns: repeat(6, minmax(0, 1fr)); }
       .field-grid--travel .date-field { grid-column: span 2; }
       .field-grid--travel .small-field { grid-column: span 1; }
-      .phone-title { display: none; }
-      .panel-settings-btn { display: none; }
-      .panel-kicker { display: flex; }
-      .panel-header .desktop-title { display: block; }
-      .panel-header p { display: block; }
-      .panel-header .trek-chip { display: inline-flex; }
-      .section-heading p { display: block; }
-      .panel-header { padding: 28px 30px 24px; flex-wrap: nowrap; }
-      .panel-header-tools { width: auto; }
-      .field-label-main .icon { display: block; }
       .field-label-main { gap: 7px; }
-      .form-body { padding: 4px 30px 30px; }
-      .form-section { padding: 26px 0; }
-      .section-heading { margin-bottom: 18px; }
-      .submit-zone { grid-template-columns: minmax(210px, auto) 1fr; gap: 16px; }
+      .field-label-main .icon { display: block; }
+      .submit-zone { grid-template-columns: minmax(220px, auto) 1fr; align-items: center; }
       .generate-btn { width: auto; }
-      .preview-layout { grid-template-columns: minmax(0, 1fr) 290px; gap: 22px; }
-      .commit-column { position: sticky; top: 22px; }
-      .commit-card {
-        display: block;
-        padding: 24px;
+      .preview-board {
+        grid-template-rows: auto minmax(0, 1fr);
+        padding: 0 18px 18px;
+        height: 100%;
       }
+      .board-split {
+        grid-template-columns: minmax(0, 1.15fr) 340px;
+        grid-template-rows: minmax(0, 1fr);
+        min-height: 0;
+        border: 1px solid var(--border-primary);
+        border-radius: 20px;
+        overflow: hidden;
+        background: var(--bg-card);
+      }
+      .day-rail {
+        flex-direction: column;
+        overflow: auto;
+        width: 168px;
+        padding: 12px 10px;
+        border-right: 1px solid var(--border-faint);
+      }
+      .days-wrap {
+        display: grid;
+        grid-template-columns: 168px minmax(0, 1fr);
+        min-height: 0;
+      }
+      .day-chip { min-width: 0; width: 100%; }
+      .days-list { padding: 8px 10px 12px; }
       .place-row {
         grid-template-columns: auto 30px 52px minmax(0, 1fr) auto;
         grid-template-areas: none;
       }
-      .place-check,
-      .place-marker,
-      .place-photo,
-      .place-copy,
-      .place-meta { grid-area: auto; }
+      .place-check, .place-marker, .place-photo, .place-copy, .place-meta { grid-area: auto; }
       .place-marker { width: 30px; height: 30px; }
       .place-photo { width: 52px; height: 52px; }
-      .place-meta { justify-content: flex-end; max-width: 190px; }
-      .hero { grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr); padding: 42px 44px; }
-      .hero h1 { font-size: clamp(46px, 7vw, 76px); }
-      .hero-map { display: block; margin-left: 32px; }
-      .guide-rail { position: sticky; grid-template-columns: 1fr; }
-      .preview-section { margin-top: 56px; }
-      .preview-heading { display: flex; align-items: flex-start; justify-content: space-between; }
-      .day-header { grid-template-columns: auto 38px minmax(0, 1fr) auto; }
-      .day-total { display: inline-flex; }
-      .place-list { padding: 4px 20px 8px 64px; }
+      .place-meta { justify-content: flex-end; max-width: 180px; }
+      .inspector {
+        border-top: 0;
+        border-left: 1px solid var(--border-primary);
+      }
+      .inspector-body { max-height: none; height: 100%; }
+      .help-overlay { place-items: center; }
+      .help-sheet { border-radius: 20px; max-height: 80vh; }
     }
 
-    @media (max-width: 1179px) {
-      .workspace-grid { gap: 0; }
-      .hero {
-        margin: 0 0 0;
-        border-radius: 20px 20px 0 0;
-      }
-      .hero-map { border-radius: 20px 20px 0 0; }
-      .planner-panel {
-        border-top-left-radius: 0;
-        border-top-right-radius: 0;
-        margin-top: 0;
-      }
-      .preview-heading { display: block; }
-      .warning-panel { margin-top: 12px; }
-      .day-header { grid-template-columns: auto 34px minmax(0, 1fr); padding: 16px; }
-      .day-total { display: none; }
-      .place-list { padding: 3px 16px 12px; }
-      .place-row { padding-bottom: 14px; }
-      .place-row::before { left: 33px; }
-      .days-list { padding-bottom: 8px; }
-    }
+    html[data-form-factor="phone"] .source-field .trek-textarea,
+    html.layout-phone .source-field .trek-textarea { font-size: 16px; }
+    html[data-form-factor="phone"] .choice,
+    html.layout-phone .choice { width: 22px; height: 22px; }
 
-    [data-reduce-motion] .route-line,
     [data-reduce-motion] .progress > i,
     [data-reduce-motion] .status-dot { animation: none !important; }
     @media (prefers-reduced-motion: reduce) {
-      .route-line, .progress > i, .status-dot { animation: none !important; }
-      .generate-btn .button-arrow, .source-item, .day-card, .choice, .place-copy { transition: none !important; }
+      .progress > i, .status-dot { animation: none !important; }
     }
   </style>
   <!-- trek:ui -->
   <style id="ai-guide-overrides">
     :root { --ai-guide-dock: 152px; }
-    /* Kit lands above; keep form controls full-width and panel padding neutral. */
     .planner-panel.trek-glass { padding: 0; }
     .source-field { display: grid; width: 100%; min-width: 0; }
     .source-field .trek-textarea {
-      display: block;
-      width: 100%;
-      min-width: 0;
-      max-width: 100%;
+      display: block; width: 100%; min-width: 0; max-width: 100%;
     }
     .app-shell .trek-input,
     .app-shell .trek-textarea,
     .app-shell .trek-select {
-      display: block;
-      width: 100%;
-      max-width: 100%;
-      min-width: 0;
-      min-height: 44px;
-      appearance: none;
-      -webkit-appearance: none;
+      display: block; width: 100%; max-width: 100%; min-width: 0; min-height: 44px;
+      appearance: none; -webkit-appearance: none;
     }
     .app-shell .trek-select-trigger { display: flex; min-height: 44px; }
     .app-shell input[type="date"].trek-input::-webkit-date-and-time-value {
-      text-align: left;
-      min-height: 1.25em;
-    }
-    html[data-form-factor="phone"] .source-field .trek-textarea,
-    html.layout-phone .source-field .trek-textarea { font-size: 16px; }
-    html[data-form-factor="phone"] .choice,
-    html.layout-phone .choice { width: 22px; height: 22px; }
-    @media (max-width: 1179px) {
-      .app-shell .trek-select,
-      .app-shell .trek-select-trigger { width: 100%; box-sizing: border-box; }
-      .field-grid--travel .small-field:last-child { margin-bottom: 4px; }
+      text-align: left; min-height: 1.25em;
     }
   </style>
 </head>
@@ -1134,45 +688,38 @@
     <symbol id="icon-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></symbol>
     <symbol id="icon-wand" viewBox="0 0 24 24"><path d="m15 4 5 5L7 22H2v-5L15 4Z"/><path d="m12 7 5 5M6 2v3M4.5 3.5h3M20 16v4M18 18h4"/></symbol>
     <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="icon-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1.4.9-1.4 1.7V14"/><path d="M12 17h.01"/></symbol>
   </svg>
 
-  <div class="app-shell trek-scroll" id="app-shell">
-    <main class="page trek-page-enter">
-      <section class="trek-glass hero">
-        <div class="hero-copy">
-          <div class="eyebrow"><span class="live-dot"></span><span data-i18n="eyebrow">Notes to mapped itinerary</span></div>
-          <h1><span data-i18n="title">AI Guide</span><span class="title-mark">.</span></h1>
-          <p class="hero-subtitle" data-i18n="subtitle">Turn a destination, Xiaohongshu link, or pasted note into a considered, editable TREK trip.</p>
-          <div class="hero-actions">
-            <button class="trek-btn trek-btn--secondary" id="open-settings" type="button">
-              <svg class="icon icon--sm" aria-hidden="true"><use href="#icon-settings"></use></svg>
-              <span data-i18n="settings">Plugin settings</span>
-            </button>
-            <span class="hero-note">
-              <svg class="icon icon--sm" aria-hidden="true"><use href="#icon-shield"></use></svg>
-              <span data-i18n="cookieHint">Your private Cookie stays on the plugin server.</span>
-            </span>
-          </div>
+  <div class="app-shell trek-scroll" id="app-shell" data-stage="plan">
+    <header class="studio-bar">
+      <div class="studio-brand">
+        <span class="studio-mark"><svg class="icon icon--sm" aria-hidden="true"><use href="#icon-sparkles"></use></svg></span>
+        <div>
+          <strong data-i18n="title">AI Guide</strong>
+          <span data-i18n="eyebrow">Notes to mapped itinerary</span>
         </div>
-        <div class="hero-map" aria-hidden="true">
-          <svg class="route-canvas" viewBox="0 0 320 270" fill="none">
-            <path class="contour" d="M-12 57c50-39 98-34 128-5s57 37 94 16 86-8 121 29"/>
-            <path class="contour" d="M-25 86c51-34 95-23 121 4s64 39 107 14 91-8 137 34"/>
-            <path class="contour" d="M-9 211c47-39 83-41 118-13s69 32 106 8 79-20 120 14"/>
-            <path class="contour" d="M26 242c34-28 69-27 97-5s61 23 88 5 55-19 88-2"/>
-            <path class="route-shadow" d="M55 215C73 170 75 137 123 139c52 2 32-70 92-66 21 1 32 18 49 37"/>
-            <path class="route-line" d="M55 215C73 170 75 137 123 139c52 2 32-70 92-66 21 1 32 18 49 37"/>
-            <circle class="route-node" cx="55" cy="215" r="7"/>
-            <circle class="route-node" cx="123" cy="139" r="7"/>
-            <circle class="route-node route-node--end" cx="264" cy="110" r="8"/>
-          </svg>
-          <div class="map-badge"><i></i><span data-i18n="mapReady">Map evidence ready</span></div>
-          <span class="map-place map-place--one"><svg class="icon"><use href="#icon-pin"></use></svg></span>
-          <span class="map-place map-place--two"><svg class="icon"><use href="#icon-compass"></use></svg></span>
-        </div>
-      </section>
+      </div>
+      <nav class="stage-tabs" role="tablist" aria-label="Workspace">
+        <button type="button" class="stage-tab" id="stage-plan" role="tab" aria-selected="true" data-i18n="stagePlan">Plan</button>
+        <button type="button" class="stage-tab" id="stage-preview" role="tab" aria-selected="false" disabled data-i18n="stagePreview">Itinerary</button>
+      </nav>
+      <div class="studio-tools">
+        <div class="status-line" id="status-line" data-state="idle" role="status" aria-live="polite"><i class="status-dot"></i><span id="status" data-i18n="idleStatus">Ready when you are</span></div>
+        <button class="trek-btn trek-btn--secondary" id="open-cookie-help" type="button">
+          <svg class="icon icon--sm" aria-hidden="true"><use href="#icon-help"></use></svg>
+          <span data-i18n="cookieHelp">Cookie help</span>
+        </button>
+        <button class="trek-btn trek-btn--secondary" id="open-settings" type="button">
+          <svg class="icon icon--sm" aria-hidden="true"><use href="#icon-settings"></use></svg>
+          <span data-i18n="settings">Plugin settings</span>
+        </button>
+      </div>
+    </header>
+    <div class="progress hidden" id="progress" role="progressbar" data-i18n-aria-label="working"><i></i></div>
 
-      <div class="workspace-grid">
+    <section class="stage-view plan-view" id="plan-stage" role="tabpanel">
+      <main class="page trek-page-enter">
         <form id="plan-form" class="trek-glass planner-panel" aria-labelledby="planner-title">
           <header class="panel-header">
             <div class="panel-header-main">
@@ -1260,6 +807,10 @@
                     </span>
                   </label>
                 </div>
+                <div class="cookie-hint-row">
+                  <p><strong data-i18n="cookieHintTitle">Linux / TREK server?</strong><span data-i18n="cookieHint">Your private Cookie stays on the plugin server. Do not log in on the server itself.</span></p>
+                  <button class="trek-btn trek-btn--secondary" id="open-cookie-help-form" type="button" data-i18n="cookieHelpOpen">How to copy</button>
+                </div>
               </div>
             </section>
 
@@ -1270,70 +821,97 @@
                 <span class="button-arrow"><svg class="icon icon--sm" aria-hidden="true"><use href="#icon-arrow"></use></svg></span>
               </button>
               <div class="status-area">
-                <div class="status-line" id="status-line" data-state="idle" role="status" aria-live="polite"><i class="status-dot"></i><span id="status" data-i18n="idleStatus">Ready when you are</span></div>
-                <div class="progress hidden" id="progress" role="progressbar" data-i18n-aria-label="working"><i></i></div>
+                <div class="status-line" data-state="idle"><i class="status-dot"></i><span data-i18n="idleStatus">Ready when you are</span></div>
               </div>
             </div>
           </div>
         </form>
+      </main>
+    </section>
 
-        <aside class="guide-rail" aria-label="Planning guide" data-i18n-aria-label="planningGuide">
-          <section class="trek-card rail-card">
-            <h2 class="rail-title"><svg class="icon"><use href="#icon-route"></use></svg><span data-i18n="workflowTitle">From note to map</span></h2>
-            <ol class="workflow">
-              <li><span class="workflow-number">01</span><div><strong data-i18n="workflowOne">Read the signals</strong><span data-i18n="workflowOneHint">Extract places, intent and useful context.</span></div></li>
-              <li><span class="workflow-number">02</span><div><strong data-i18n="workflowTwo">Verify the map</strong><span data-i18n="workflowTwoHint">Resolve each place to real coordinates.</span></div></li>
-              <li><span class="workflow-number">03</span><div><strong data-i18n="workflowThree">You make the call</strong><span data-i18n="workflowThreeHint">Review every day before anything is written.</span></div></li>
-            </ol>
-          </section>
-          <section class="privacy-card">
-            <span class="privacy-icon"><svg class="icon"><use href="#icon-shield"></use></svg></span>
-            <strong data-i18n="privacyTitle">Private by design</strong>
-            <p data-i18n="privacyHint">Cookie credentials never enter this page, your AI prompts, drafts, logs or exports.</p>
-          </section>
-        </aside>
-      </div>
+    <section class="stage-view preview-view hidden" id="preview" role="tabpanel" aria-labelledby="preview-title">
+      <div class="preview-board">
+        <section id="warnings" class="trek-card warning-panel hidden" role="alert">
+          <span class="warning-icon"><svg class="icon"><use href="#icon-alert"></use></svg></span>
+          <div class="warning-copy"><strong data-i18n="warnings">A few things to review</strong><ul class="warning-list" id="warning-list"></ul></div>
+          <span class="trek-chip trek-chip--warning warning-count" id="warning-count">0</span>
+        </section>
 
-      <section id="warnings" class="trek-card warning-panel hidden" role="alert">
-        <span class="warning-icon"><svg class="icon"><use href="#icon-alert"></use></svg></span>
-        <div class="warning-copy"><strong data-i18n="warnings">A few things to review</strong><ul class="warning-list" id="warning-list"></ul></div>
-        <span class="trek-chip trek-chip--warning warning-count" id="warning-count">0</span>
-      </section>
-
-      <section id="preview" class="preview-section hidden" aria-labelledby="preview-title">
-        <header class="preview-heading">
-          <div>
-            <div class="eyebrow"><span class="live-dot"></span><span data-i18n="previewEyebrow">Your mapped draft</span></div>
-            <h2 id="preview-title" data-i18n="preview">Preview the journey</h2>
-          </div>
-          <p data-i18n="previewHint">Uncheck a day or place before creating your trip. Nothing is written until you confirm.</p>
-        </header>
-
-        <div class="preview-layout">
-          <div class="itinerary-column">
-            <section class="trek-card source-card" id="source-card">
-              <div class="source-head"><strong><svg class="icon icon--sm"><use href="#icon-file"></use></svg><span data-i18n="sources">Sources used</span></strong><span class="trek-chip" id="source-count">0</span></div>
-              <div id="sources" class="source-list"></div>
-            </section>
+        <div class="board-split">
+          <div class="days-wrap">
+            <nav class="day-rail" id="day-rail" aria-label="Days" data-i18n-aria-label="dayRail"></nav>
             <div id="days" class="days-list trek-stagger"></div>
           </div>
-
-          <aside class="commit-column">
-            <section class="trek-glass commit-card">
-              <div class="commit-route"><svg class="icon icon--sm"><use href="#icon-check"></use></svg><span data-i18n="finalStep">Final check</span></div>
-              <div class="selection-number"><strong id="selected-number">0</strong><span id="selection-count" data-i18n="selectedPlaces">places selected</span></div>
-              <label class="field"><span class="field-label" data-i18n="tripTitle">New trip title</span><input class="trek-input" id="trip-title" autocomplete="off" /></label>
-              <button class="trek-btn trek-btn--primary commit-button" id="commit" type="button">
-                <span data-i18n="commit">Create new trip</span>
-                <svg class="icon icon--sm" aria-hidden="true"><use href="#icon-arrow"></use></svg>
-              </button>
-              <p class="commit-hint"><svg class="icon icon--sm"><use href="#icon-shield"></use></svg><span data-i18n="commitHint">Only the checked places will be added to a new TREK trip.</span></p>
-            </section>
+          <aside class="inspector" id="inspector">
+            <div class="inspector-tabs" role="tablist">
+              <button type="button" class="inspector-tab" id="tab-place" data-pane="place" aria-selected="true" data-i18n="inspectorPlace">Place</button>
+              <button type="button" class="inspector-tab" id="tab-prep" data-pane="prep" aria-selected="false" data-i18n="inspectorPrep">Before you go</button>
+              <button type="button" class="inspector-tab" id="tab-sources" data-pane="sources" aria-selected="false" data-i18n="inspectorSources">Sources</button>
+              <button type="button" class="inspector-tab" id="tab-commit" data-pane="commit" aria-selected="false" data-i18n="inspectorCommit">Create trip</button>
+            </div>
+            <div class="inspector-body">
+              <div class="inspector-pane" id="pane-place">
+                <div id="place-detail"><p class="trek-faint" data-i18n="noPlaceSelected">Select a place to read tips, hours and reservations.</p></div>
+              </div>
+              <div class="inspector-pane hidden" id="pane-prep">
+                <h3 class="place-detail-title" data-i18n="prepTitle">Before you go</h3>
+                <p class="lead trek-faint" data-i18n="prepHint">Pitfalls, booking, packing and transit notes collected from the guides.</p>
+                <ul class="prep-list" id="prep-tips"></ul>
+              </div>
+              <div class="inspector-pane hidden" id="pane-sources">
+                <section class="source-card" id="source-card">
+                  <div class="source-head"><strong data-i18n="sources">Sources used</strong><span class="trek-chip" id="source-count">0</span></div>
+                  <div id="sources" class="source-list"></div>
+                </section>
+              </div>
+              <div class="inspector-pane hidden" id="pane-commit">
+                <section class="commit-card">
+                  <div class="selection-number"><strong id="selected-number">0</strong><span id="selection-count" data-i18n="selectedPlaces">places selected</span></div>
+                  <label class="field"><span class="field-label" data-i18n="tripTitle">New trip title</span><input class="trek-input" id="trip-title" autocomplete="off" /></label>
+                  <button class="trek-btn trek-btn--primary commit-button" id="commit" type="button">
+                    <span data-i18n="commit">Create new trip</span>
+                    <svg class="icon icon--sm" aria-hidden="true"><use href="#icon-arrow"></use></svg>
+                  </button>
+                  <p class="commit-hint"><svg class="icon icon--sm"><use href="#icon-shield"></use></svg><span data-i18n="commitHint">Only the checked places will be added to a new TREK trip.</span></p>
+                </section>
+              </div>
+            </div>
           </aside>
         </div>
-      </section>
-    </main>
+      </div>
+      <h2 id="preview-title" class="hidden" data-i18n="preview">Preview the journey</h2>
+    </section>
   </div>
+
+  <div class="help-overlay hidden" id="cookie-help" role="dialog" aria-modal="true" aria-labelledby="cookie-help-title">
+    <div class="help-sheet trek-card">
+      <h2 id="cookie-help-title" data-i18n="cookieHelpTitle">Get a Xiaohongshu Cookie</h2>
+      <p class="lead" data-i18n="cookieHelpLead">TREK runs on your Linux server. Do not log into Xiaohongshu on that server. Copy the Cookie from a normal browser on your own computer or phone, then paste it into plugin settings.</p>
+      <div class="help-step">
+        <strong data-i18n="cookieHelpStep1Title">1. Log in on your own device</strong>
+        <p data-i18n="cookieHelpStep1">Open www.xiaohongshu.com in Chrome or Firefox on your laptop or phone and log in. A headless Linux server has no QR-scan surface and is a poor place to keep a personal session.</p>
+      </div>
+      <div class="help-step">
+        <strong data-i18n="cookieHelpStep2Title">2. Copy the Cookie</strong>
+        <p data-i18n="cookieHelpStep2">DevTools → Network → any edith.xiaohongshu.com request → Headers → Request Headers → Cookie. You can also use Application → Cookies. The value must include a1 and web_session.</p>
+        <code class="help-code">a1=…; web_session=…; xsecappid=xhs-pc-web</code>
+      </div>
+      <div class="help-step">
+        <strong data-i18n="cookieHelpStep3Title">3. Paste into TREK</strong>
+        <p data-i18n="cookieHelpStep3">In TREK: Settings → Plugins → AI 攻略 → 小红书 Web Cookie. Save, then run “测试小红书会话”. The Cookie stays on the plugin server and never enters this page or the AI prompt.</p>
+      </div>
+      <div class="help-step">
+        <strong data-i18n="cookieHelpIpTitle">IP mismatch and 461</strong>
+        <p data-i18n="cookieHelpIp">The Cookie is used from the TREK server’s public IP, not your laptop’s. A home/phone login (IP1) reused on a cloud host (IP2) often triggers 461. Run “Test Xiaohongshu session” after saving. If it 461s, skip keyword search and paste links or note text instead — those paths do not need a Cookie.</p>
+      </div>
+      <div class="help-step">
+        <strong data-i18n="cookieHelpLinuxTitle">If your only computer is Linux</strong>
+        <p data-i18n="cookieHelpLinux">Use a desktop Linux session with Chromium/Firefox — not the TREK Docker/host. SSH port-forwarding a GUI browser is fine; running a headless login bot on the server is not. Cookie lasts about a week; refresh when search starts failing.</p>
+      </div>
+      <button class="trek-btn trek-btn--primary help-close" id="close-cookie-help" type="button" data-i18n="cookieHelpClose">Got it</button>
+    </div>
+  </div>
+
   <script>
     function resolveLocale(ctxLocale) {
       var host = String(ctxLocale || '').toLowerCase();
@@ -1352,6 +930,9 @@
     var isBusy = false;
     var revealOnReady = false;
     var xhsSearchAllowed = false;
+    var activeDayIndex = 0;
+    var activePlaceId = '';
+    var activeInspector = 'place';
 
     function applyXhsSearchPrefs(prefs) {
       xhsSearchAllowed = Boolean(prefs && prefs.xhsSearchAllowed);
@@ -1378,7 +959,23 @@
         title: 'AI Guide',
         subtitle: 'Turn a destination, Xiaohongshu link, or pasted note into a considered, editable TREK trip.',
         settings: 'Plugin settings',
-        cookieHint: 'Your private Cookie stays on the plugin server.',
+        cookieHint: 'Your private Cookie stays on the plugin server. Do not log in on the Linux TREK host.',
+        cookieHintTitle: 'Linux / TREK server?',
+        cookieHelp: 'Cookie help',
+        cookieHelpOpen: 'How to copy',
+        cookieHelpTitle: 'Get a Xiaohongshu Cookie',
+        cookieHelpLead: 'TREK runs on your Linux server. Do not log into Xiaohongshu on that server. Copy the Cookie from a normal browser on your own computer or phone, then paste it into plugin settings.',
+        cookieHelpStep1Title: '1. Log in on your own device',
+        cookieHelpStep1: 'Open www.xiaohongshu.com in Chrome or Firefox on your laptop or phone and log in. A headless Linux server has no QR-scan surface and is a poor place to keep a personal session.',
+        cookieHelpStep2Title: '2. Copy the Cookie',
+        cookieHelpStep2: 'DevTools → Network → any edith.xiaohongshu.com request → Headers → Request Headers → Cookie. You can also use Application → Cookies. The value must include a1 and web_session.',
+        cookieHelpStep3Title: '3. Paste into TREK',
+        cookieHelpStep3: 'In TREK: Settings → Plugins → AI Guide → Xiaohongshu Web Cookie. Save, then run “Test Xiaohongshu session”. The Cookie stays on the plugin server and never enters this page or the AI prompt.',
+        cookieHelpLinuxTitle: 'If your only computer is Linux',
+        cookieHelpLinux: 'Use a desktop Linux session with Chromium/Firefox — not the TREK Docker/host. SSH port-forwarding a GUI browser is fine; running a headless login bot on the server is not. Cookie lasts about a week; refresh when search starts failing.',
+        cookieHelpIpTitle: 'IP mismatch and 461',
+        cookieHelpIp: 'The Cookie is used from the TREK server’s public IP, not your laptop’s. A home/phone login (IP1) reused on a cloud host (IP2) often triggers 461. Run “Test Xiaohongshu session” after saving. If it 461s, skip keyword search and paste links or note text instead — those paths do not need a Cookie.',
+        cookieHelpClose: 'Got it',
         mapReady: 'Map evidence ready',
         plannerKicker: 'Build your route',
         plannerTitle: 'Start with the shape of your trip',
@@ -1454,14 +1051,52 @@
         sourceOpen: 'Open source',
         sourcesEmpty: 'No travel notes were read this time',
         sourcesEmptyHint: 'Places were proposed from the destination and interests. Add Xiaohongshu Cookie, links, or pasted text to list the articles used.',
-        sourcesQuery: 'Search query'
+        sourcesQuery: 'Search query',
+        stagePlan: 'Plan',
+        stagePreview: 'Itinerary',
+        inspectorPlace: 'Place',
+        inspectorPrep: 'Before you go',
+        inspectorSources: 'Sources',
+        inspectorCommit: 'Create trip',
+        prepTitle: 'Before you go',
+        prepHint: 'Pitfalls, booking, packing and transit notes collected from the guides.',
+        prepEmpty: 'No booking or packing tips were extracted from the notes this time.',
+        prepBooking: 'Booking',
+        prepHours: 'Hours & tickets',
+        prepTransit: 'Transit',
+        prepPacking: 'What to wear',
+        prepDocs: 'Visa & money',
+        prepPitfall: 'Pitfall',
+        noPlaceSelected: 'Select a place to read tips, hours and reservations.',
+        placeAddress: 'Address',
+        placeNotes: 'From the notes',
+        placeComments: 'From comments',
+        placePrep: 'Before you go',
+        dayRail: 'Days',
+        backToPlan: 'Back to plan'
       },
       zh: {
         eyebrow: '攻略灵感 · 地图行程',
         title: 'AI 攻略',
         subtitle: '把目的地、小红书链接或粘贴正文，变成一份有地图证据、可逐项编辑的 TREK 行程。',
         settings: '插件设置',
-        cookieHint: '你的私密 Cookie 只留在插件服务端。',
+        cookieHint: 'Cookie 只留在插件服务端。不要在 TREK 所在的 Linux 服务器上登录小红书。',
+        cookieHintTitle: 'Linux / TREK 服务器？',
+        cookieHelp: 'Cookie 指南',
+        cookieHelpOpen: '如何复制',
+        cookieHelpTitle: '如何获取小红书 Cookie',
+        cookieHelpLead: 'TREK 跑在 Linux 服务器上。不要在那台服务器里登录小红书。请在自己的电脑或手机浏览器登录后复制 Cookie，再粘贴到插件设置。',
+        cookieHelpStep1Title: '1. 在自己的设备上登录',
+        cookieHelpStep1: '用电脑或手机的 Chrome / Firefox 打开 www.xiaohongshu.com 并登录。无图形界面的 Linux 服务器没有扫码界面，也不适合保存个人登录态。',
+        cookieHelpStep2Title: '2. 复制 Cookie',
+        cookieHelpStep2: '开发者工具 → Network → 任选一条 edith.xiaohongshu.com 请求 → Headers → Request Headers → Cookie。也可以在 Application → Cookies 里查看。必须包含 a1 和 web_session。',
+        cookieHelpStep3Title: '3. 粘贴到 TREK',
+        cookieHelpStep3: '打开 TREK：设置 → 插件 → AI 攻略 → 小红书 Web Cookie。保存后再点「测试小红书会话」。Cookie 只留在插件服务端，不会进入本页或 AI 提示词。',
+        cookieHelpLinuxTitle: '如果日常只用 Linux',
+        cookieHelpLinux: '用带桌面的 Linux（Chromium/Firefox）登录即可，不要用 TREK 的 Docker/宿主机。通过 SSH 转发图形浏览器可以；在服务器上跑无头登录脚本不行。Cookie 大约一周失效，搜索失败时再更新。',
+        cookieHelpIpTitle: '换 IP 会不会 461？',
+        cookieHelpIp: 'Cookie 实际是从 TREK 服务器的公网 IP 发出去的，不是你笔记本的 IP。家宽/手机登录（IP1）拿到的会话，拿到云主机（IP2）上用，很容易触发 461。保存后先点「测试小红书会话」。若测试就是 461，就不要开关键词搜索，改粘贴链接或正文——这两条路径不需要 Cookie。',
+        cookieHelpClose: '知道了',
         mapReady: '地图证据就绪',
         plannerKicker: '规划你的路线',
         plannerTitle: '先勾勒这趟旅行的样子',
@@ -1537,7 +1172,29 @@
         sourceOpen: '打开来源',
         sourcesEmpty: '本次没有读取攻略文章',
         sourcesEmptyHint: '地点依据目的地和兴趣生成。配置小红书 Cookie，或粘贴链接 / 正文后，这里会列出参考文章。',
-        sourcesQuery: '检索关键词'
+        sourcesQuery: '检索关键词',
+        stagePlan: '规划',
+        stagePreview: '行程',
+        inspectorPlace: '地点',
+        inspectorPrep: '出发前',
+        inspectorSources: '来源',
+        inspectorCommit: '写入行程',
+        prepTitle: '出发前准备',
+        prepHint: '从攻略里汇总的避坑、预约、穿衣、交通等信息。',
+        prepEmpty: '这次攻略里没有提取到预约或出发前提示。',
+        prepBooking: '预约',
+        prepHours: '门票 / 开放时间',
+        prepTransit: '交通',
+        prepPacking: '穿衣',
+        prepDocs: '签证 / 换汇',
+        prepPitfall: '避坑',
+        noPlaceSelected: '点选一个地点，查看攻略理由、评论区和出发前提示。',
+        placeAddress: '地址',
+        placeNotes: '攻略里怎么说',
+        placeComments: '评论区',
+        placePrep: '出发前提示',
+        dayRail: '行程日',
+        backToPlan: '返回规划'
       }
     };
 
@@ -1567,6 +1224,31 @@
       return svg;
     }
 
+    function showStage(name) {
+      var plan = name !== 'preview';
+      document.getElementById('app-shell').dataset.stage = plan ? 'plan' : 'preview';
+      document.getElementById('plan-stage').classList.toggle('hidden', !plan);
+      document.getElementById('preview').classList.toggle('hidden', plan);
+      document.getElementById('stage-plan').setAttribute('aria-selected', plan ? 'true' : 'false');
+      document.getElementById('stage-preview').setAttribute('aria-selected', plan ? 'false' : 'true');
+      document.getElementById('stage-preview').disabled = !currentDraft;
+    }
+
+    function showInspector(name) {
+      activeInspector = name || 'place';
+      document.querySelectorAll('.inspector-tab').forEach(function (tab) {
+        tab.setAttribute('aria-selected', tab.dataset.pane === activeInspector ? 'true' : 'false');
+      });
+      ['place', 'prep', 'sources', 'commit'].forEach(function (pane) {
+        var el = document.getElementById('pane-' + pane);
+        if (el) el.classList.toggle('hidden', pane !== activeInspector);
+      });
+    }
+
+    function setCookieHelpOpen(open) {
+      document.getElementById('cookie-help').classList.toggle('hidden', !open);
+    }
+
     function translate() {
       document.documentElement.lang = locale;
       document.querySelectorAll('svg.icon').forEach(function (el) {
@@ -1590,6 +1272,11 @@
     function setStatus(message, state) {
       document.getElementById('status').textContent = message;
       document.getElementById('status-line').dataset.state = state || 'idle';
+      document.querySelectorAll('.plan-view .status-line').forEach(function (line) {
+        line.dataset.state = state || 'idle';
+        var label = line.querySelector('span');
+        if (label && !label.id) label.textContent = message;
+      });
     }
 
     function selectedChecks() {
@@ -1637,6 +1324,16 @@
       document.querySelectorAll('.day-card').forEach(function (card) {
         var dayCheck = card.querySelector('.day-check');
         card.classList.toggle('is-off', Boolean(dayCheck && !dayCheck.checked && !dayCheck.indeterminate));
+      });
+      document.querySelectorAll('.day-chip').forEach(function (chip) {
+        var dayIndex = chip.dataset.day;
+        var cardCheck = document.querySelector('.day-card[data-day="' + dayIndex + '"] .day-check');
+        var chipCheck = chip.querySelector('.day-check');
+        if (cardCheck && chipCheck) {
+          chipCheck.checked = cardCheck.checked;
+          chipCheck.indeterminate = cardCheck.indeterminate;
+        }
+        chip.setAttribute('aria-selected', Number(dayIndex) === activeDayIndex ? 'true' : 'false');
       });
       refreshCommitAvailability();
     }
@@ -1695,6 +1392,19 @@
     document.getElementById('open-settings').addEventListener('click', openPluginSettings);
     var mobileSettings = document.getElementById('open-settings-mobile');
     if (mobileSettings) mobileSettings.addEventListener('click', openPluginSettings);
+    document.getElementById('open-cookie-help').addEventListener('click', function () { setCookieHelpOpen(true); });
+    document.getElementById('open-cookie-help-form').addEventListener('click', function () { setCookieHelpOpen(true); });
+    document.getElementById('close-cookie-help').addEventListener('click', function () { setCookieHelpOpen(false); });
+    document.getElementById('cookie-help').addEventListener('click', function (event) {
+      if (event.target === this) setCookieHelpOpen(false);
+    });
+    document.getElementById('stage-plan').addEventListener('click', function () { showStage('plan'); });
+    document.getElementById('stage-preview').addEventListener('click', function () {
+      if (currentDraft) showStage('preview');
+    });
+    document.querySelectorAll('.inspector-tab').forEach(function (tab) {
+      tab.addEventListener('click', function () { showInspector(tab.dataset.pane); });
+    });
 
     async function resume() {
       try {
@@ -1757,8 +1467,10 @@
       event.preventDefault();
       revealOnReady = true;
       currentDraft = null;
+      showStage('plan');
       document.getElementById('preview').classList.add('hidden');
       document.getElementById('warnings').classList.add('hidden');
+      document.getElementById('stage-preview').disabled = true;
       setBusy(true);
       setStatus(t('working'), 'working');
       try {
@@ -1819,6 +1531,22 @@
       return '';
     }
 
+    function prepCategoryLabel(category) {
+      if (category === 'booking') return t('prepBooking');
+      if (category === 'hours') return t('prepHours');
+      if (category === 'transit') return t('prepTransit');
+      if (category === 'packing') return t('prepPacking');
+      if (category === 'docs') return t('prepDocs');
+      return t('prepPitfall');
+    }
+
+    function normalizePrepTips(list) {
+      return (list || []).map(function (item) {
+        if (typeof item === 'string') return { text: item, category: 'pitfall' };
+        return { text: String(item && item.text || ''), category: String(item && item.category || 'pitfall') };
+      }).filter(function (item) { return item.text; });
+    }
+
     function renderWarnings(warnings) {
       var panel = document.getElementById('warnings');
       var list = document.getElementById('warning-list');
@@ -1837,8 +1565,18 @@
       root.innerHTML = '';
       var card = document.getElementById('source-card');
       if (!guides.length) {
-        card.classList.add('hidden');
         document.getElementById('source-count').textContent = '0';
+        var empty = document.createElement('div');
+        empty.className = 'source-empty';
+        var title = document.createElement('strong');
+        title.textContent = t('sourcesEmpty');
+        var hint = document.createElement('span');
+        hint.textContent = (summary && summary.query)
+          ? t('sourcesEmptyHint') + ' · ' + t('sourcesQuery') + ' ' + summary.query
+          : t('sourcesEmptyHint');
+        empty.appendChild(title);
+        empty.appendChild(hint);
+        root.appendChild(empty);
         return;
       }
       document.getElementById('source-count').textContent = String(guides.length);
@@ -1873,6 +1611,166 @@
       });
     }
 
+    function renderPrepTips(tips) {
+      var root = document.getElementById('prep-tips');
+      root.innerHTML = '';
+      var items = normalizePrepTips(tips);
+      if (!items.length) {
+        var empty = document.createElement('li');
+        empty.className = 'prep-item';
+        empty.textContent = t('prepEmpty');
+        root.appendChild(empty);
+        return;
+      }
+      items.forEach(function (tip) {
+        var row = document.createElement('li');
+        row.className = 'prep-item';
+        var cat = document.createElement('span');
+        cat.className = 'prep-cat';
+        cat.textContent = prepCategoryLabel(tip.category);
+        var body = document.createElement('div');
+        body.textContent = tip.text;
+        row.appendChild(cat);
+        row.appendChild(body);
+        root.appendChild(row);
+      });
+    }
+
+    function findPlace(evidenceId) {
+      var days = (currentDraft && currentDraft.days) || [];
+      for (var i = 0; i < days.length; i += 1) {
+        var places = days[i].places || [];
+        for (var j = 0; j < places.length; j += 1) {
+          if (places[j].evidenceId === evidenceId) return places[j];
+        }
+      }
+      return null;
+    }
+
+    function addDetailBlock(root, titleKey, text) {
+      if (!text) return;
+      var block = document.createElement('div');
+      block.className = 'detail-block';
+      var heading = document.createElement('h4');
+      heading.textContent = t(titleKey);
+      var body = document.createElement('p');
+      body.textContent = text;
+      block.appendChild(heading);
+      block.appendChild(body);
+      root.appendChild(block);
+    }
+
+    function renderPlaceDetail(place) {
+      var root = document.getElementById('place-detail');
+      root.innerHTML = '';
+      if (!place) {
+        var empty = document.createElement('p');
+        empty.className = 'trek-faint';
+        empty.textContent = t('noPlaceSelected');
+        root.appendChild(empty);
+        return;
+      }
+      var title = document.createElement('h3');
+      title.className = 'place-detail-title';
+      title.textContent = place.name || '';
+      root.appendChild(title);
+      var meta = document.createElement('div');
+      meta.className = 'place-detail-meta';
+      if (place.stayMinutes) {
+        var time = document.createElement('span');
+        time.className = 'trek-chip';
+        time.textContent = interpolate('minutes', { count: place.stayMinutes });
+        meta.appendChild(time);
+      }
+      if (place.reservationRequired) {
+        var reserve = document.createElement('span');
+        reserve.className = 'trek-chip trek-chip--info';
+        reserve.textContent = place.reservationTips || t('reservationRequired');
+        meta.appendChild(reserve);
+      }
+      if (place.tooFar) {
+        var far = document.createElement('span');
+        far.className = 'trek-chip trek-chip--warning';
+        far.textContent = t('tooFar');
+        meta.appendChild(far);
+      }
+      root.appendChild(meta);
+      addDetailBlock(root, 'placeNotes', place.notes || place.reason || '');
+      addDetailBlock(root, 'placeAddress', place.address || '');
+      var comments = Array.isArray(place.commentTips) ? place.commentTips.join('；') : '';
+      addDetailBlock(root, 'placeComments', comments);
+      var prep = normalizePrepTips(place.prepTips).map(function (item) { return item.text; }).join('；');
+      addDetailBlock(root, 'placePrep', prep);
+    }
+
+    function selectPlace(evidenceId, opts) {
+      activePlaceId = evidenceId || '';
+      document.querySelectorAll('.place-row').forEach(function (row) {
+        row.classList.toggle('is-active', row.dataset.evidence === activePlaceId);
+      });
+      renderPlaceDetail(findPlace(activePlaceId));
+      if (opts && opts.open) showInspector('place');
+    }
+
+    function setActiveDay(index) {
+      var days = (currentDraft && currentDraft.days) || [];
+      if (!days.length) return;
+      activeDayIndex = Math.max(0, Math.min(days.length - 1, Number(index) || 0));
+      document.querySelectorAll('.day-card').forEach(function (card) {
+        card.classList.toggle('is-active', Number(card.dataset.day) === activeDayIndex);
+      });
+      document.querySelectorAll('.day-chip').forEach(function (chip) {
+        chip.setAttribute('aria-selected', Number(chip.dataset.day) === activeDayIndex ? 'true' : 'false');
+      });
+      var first = document.querySelector('.day-card.is-active .place-row');
+      if (first && first.dataset.evidence) selectPlace(first.dataset.evidence);
+    }
+
+    function renderDayRail() {
+      var root = document.getElementById('day-rail');
+      if (!root) return;
+      var days = (currentDraft && currentDraft.days) || [];
+      root.innerHTML = '';
+      days.forEach(function (day, dayIndex) {
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'day-chip';
+        chip.dataset.day = String(dayIndex);
+        chip.setAttribute('aria-selected', dayIndex === activeDayIndex ? 'true' : 'false');
+        var check = document.createElement('input');
+        check.type = 'checkbox';
+        check.className = 'choice day-check';
+        check.dataset.day = String(dayIndex);
+        var cardCheck = document.querySelector('.day-card[data-day="' + dayIndex + '"] .day-check');
+        check.checked = cardCheck ? cardCheck.checked : day.selected !== false;
+        check.indeterminate = cardCheck ? cardCheck.indeterminate : false;
+        check.addEventListener('click', function (event) { event.stopPropagation(); });
+        check.addEventListener('change', function () {
+          var places = document.querySelectorAll('.place-check[data-day="' + dayIndex + '"]');
+          places.forEach(function (place) {
+            place.checked = check.checked && place.dataset.tooFar !== 'true';
+          });
+          syncDayState(dayIndex);
+          updateSelection();
+        });
+        var copyWrap = document.createElement('span');
+        copyWrap.className = 'day-chip-copy';
+        var title = document.createElement('strong');
+        title.textContent = day.title || interpolate('placesCount', { count: (day.places || []).length });
+        var meta = document.createElement('span');
+        meta.textContent = (formatDate(day.date) ? formatDate(day.date) + ' · ' : '') + interpolate('placesCount', { count: (day.places || []).length });
+        copyWrap.appendChild(title);
+        copyWrap.appendChild(meta);
+        chip.appendChild(check);
+        chip.appendChild(copyWrap);
+        chip.addEventListener('click', function (event) {
+          if (event.target === check) return;
+          setActiveDay(dayIndex);
+        });
+        root.appendChild(chip);
+      });
+    }
+
     function syncDayState(dayIndex) {
       var root = document.getElementById('days');
       var places = Array.prototype.slice.call(root.querySelectorAll('.place-check[data-day="' + dayIndex + '"]'));
@@ -1891,7 +1789,7 @@
       days.forEach(function (day, dayIndex) {
         var places = day.places || [];
         var section = document.createElement('section');
-        section.className = 'trek-card day-card';
+        section.className = 'trek-card day-card' + (dayIndex === activeDayIndex ? ' is-active' : '');
         section.dataset.day = String(dayIndex);
 
         var heading = document.createElement('label');
@@ -1902,27 +1800,7 @@
         dayCheck.dataset.day = String(dayIndex);
         dayCheck.checked = day.selected !== false;
         dayCheck.setAttribute('aria-label', day.title || String(dayIndex + 1));
-
-        var index = document.createElement('span');
-        index.className = 'day-index';
-        index.textContent = String(dayIndex + 1).padStart(2, '0');
-
-        var title = document.createElement('span');
-        title.className = 'day-title';
-        var titleStrong = document.createElement('strong');
-        titleStrong.textContent = day.title || '';
-        var date = document.createElement('span');
-        date.textContent = formatDate(day.date);
-        title.appendChild(titleStrong);
-        title.appendChild(date);
-
-        var total = document.createElement('span');
-        total.className = 'day-total';
-        total.textContent = interpolate('placesCount', { count: places.length });
         heading.appendChild(dayCheck);
-        heading.appendChild(index);
-        heading.appendChild(title);
-        heading.appendChild(total);
         section.appendChild(heading);
 
         var placeList = document.createElement('div');
@@ -1937,6 +1815,7 @@
         places.forEach(function (place, placeIndex) {
           var row = document.createElement('label');
           row.className = 'place-row';
+          row.dataset.evidence = place.evidenceId || '';
 
           var check = document.createElement('input');
           check.type = 'checkbox';
@@ -1951,33 +1830,22 @@
           marker.className = 'place-marker';
           marker.textContent = String(placeIndex + 1).padStart(2, '0');
 
+          var photoEl;
           if (place.photoUrl) {
-            var photo = document.createElement('img');
-            photo.className = 'place-photo';
             var safePhoto = safePhotoUrl(place.photoUrl);
             if (safePhoto) {
-              photo.src = safePhoto;
-              photo.alt = place.name || '';
-              photo.loading = 'lazy';
-              photo.referrerPolicy = 'no-referrer';
-              row.appendChild(check);
-              row.appendChild(marker);
-              row.appendChild(photo);
-            } else {
-              var photoSpacer = document.createElement('span');
-              photoSpacer.className = 'place-photo place-photo--empty';
-              photoSpacer.setAttribute('aria-hidden', 'true');
-              row.appendChild(check);
-              row.appendChild(marker);
-              row.appendChild(photoSpacer);
+              photoEl = document.createElement('img');
+              photoEl.className = 'place-photo';
+              photoEl.src = safePhoto;
+              photoEl.alt = place.name || '';
+              photoEl.loading = 'lazy';
+              photoEl.referrerPolicy = 'no-referrer';
             }
-          } else {
-            var photoSpacer = document.createElement('span');
-            photoSpacer.className = 'place-photo place-photo--empty';
-            photoSpacer.setAttribute('aria-hidden', 'true');
-            row.appendChild(check);
-            row.appendChild(marker);
-            row.appendChild(photoSpacer);
+          }
+          if (!photoEl) {
+            photoEl = document.createElement('span');
+            photoEl.className = 'place-photo place-photo--empty';
+            photoEl.setAttribute('aria-hidden', 'true');
           }
 
           var placeCopy = document.createElement('span');
@@ -1988,9 +1856,9 @@
           var noteParts = [];
           if (place.notes) noteParts.push(place.notes);
           if (place.commentTips && place.commentTips.length) {
-            noteParts.push((locale === 'zh' ? '评论区：' : 'Comments: ') + place.commentTips.join('；'));
+            noteParts.push((locale.indexOf('zh') === 0 ? '评论区：' : 'Comments: ') + place.commentTips.join('；'));
           }
-          notes.textContent = noteParts.join('\n\n') || place.address || '';
+          notes.textContent = noteParts.join(' · ') || place.address || '';
           placeCopy.appendChild(placeName);
           if (notes.textContent) placeCopy.appendChild(notes);
 
@@ -2018,8 +1886,12 @@
             meta.appendChild(reserve);
           }
 
+          row.appendChild(check);
+          row.appendChild(marker);
+          row.appendChild(photoEl);
           row.appendChild(placeCopy);
           row.appendChild(meta);
+          row.addEventListener('click', function () { selectPlace(place.evidenceId, { open: true }); });
           placeList.appendChild(row);
         });
 
@@ -2053,23 +1925,21 @@
     function render(data) {
       renderWarnings(data.warnings || []);
       renderSources(data.guides || [], data.sourceSummary || {});
+      renderPrepTips(data.prepTips || []);
+      activeDayIndex = 0;
       renderDays(data.days || []);
+      renderDayRail();
+      setActiveDay(0);
+      if (normalizePrepTips(data.prepTips).length) showInspector('prep');
+      else showInspector('place');
 
       var intent = data.intent || {};
       document.getElementById('trip-title').value = intent.destination
         ? intent.destination + (locale.indexOf('zh') === 0 ? ' · ' + intent.dayCount + ' 日行程' : ' · ' + intent.dayCount + ' day trip')
         : '';
-      document.getElementById('preview').classList.remove('hidden');
+      document.getElementById('stage-preview').disabled = false;
+      showStage('preview');
       updateSelection();
-
-      if (revealOnReady) {
-        revealOnReady = false;
-        window.requestAnimationFrame(function () {
-          var reduced = document.documentElement.hasAttribute('data-reduce-motion') ||
-            (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-          document.getElementById('preview').scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
-        });
-      }
     }
 
     document.getElementById('commit').addEventListener('click', async function () {
