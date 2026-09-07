@@ -1271,8 +1271,10 @@ test('限流降级文案区分认证与请求过快（中英），并说明继�
   const verifyZh = formatXhsDegradedWarning(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification'), 'zh', message);
   const verifyEn = formatXhsDegradedWarning(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification'), 'en', message);
   assert.match(verifyZh, /【需要验证】/);
-  assert.match(verifyZh, /已降级继续/);
-  assert.match(verifyEn, /Degraded and continuing/i);
+  assert.match(verifyZh, /出口 IP|IP/);
+  assert.match(verifyZh, /链接|粘贴|表单/);
+  assert.match(verifyEn, /different IP|cloud host/i);
+  assert.match(verifyEn, /skipped|links|pasted/i);
 });
 
 test('关键词搜索遇 429 会退避重试并降级继续表单路径', async () => {

@@ -901,6 +901,10 @@
         <p data-i18n="cookieHelpStep3">In TREK: Settings → Plugins → AI 攻略 → 小红书 Web Cookie. Save, then run “测试小红书会话”. The Cookie stays on the plugin server and never enters this page or the AI prompt.</p>
       </div>
       <div class="help-step">
+        <strong data-i18n="cookieHelpIpTitle">IP mismatch and 461</strong>
+        <p data-i18n="cookieHelpIp">The Cookie is used from the TREK server’s public IP, not your laptop’s. A home/phone login (IP1) reused on a cloud host (IP2) often triggers 461. Run “Test Xiaohongshu session” after saving. If it 461s, skip keyword search and paste links or note text instead — those paths do not need a Cookie.</p>
+      </div>
+      <div class="help-step">
         <strong data-i18n="cookieHelpLinuxTitle">If your only computer is Linux</strong>
         <p data-i18n="cookieHelpLinux">Use a desktop Linux session with Chromium/Firefox — not the TREK Docker/host. SSH port-forwarding a GUI browser is fine; running a headless login bot on the server is not. Cookie lasts about a week; refresh when search starts failing.</p>
       </div>
@@ -969,6 +973,8 @@
         cookieHelpStep3: 'In TREK: Settings → Plugins → AI Guide → Xiaohongshu Web Cookie. Save, then run “Test Xiaohongshu session”. The Cookie stays on the plugin server and never enters this page or the AI prompt.',
         cookieHelpLinuxTitle: 'If your only computer is Linux',
         cookieHelpLinux: 'Use a desktop Linux session with Chromium/Firefox — not the TREK Docker/host. SSH port-forwarding a GUI browser is fine; running a headless login bot on the server is not. Cookie lasts about a week; refresh when search starts failing.',
+        cookieHelpIpTitle: 'IP mismatch and 461',
+        cookieHelpIp: 'The Cookie is used from the TREK server’s public IP, not your laptop’s. A home/phone login (IP1) reused on a cloud host (IP2) often triggers 461. Run “Test Xiaohongshu session” after saving. If it 461s, skip keyword search and paste links or note text instead — those paths do not need a Cookie.',
         cookieHelpClose: 'Got it',
         mapReady: 'Map evidence ready',
         plannerKicker: 'Build your route',
@@ -1088,6 +1094,8 @@
         cookieHelpStep3: '打开 TREK：设置 → 插件 → AI 攻略 → 小红书 Web Cookie。保存后再点「测试小红书会话」。Cookie 只留在插件服务端，不会进入本页或 AI 提示词。',
         cookieHelpLinuxTitle: '如果日常只用 Linux',
         cookieHelpLinux: '用带桌面的 Linux（Chromium/Firefox）登录即可，不要用 TREK 的 Docker/宿主机。通过 SSH 转发图形浏览器可以；在服务器上跑无头登录脚本不行。Cookie 大约一周失效，搜索失败时再更新。',
+        cookieHelpIpTitle: '换 IP 会不会 461？',
+        cookieHelpIp: 'Cookie 实际是从 TREK 服务器的公网 IP 发出去的，不是你笔记本的 IP。家宽/手机登录（IP1）拿到的会话，拿到云主机（IP2）上用，很容易触发 461。保存后先点「测试小红书会话」。若测试就是 461，就不要开关键词搜索，改粘贴链接或正文——这两条路径不需要 Cookie。',
         cookieHelpClose: '知道了',
         mapReady: '地图证据就绪',
         plannerKicker: '规划你的路线',

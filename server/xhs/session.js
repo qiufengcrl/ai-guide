@@ -67,8 +67,8 @@ function formatXhsWarning(error, locale, messageFn, options = {}) {
   }
   if (isXhsVerificationError(error) || /风控/.test(text)) {
     return messageFn(locale,
-      `【需要验证】小红书要求验证码或触发风控（461）。请在本机浏览器登录后更新 Cookie。已降级继续。${suffix}`,
-      `【Verification required】Xiaohongshu requested captcha or risk control (461). Log in locally and update your Cookie. Degraded and continuing. ${suffix}`);
+      `【需要验证】小红书要求验证码或触发风控（461）。常见原因是登录 IP 与 TREK 服务器出口 IP 不一致（家宽 Cookie 用在云主机上）。已跳过关键词搜索，改为用链接、粘贴或表单继续。`,
+      `【Verification required】Xiaohongshu requested captcha or risk control (461). A common cause is using a Cookie from a different IP than this TREK server (home login on a cloud host). Keyword search was skipped; continuing with links, pasted text, or the form.`);
   }
   if (isXhsRateLimitError(error) || /429|频繁|cuqps|too many requests|rate limit/i.test(text)) {
     const retry = scene === 'search'
