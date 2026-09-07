@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "npx -y trek-plugin-sdk dev",
     "pack": "npx -y trek-plugin-sdk pack",
+    "deploy": "bash scripts/deploy-production.sh",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {

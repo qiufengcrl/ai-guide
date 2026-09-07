@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/confirm-plugin-deploy.sh",
+        "matcher": "deploy-production\\.sh|npm run deploy",
+        "timeout": 15
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "command": ".cursor/hooks/suggest-deploy-after-pack.sh",
+        "matcher": "trek-plugin-sdk pack|npm run pack",
+        "timeout": 15
+      }
+    ]
+  }
+}
