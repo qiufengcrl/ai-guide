@@ -112,5 +112,11 @@ test('AGENTS.md: design kit tokens, no hardcoded palette, trek.session for tab s
   assert.match(html, /class="[^"]*trek-cluster/);
   assert.match(html, /class="[^"]*trek-title/);
   assert.match(html, /class="[^"]*trek-btn trek-btn--primary/);
-  assert.match(html, /<select class="trek-select"/);
+  assert.match(html, /<select id="pace">/);
+  assert.doesNotMatch(html, /\.app-shell \.trek-select \{/);
+  assert.match(html, /select\.trek-select-native-hidden/);
+  assert.match(html, /font-family:\s*var\(--font-system\),/);
+  assert.doesNotMatch(html, /class="app-shell trek-scroll"/);
+  assert.match(html, /class="page trek-scroll/);
+  assert.doesNotMatch(html, /\.planner-panel \{[^}]*background:/);
 });
