@@ -83,5 +83,11 @@ test('theme, accessibility, and responsive host states are explicitly supported'
   assert.match(html, /role=["']status["'][^>]+aria-live=["']polite["']/);
   assert.match(html, /role=["']progressbar["']/);
   assert.match(html, /role=["']alert["']/);
+  assert.match(html, /<body class="trek-ui">/);
+  assert.match(html, /font-family:\s*var\(--font-system\)/);
+  assert.match(html, /html\.layout-phone \.app-shell/);
+  assert.match(html, /input\[type="date"\]\.trek-input/);
+  assert.match(html, /color: inherit/);
+  assert.match(appScript, /TREK UI kit is not loaded/);
   assert.match(html, /:focus-visible|\.trek-ui :focus-visible/);
 });

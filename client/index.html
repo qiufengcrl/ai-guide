@@ -5,11 +5,46 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI Guide</title>
   <style>
-    html, body { height: 100%; margin: 0; }
-    body { background: transparent; color: var(--text-primary); }
-    button, input, textarea, select { font-family: inherit; }
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --ai-guide-dock: 120px;
+      --bg-primary: #ffffff; --bg-secondary: #f8fafc; --bg-tertiary: #f1f5f9;
+      --bg-card: #ffffff; --bg-input: #ffffff; --bg-hover: rgba(0,0,0,.03);
+      --text-primary: #111827; --text-secondary: #374151; --text-muted: #6b7280; --text-faint: #9ca3af;
+      --border-primary: #e5e7eb; --border-faint: rgba(0,0,0,.06);
+      --accent: #111827; --accent-text: #ffffff; --accent-subtle: #f1f5f9;
+      --info: #2563eb; --info-soft: #eff6ff;
+      --warning: #d97706; --warning-soft: #fffbeb;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
+      --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: var(--font-system);
+      color: var(--text-primary);
+      background: transparent;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, textarea, select { font-family: inherit; font-size: inherit; }
     button { -webkit-tap-highlight-color: transparent; }
     svg { display: block; }
+    .trek-btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 10px 16px; border-radius: 12px; font: inherit; font-size: 14px; font-weight: 500;
+      border: 1px solid transparent; cursor: pointer; background: var(--accent); color: var(--accent-text);
+    }
+    .trek-btn--secondary {
+      background: var(--bg-card); color: var(--text-primary);
+      border-color: var(--border-primary); box-shadow: var(--shadow-sm);
+    }
+    .trek-input, .trek-textarea, .trek-select {
+      width: 100%; box-sizing: border-box;
+      padding: 8px 14px; border-radius: 10px; min-height: 44px;
+      border: 1px solid var(--border-primary); background: var(--bg-input); color: var(--text-primary);
+      font: inherit; font-size: 16px; outline: none;
+    }
+    .trek-input::placeholder, .trek-textarea::placeholder { color: var(--text-faint); }
 
     .hidden { display: none !important; }
     .icon-library { position: absolute; width: 0; height: 0; overflow: hidden; }
@@ -29,10 +64,7 @@
       display: flex;
       flex-direction: column;
       color: var(--text-primary);
-      background:
-        radial-gradient(1200px 420px at 0% -10%, color-mix(in oklch, var(--accent) 10%, transparent), transparent 58%),
-        radial-gradient(900px 380px at 100% 0%, color-mix(in oklch, var(--info) 8%, transparent), transparent 52%),
-        var(--bg-secondary);
+      background: var(--bg-secondary);
     }
     .app-shell::before {
       content: "";
@@ -148,6 +180,7 @@
     .stage-view {
       flex: 1;
       min-height: 0;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
     }
@@ -156,11 +189,17 @@
     .page {
       width: min(100%, 1180px);
       margin: 0 auto;
-      padding: 12px 12px calc(20px + var(--ai-guide-dock, 152px) + env(safe-area-inset-bottom, 0px));
+      padding: 12px;
     }
-    .plan-view .page { overflow: auto; height: 100%; box-sizing: border-box; }
+    .plan-view .page { overflow: auto; height: 100%; }
 
-    .planner-panel { padding: 0; border-radius: var(--r-xl, 22px); }
+    .planner-panel {
+      padding: 0;
+      border-radius: var(--r-xl, 22px);
+      background: var(--bg-card);
+      border: 1px solid var(--border-primary);
+      box-shadow: var(--shadow-sm);
+    }
     .panel-header {
       display: flex;
       align-items: center;
@@ -267,7 +306,7 @@
       min-height: 0;
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr);
-      padding: 0 0 calc(12px + var(--ai-guide-dock, 152px) + env(safe-area-inset-bottom, 0px));
+      padding: 0;
     }
     .warning-panel {
       display: grid;
@@ -639,8 +678,16 @@
       .help-sheet { border-radius: 20px; max-height: 80vh; }
     }
 
+    html[data-form-factor="phone"] .app-shell,
+    html.layout-phone .app-shell {
+      padding-bottom: calc(var(--ai-guide-dock, 120px) + env(safe-area-inset-bottom, 0px));
+    }
     html[data-form-factor="phone"] .source-field .trek-textarea,
     html.layout-phone .source-field .trek-textarea { font-size: 16px; }
+    html[data-form-factor="phone"] .trek-input,
+    html.layout-phone .trek-input,
+    html[data-form-factor="phone"] .trek-select,
+    html.layout-phone .trek-select { font-size: 16px; }
     html[data-form-factor="phone"] .choice,
     html.layout-phone .choice { width: 22px; height: 22px; }
 
@@ -652,7 +699,6 @@
   </style>
   <!-- trek:ui -->
   <style id="ai-guide-overrides">
-    :root { --ai-guide-dock: 152px; }
     .planner-panel.trek-glass { padding: 0; }
     .source-field { display: grid; width: 100%; min-width: 0; }
     .source-field .trek-textarea {
@@ -662,15 +708,28 @@
     .app-shell .trek-textarea,
     .app-shell .trek-select {
       display: block; width: 100%; max-width: 100%; min-width: 0; min-height: 44px;
+    }
+    .app-shell input:not([type="date"]).trek-input,
+    .app-shell .trek-textarea {
       appearance: none; -webkit-appearance: none;
     }
-    .app-shell .trek-select-trigger { display: flex; min-height: 44px; }
-    .app-shell input[type="date"].trek-input::-webkit-date-and-time-value {
-      text-align: left; min-height: 1.25em;
+    .app-shell input[type="date"].trek-input {
+      appearance: none;
+      background: var(--bg-input, #fff);
+      color: var(--text-primary, #111827);
+      line-height: 1.4;
+      min-height: 44px;
     }
+    .app-shell input[type="date"].trek-input::-webkit-date-and-time-value,
+    .app-shell input[type="date"].trek-input::-webkit-datetime-edit {
+      color: inherit;
+      text-align: left;
+      min-height: 1.25em;
+    }
+    .app-shell .trek-select-trigger { display: flex; min-height: 44px; }
   </style>
 </head>
-<body>
+<body class="trek-ui">
   <svg class="icon-library" aria-hidden="true">
     <symbol id="icon-sparkles" viewBox="0 0 24 24"><path d="m12 3-1.45 3.8L7 8.25l3.55 1.45L12 13.5l1.45-3.8L17 8.25 13.45 6.8 12 3Z"/><path d="m19 13-.9 2.1L16 16l2.1.9L19 19l.9-2.1L22 16l-2.1-.9L19 13Z"/><path d="m5 14-1.15 2.85L1 18l2.85 1.15L5 22l1.15-2.85L9 18l-2.85-1.15L5 14Z"/></symbol>
     <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.55v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.05 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.2V9.55h.15a1.7 1.7 0 0 0 1.7-1.1 1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.86-2.86.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1-1.7V2.2h4.05v.15a1.7 1.7 0 0 0 1.1 1.7 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.7 1.1h.1v4.05h-.1A1.7 1.7 0 0 0 19.4 15Z"/></symbol>
@@ -913,6 +972,17 @@
   </div>
 
   <script>
+    if (typeof trek === 'undefined') {
+      window.trek = {
+        onContext: function () { return function () {}; },
+        invoke: function () { return Promise.reject(new Error('TREK UI kit is not loaded')); },
+        notify: function () {},
+        navigate: function () {},
+        openExternal: function () {},
+        context: null
+      };
+    }
+
     function resolveLocale(ctxLocale) {
       var host = String(ctxLocale || '').toLowerCase();
       if (host.indexOf('zh') === 0) return host;
@@ -1360,7 +1430,7 @@
 
     function syncDockInset(ctx) {
       var phone = isPhoneLayout(ctx);
-      var bottomInset = 152;
+      var bottomInset = 120;
       var vp = ctx && ctx.viewport;
       if (vp && vp.insets && typeof vp.insets.bottom === 'number' && vp.insets.bottom > 0) {
         bottomInset = Math.max(vp.insets.bottom + 56, 136);
