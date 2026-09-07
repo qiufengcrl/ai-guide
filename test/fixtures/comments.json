@@ -21,7 +21,14 @@
       {
         "id": "c4",
         "content": "清水寺早上人少，拍照好看",
-        "user_info": { "nickname": "摄影党" }
+        "user_info": { "nickname": "摄影党" },
+        "sub_comments": [
+          {
+            "id": "c4s1",
+            "content": "门票现在要预约，别现场买",
+            "user_info": { "nickname": "路过" }
+          }
+        ]
       }
     ],
     "cursor": "",

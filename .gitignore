@@ -1,5 +1,6 @@
 node_modules/
 plugin.zip
+.trek-dev/
 .env
 .env.*
 !.env.example

@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, inferDestinationFromGuides, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES, guideSearchQueries } = require('../server/pipeline');
+const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, nearDestination, pickDestinationBias, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, inferDestinationFromGuides, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES, guideSearchQueries } = require('../server/pipeline');
 const { normalizeXhsCookie, formatXhsWarning, formatXhsDegradedWarning, isXhsAuthError, XhsSessionError } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces, isRateLimitError } = require('../server/geo/nominatim');
@@ -26,7 +26,8 @@ const {
   MAX_INTERVAL_MS,
 } = require('../server/xhs/throttle');
 const { readXhsCookieUpdatedAt } = require('../server/xhs/freshness');
-const { isMarketingGuide, filterMarketingGuides, buildTrekPlaceNotes, extractCommentInsights, commentTipsForPlace, attachPreviewTips, extractPrepTips, categorizePrepTip, scoreGuide, selectSearchNotes } = require('../server/guide-quality');
+const { isMarketingGuide, filterMarketingGuides, buildTrekPlaceNotes, extractCommentInsights, commentTipsForPlace, attachPreviewTips, extractPrepTips, categorizePrepTip, scoreGuide, selectSearchNotes, collectReservations } = require('../server/guide-quality');
+const { estimateBudget, extractPriceClues } = require('../server/budget');
 const { buildTrekPlacePayload } = require('../server/trek-handoff');
 
 setGeoThrottleInterval(0);
@@ -109,7 +110,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.43');
+  assert.equal(manifest.version, '1.1.44');
 });
 
 function memoryDb() {
@@ -406,21 +407,59 @@ test('分享口令里的 xhslink.cn 会被抽成笔记链接，大兴安岭有�
 
 test('地图证据会丢掉远离目的地的误匹配', () => {
   const candidate = { name: '洛古河', durationMinutes: 90, dayHint: 1 };
-  const bias = { lat: 52.3, lng: 124.7 };
+  const bias = { lat: 52.3, lng: 124.7, radiusKm: 400 };
   assert.equal(evidenceFromSearch(candidate, {
     source: 'nominatim',
     places: [{ name: '古塔', lat: 48.95, lng: 27.05, types: ['tourism'], address: '乌克兰' }],
   }, 0, '大兴安岭', bias), null);
+  assert.equal(evidenceFromSearch(candidate, {
+    source: 'nominatim',
+    places: [{ name: '北极镇', lat: 53.48, lng: 122.35, types: ['town'], address: '北极镇, 漠河市, 大兴安岭地区, 黑龙江省, 中国' }],
+  }, 0, '大兴安岭', { lat: 43.0, lng: 118.0, radiusKm: 400 }), null);
   const labeled = evidenceFromSearch(candidate, {
     source: 'nominatim',
     places: [{ name: '北极镇', lat: 53.48, lng: 122.35, types: ['town'], address: '北极镇, 漠河市, 大兴安岭地区, 黑龙江省, 中国' }],
-  }, 0, '大兴安岭', { lat: 43.0, lng: 118.0 });
+  }, 0, '大兴安岭', bias);
   assert.equal(labeled.name, '北极镇');
   const near = evidenceFromSearch(candidate, {
     source: 'nominatim',
     places: [{ name: '洛古河村', lat: 53.3, lng: 122.35, types: ['village'], address: '洛古河村, 漠河市, 大兴安岭地区' }],
   }, 0, '大兴安岭', bias);
   assert.equal(near.name, '洛古河村');
+});
+
+test('地理边界会拒绝跨城同名，且京都不会误匹配东京都', () => {
+  const xian = pickDestinationBias([
+    { name: '西安市', lat: 34.27, lng: 108.95, address: '陕西省西安市', types: ['city'] },
+    { name: '西安路', lat: 39.12, lng: 117.20, address: '天津市和平区西安路', types: ['route'] },
+  ], '西安');
+  assert.equal(xian.name, '西安市');
+  assert.equal(xian.radiusKm, 150);
+  assert.equal(nearDestination(
+    { name: '故宫博物院', lat: 39.92, lng: 116.39, address: '北京市东城区景山前街4号' },
+    '西安',
+    xian,
+  ), false);
+  assert.equal(evidenceFromSearch({ name: '故宫', durationMinutes: 90, dayHint: 1 }, {
+    source: 'nominatim',
+    places: [{ name: '故宫博物院', lat: 39.92, lng: 116.39, types: ['attraction'], address: '北京市东城区' }],
+  }, 0, '西安', xian), null);
+
+  const kyoto = pickDestinationBias([
+    { name: '京都市', lat: 35.01, lng: 135.77, address: '京都府京都市', types: ['city'] },
+    { name: '新宿', lat: 35.69, lng: 139.70, address: '東京都新宿区', types: ['attraction'] },
+  ], '京都');
+  assert.equal(kyoto.name, '京都市');
+  assert.equal(nearDestination(
+    { name: '新宿站', lat: 35.69, lng: 139.70, address: '東京都新宿区' },
+    '京都',
+    kyoto,
+  ), false);
+  assert.equal(nearDestination(
+    { name: '伏见稻荷大社', lat: 34.97, lng: 135.77, address: '京都府京都市伏见区' },
+    '京都',
+    kyoto,
+  ), true);
 });
 
 test('组合检索无结果时下一拍改搜景点本名', async () => {
@@ -677,6 +716,31 @@ test('deleteUserData 幂等清除该用户任务，export 不含 Cookie 或正�
   assert.equal(fixture.db.jobs.size, 0);
 });
 
+test('Nominatim 有目的地偏差时会 bounded 限制 viewbox', async () => {
+  const original = global.fetch;
+  let href = '';
+  global.fetch = async (url) => {
+    href = String(url);
+    return {
+      ok: true,
+      status: 200,
+      headers: { get() { return null; } },
+      async json() { return []; },
+    };
+  };
+  try {
+    await searchPlaces('故宫 西安', {
+      lang: 'zh',
+      locationBias: { lat: 34.27, lng: 108.95, radius: 150000 },
+    });
+    const params = new URL(href).searchParams;
+    assert.equal(params.get('bounded'), '1');
+    assert.ok(params.get('viewbox'));
+  } finally {
+    global.fetch = original;
+  }
+});
+
 test('Nominatim 优先返回景点而不是行政区', async () => {
   assert.ok(scoreRow({ category: 'tourism', type: 'attraction', importance: 0.2 })
     > scoreRow({ category: 'boundary', type: 'administrative', importance: 0.9 }));
@@ -762,6 +826,7 @@ test('extract prompt 强调预约、避坑与中英名称', () => {
   assert.match(instruction, /nameZh/);
   assert.match(instruction, /reservationRequired/);
   assert.match(instruction, /first-person/);
+  assert.match(instruction, /economy/);
   const text = extractionText([{ id: 'g_1', title: '测试', text: '需要提前预约故宫' }], {
     destination: '北京',
     dayCount: 2,
@@ -1666,6 +1731,50 @@ test('粘贴攻略生成的预览会带上 prepTips', async () => {
   assert.ok(Array.isArray(state.prepTips));
   assert.ok(state.prepTips.length >= 2);
   assert.ok(state.prepTips.some((tip) => /闭馆|预约|穿衣/.test(tip.text)));
+  assert.ok(state.budget);
+  assert.equal(state.budget.currency, 'JPY');
+  assert.ok(state.budget.economy.total > 0);
+  assert.ok(state.budget.luxury.total > state.budget.economy.total);
+});
+
+test('三档预算会从笔记价格线索与启发式生成', () => {
+  const clues = extractPriceClues([{
+    text: '门票60元，人均120，住宿酒店300',
+    commentInsights: ['现在门票 80 建议提前预约'],
+  }]);
+  assert.ok(clues.some((item) => item.kind === 'tickets'));
+  const budget = estimateBudget({
+    destination: '京都',
+    dayCount: 3,
+    guides: [{ text: '门票1500日元，人均4000，住宿酒店8000' }],
+    llm: {
+      currency: 'JPY',
+      economy: { transport: 2000, lodging: 12000, tickets: 3000, food: 7000 },
+    },
+  });
+  assert.equal(budget.currency, 'JPY');
+  assert.equal(budget.source, 'notes+model');
+  assert.equal(budget.economy.total, 24000);
+  assert.ok(budget.comfort.total > budget.economy.total);
+});
+
+test('出发前专区会汇总预约表', () => {
+  const draft = attachPreviewTips({
+    guides: [{ id: 'g_1', text: '清水寺需提前预约，周一闭馆' }],
+    days: [{
+      title: '第 1 天 · 京都',
+      places: [{
+        name: '清水寺',
+        fromGuideIds: ['g_1'],
+        reservationRequired: true,
+        reservationTips: '需提前预约',
+      }],
+    }],
+  });
+  const reservations = collectReservations(draft);
+  assert.equal(reservations.length, 1);
+  assert.equal(reservations[0].name, '清水寺');
+  assert.ok(draft.prepTips.some((tip) => tip.category === 'booking' || tip.category === 'hours'));
 });
 
 test('营销景点候选会被过滤', () => {

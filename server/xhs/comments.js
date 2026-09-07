@@ -3,17 +3,26 @@ const { createSignedGet } = require('./signature');
 const { assertSessionResponse, XhsSessionError } = require('./session');
 
 const COMMENT_PAGE_PATH = '/api/sns/web/v2/comment/page';
-const DEFAULT_MAX_COMMENTS = 24;
+const DEFAULT_MAX_COMMENTS = 40;
+const COMMENT_GUIDE_LIMIT = 5;
+
+function pushComment(item, texts, maxComments) {
+  const content = String(item?.content || '').trim();
+  if (content) texts.push(content);
+  const subs = item?.sub_comments || item?.subComments || [];
+  for (const sub of Array.isArray(subs) ? subs : []) {
+    if (texts.length >= maxComments) return;
+    pushComment(sub, texts, maxComments);
+  }
+}
 
 function parseCommentTexts(data, maxComments = DEFAULT_MAX_COMMENTS) {
   const comments = data?.data?.comments;
   if (!Array.isArray(comments)) return [];
   const texts = [];
   for (const item of comments) {
-    const content = String(item?.content || '').trim();
-    if (!content) continue;
-    texts.push(content);
     if (texts.length >= maxComments) break;
+    pushComment(item, texts, maxComments);
   }
   return texts;
 }
@@ -56,6 +65,8 @@ async function fetchNoteComments(noteId, cookie, options = {}) {
 
 module.exports = {
   COMMENT_PAGE_PATH,
+  COMMENT_GUIDE_LIMIT,
+  DEFAULT_MAX_COMMENTS,
   parseCommentTexts,
   fetchNoteComments,
 };

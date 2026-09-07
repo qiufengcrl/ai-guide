@@ -130,7 +130,8 @@ test('评论区 API 解析实用提示', async () => {
     assert.ok(insights.length >= 2);
     assert.equal(insights.some((line) => /加微信/.test(line)), false);
     const parsed = parseCommentTexts(fixture('comments.json'), 10);
-    assert.equal(parsed.length, 4);
+    assert.equal(parsed.length, 5);
+    assert.ok(parsed.some((line) => /别现场买/.test(line)));
   } finally {
     global.fetch = originalFetch;
   }

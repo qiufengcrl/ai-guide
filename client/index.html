@@ -237,6 +237,15 @@
           <ul id="warning-list" class="trek-stack"></ul>
         </section>
 
+        <section id="budget-card" class="trek-card hidden">
+          <div class="trek-cluster">
+            <strong data-i18n="budgetTitle">Budget estimate</strong>
+            <span class="trek-chip" id="budget-currency">CNY</span>
+          </div>
+          <p class="trek-faint" data-i18n="budgetDisclaimer">Rough totals from the notes, not live prices.</p>
+          <div class="trek-cluster" id="budget-tiers"></div>
+        </section>
+
         <div class="board-split">
           <div class="days-wrap">
             <nav class="day-rail trek-cluster" id="day-rail" role="tablist" aria-label="Days" data-i18n-aria-label="dayRail"></nav>
@@ -256,6 +265,10 @@
               <div class="inspector-pane hidden" id="pane-prep">
                 <div class="trek-title" data-i18n="prepTitle">Before you go</div>
                 <p class="trek-faint" data-i18n="prepHint">Pitfalls, booking, packing and transit notes collected from the guides.</p>
+                <div id="prep-reservation-block" class="trek-stack">
+                  <div class="trek-title" data-i18n="prepReservations">Reservations</div>
+                  <ul class="trek-stack" id="prep-reservations"></ul>
+                </div>
                 <ul class="trek-stack" id="prep-tips"></ul>
               </div>
               <div class="inspector-pane hidden" id="pane-sources">
@@ -557,6 +570,20 @@
         prepPacking: 'What to wear',
         prepDocs: 'Visa & money',
         prepPitfall: 'Pitfall',
+        prepReservations: 'Reservations',
+        prepReservationEmpty: 'No booking requirements were extracted.',
+        budgetTitle: 'Budget estimate',
+        budgetDisclaimer: 'Rough totals from the notes, not live prices. Check official sites before you pay.',
+        budgetEconomy: 'Saver',
+        budgetComfort: 'Comfort',
+        budgetLuxury: 'Splurge',
+        budgetTransport: 'Transit',
+        budgetLodging: 'Stay',
+        budgetTickets: 'Tickets',
+        budgetFood: 'Food',
+        budgetTotal: 'Total',
+        budgetClues: 'Price clues in the notes',
+        placeCommentsChip: 'Comments',
         noPlaceSelected: 'Select a place to read tips, hours and reservations.',
         placeAddress: 'Address',
         placeNotes: 'From the notes',
@@ -679,6 +706,20 @@
         prepPacking: '穿衣',
         prepDocs: '签证 / 换汇',
         prepPitfall: '避坑',
+        prepReservations: '需要预约',
+        prepReservationEmpty: '这次没有提取到必须预约的地点。',
+        budgetTitle: '预算估算',
+        budgetDisclaimer: '根据攻略里的价格线索估算全程花费，不是实时询价。出行前请再核对官方价格。',
+        budgetEconomy: '经济',
+        budgetComfort: '舒适',
+        budgetLuxury: '豪华',
+        budgetTransport: '交通',
+        budgetLodging: '住宿',
+        budgetTickets: '门票',
+        budgetFood: '餐饮',
+        budgetTotal: '合计',
+        budgetClues: '攻略里的价格线索',
+        placeCommentsChip: '评论区',
         noPlaceSelected: '点选一个地点，查看攻略理由、评论区和出发前提示。',
         placeAddress: '地址',
         placeNotes: '攻略里怎么说',
@@ -1123,7 +1164,8 @@
       });
     }
 
-    function renderPrepTips(tips) {
+    function renderPrepTips(tips, reservations) {
+      renderReservations(reservations);
       var root = document.getElementById('prep-tips');
       root.innerHTML = '';
       var items = normalizePrepTips(tips);
@@ -1134,18 +1176,129 @@
         root.appendChild(empty);
         return;
       }
-      items.forEach(function (tip) {
+      var order = ['booking', 'hours', 'transit', 'packing', 'docs', 'pitfall'];
+      order.forEach(function (category) {
+        var group = items.filter(function (tip) { return tip.category === category; });
+        if (!group.length) return;
+        var heading = document.createElement('li');
+        heading.className = 'trek-title';
+        heading.textContent = prepCategoryLabel(category);
+        root.appendChild(heading);
+        group.forEach(function (tip) {
+          var row = document.createElement('li');
+          row.className = 'trek-card';
+          row.textContent = tip.text;
+          root.appendChild(row);
+        });
+      });
+    }
+
+    function renderReservations(reservations) {
+      var block = document.getElementById('prep-reservation-block');
+      var root = document.getElementById('prep-reservations');
+      root.innerHTML = '';
+      var items = Array.isArray(reservations) ? reservations.filter(function (item) { return item && item.name; }) : [];
+      block.classList.toggle('hidden', !items.length);
+      items.forEach(function (item) {
         var row = document.createElement('li');
         row.className = 'trek-card trek-stack';
-        var cat = document.createElement('span');
-        cat.className = 'trek-chip trek-chip--accent';
-        cat.textContent = prepCategoryLabel(tip.category);
-        var body = document.createElement('div');
-        body.textContent = tip.text;
-        row.appendChild(cat);
-        row.appendChild(body);
+        var name = document.createElement('strong');
+        name.textContent = item.name;
+        row.appendChild(name);
+        if (item.dayTitle) {
+          var day = document.createElement('span');
+          day.className = 'trek-faint';
+          day.textContent = item.dayTitle;
+          row.appendChild(day);
+        }
+        if (item.tips) {
+          var tips = document.createElement('span');
+          tips.className = 'trek-muted';
+          tips.textContent = item.tips;
+          row.appendChild(tips);
+        }
         root.appendChild(row);
       });
+    }
+
+    function formatMoney(amount, currency) {
+      var value = Number(amount);
+      if (!Number.isFinite(value)) return '—';
+      try {
+        return new Intl.NumberFormat(locale.indexOf('zh') === 0 ? 'zh-CN' : locale, {
+          style: 'currency',
+          currency: currency || 'CNY',
+          maximumFractionDigits: 0
+        }).format(value);
+      } catch (_) {
+        return String(Math.round(value)) + ' ' + (currency || '');
+      }
+    }
+
+    function renderBudget(budget) {
+      var card = document.getElementById('budget-card');
+      var root = document.getElementById('budget-tiers');
+      root.innerHTML = '';
+      if (!budget || !budget.economy) {
+        card.classList.add('hidden');
+        return;
+      }
+      card.classList.remove('hidden');
+      document.getElementById('budget-currency').textContent = budget.currency || 'CNY';
+      var currency = budget.currency || 'CNY';
+      [
+        { key: 'economy', label: t('budgetEconomy') },
+        { key: 'comfort', label: t('budgetComfort') },
+        { key: 'luxury', label: t('budgetLuxury') }
+      ].forEach(function (tier) {
+        var data = budget[tier.key] || {};
+        var box = document.createElement('div');
+        box.className = 'trek-card trek-stack';
+        var title = document.createElement('strong');
+        title.textContent = tier.label;
+        box.appendChild(title);
+        [
+          ['budgetTransport', data.transport],
+          ['budgetLodging', data.lodging],
+          ['budgetTickets', data.tickets],
+          ['budgetFood', data.food]
+        ].forEach(function (row) {
+          var line = document.createElement('div');
+          line.className = 'trek-cluster';
+          var label = document.createElement('span');
+          label.className = 'trek-muted';
+          label.textContent = t(row[0]);
+          var value = document.createElement('span');
+          value.textContent = formatMoney(row[1], currency);
+          line.appendChild(label);
+          line.appendChild(value);
+          box.appendChild(line);
+        });
+        var total = document.createElement('div');
+        total.className = 'trek-cluster';
+        var totalLabel = document.createElement('strong');
+        totalLabel.textContent = t('budgetTotal');
+        var totalValue = document.createElement('strong');
+        totalValue.textContent = formatMoney(data.total, currency);
+        total.appendChild(totalLabel);
+        total.appendChild(totalValue);
+        box.appendChild(total);
+        if (data.notes) {
+          var notes = document.createElement('p');
+          notes.className = 'trek-faint';
+          notes.textContent = data.notes;
+          box.appendChild(notes);
+        }
+        root.appendChild(box);
+      });
+      if (Array.isArray(budget.clues) && budget.clues.length) {
+        var clueLine = document.createElement('p');
+        clueLine.className = 'trek-faint';
+        clueLine.textContent = t('budgetClues') + ' · ' + budget.clues.map(function (item) {
+          return String(item.kind || '') + ' ' + String(item.amount || '');
+        }).join(' · ');
+        card.appendChild(clueLine);
+      }
     }
 
     function findPlace(evidenceId) {
@@ -1414,6 +1567,12 @@
             reserve.textContent = place.reservationTips || t('reservationRequired');
             meta.appendChild(reserve);
           }
+          if (place.commentTips && place.commentTips.length) {
+            var commentsChip = document.createElement('span');
+            commentsChip.className = 'trek-chip trek-chip--accent';
+            commentsChip.textContent = t('placeCommentsChip');
+            meta.appendChild(commentsChip);
+          }
 
           check.addEventListener('click', function (event) { event.stopPropagation(); });
           row.appendChild(check);
@@ -1458,7 +1617,8 @@
     function render(data) {
       renderWarnings(data.warnings || []);
       renderSources(data.guides || [], data.sourceSummary || {});
-      renderPrepTips(data.prepTips || []);
+      renderBudget(data.budget || null);
+      renderPrepTips(data.prepTips || [], data.reservations || []);
       activeDayIndex = 0;
       renderDays(data.days || []);
       renderDayRail();

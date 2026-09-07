@@ -162,33 +162,54 @@ function toPrepTipItems(texts) {
   }));
 }
 
-function extractPrepTips(guides, limit = 8) {
+function extractPrepTips(guides, limit = 12) {
   const tips = [];
   const seen = new Set();
+  const pushLine = (raw) => {
+    const text = String(raw || '').replace(/https?:\/\/\S+/g, '')
+      .replace(/^[▪️•*\-\s]+/, '')
+      .replace(/^\d+[.\u3001、]\s*/, '')
+      .trim();
+    if (text.length < 6 || text.length > 160) return false;
+    if (!PREP_LINE_RE.test(text)) return false;
+    if (isMarketingText(text)) return false;
+    const key = text.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    tips.push(text);
+    return tips.length >= limit;
+  };
   for (const guide of guides || []) {
     for (const line of String(guide?.text || '').split(/\n/)) {
-      const text = line.replace(/https?:\/\/\S+/g, '')
-        .replace(/^[▪️•*\-\s]+/, '')
-        .replace(/^\d+[.\u3001、]\s*/, '')
-        .trim();
-      if (text.length < 6 || text.length > 160) continue;
-      if (!PREP_LINE_RE.test(text)) continue;
-      if (isMarketingText(text)) continue;
-      const key = text.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      tips.push(text);
-      if (tips.length >= limit) break;
+      if (pushLine(line)) return tips;
     }
-    if (tips.length >= limit) break;
+    for (const tip of guide?.commentInsights || []) {
+      if (pushLine(tip)) return tips;
+    }
   }
   return tips;
 }
 
-function attachPreviewTips(draft, limit = 8) {
+function collectReservations(draft) {
+  const items = [];
+  for (const day of draft?.days || []) {
+    for (const place of day.places || []) {
+      if (!(place.reservationRequired || String(place.reservationTips || '').trim())) continue;
+      items.push({
+        name: String(place.name || '').trim(),
+        dayTitle: String(day.title || '').trim(),
+        tips: String(place.reservationTips || '').trim(),
+      });
+    }
+  }
+  return items;
+}
+
+function attachPreviewTips(draft, limit = 12) {
   const next = draft || {};
   const guides = next.guides || [];
   next.prepTips = toPrepTipItems(extractPrepTips(guides, limit));
+  next.reservations = collectReservations(next);
   for (const day of next.days || []) {
     for (const place of day.places || []) {
       const related = guidesForItem(guides, place.fromGuideIds);
@@ -255,6 +276,7 @@ module.exports = {
   categorizePrepTip,
   toPrepTipItems,
   attachPreviewTips,
+  collectReservations,
   extractCommentInsights,
   commentTipsForPlace,
   guidesForItem,

@@ -25,10 +25,12 @@ const {
   collectXhsNoteIds,
   mapConcurrent,
   resolveCandidateEvidence,
+  pickDestinationBias,
   MAX_FROM_DESTINATION_KM,
   filterMarketingGuides,
 } = require('./pipeline');
-const { isMarketingGuide, commentTipsForPlace, extractCommentInsights, attachPreviewTips, selectSearchNotes } = require('./guide-quality');
+const { isMarketingGuide, commentTipsForPlace, extractCommentInsights, attachPreviewTips, selectSearchNotes, scoreGuide, QUALITY_MIN_SCORE } = require('./guide-quality');
+const { estimateBudget } = require('./budget');
 const { loadTrekCategoryMap, buildTrekPlacePayload } = require('./trek-handoff');
 const { fetchPublicNote, fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const {
@@ -48,7 +50,7 @@ const {
   writeXhsCookieUpdatedAt,
 } = require('./xhs/freshness');
 const { getXhsPhoto } = require('./xhs/photos');
-const { fetchNoteComments } = require('./xhs/comments');
+const { fetchNoteComments, COMMENT_GUIDE_LIMIT, DEFAULT_MAX_COMMENTS } = require('./xhs/comments');
 const { searchPlaces } = require('./geo/nominatim');
 
 const JOB_FIELDS = 'id, user_id, status, stage, payload_json, draft_json, work_json, error, committed_trip_id, created_at, updated_at';
@@ -400,7 +402,7 @@ async function advance(job, ctx) {
       }
       return;
     }
-    job.stage = 'extract';
+    job.stage = 'enrich_comments';
     return;
   }
 
@@ -496,35 +498,44 @@ async function advance(job, ctx) {
     job.work.bias = null;
     job.work.geocodeDone = false;
     job.work.photosDone = false;
-    job.work.commentGuideIndex = 0;
-    job.stage = 'enrich_comments';
+    job.work.budgetHints = extracted.budget || null;
+    job.stage = 'gather_evidence';
     return;
   }
 
   if (job.stage === 'enrich_comments') {
     const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
     const work = job.work;
-    const maxGuides = 3;
-    const guidesWithNotes = (job.draft.guides || []).filter((guide) => guide.noteId);
-    const shouldSkip = !cookie || work.xhsSignedApiBlocked || !guidesWithNotes.length || !limits.xhsEnabled;
+    const ranked = (job.draft.guides || [])
+      .filter((guide) => {
+        if (!guide.noteId) return false;
+        const rating = scoreGuide(guide);
+        return !rating.reject && rating.score >= QUALITY_MIN_SCORE;
+      })
+      .slice()
+      .sort((left, right) => scoreGuide(right).score - scoreGuide(left).score);
+    const shouldSkip = !cookie || work.xhsSignedApiBlocked || !ranked.length || !limits.xhsEnabled;
+    if (work.commentGuideTotal == null) {
+      work.commentGuideTotal = Math.min(COMMENT_GUIDE_LIMIT, ranked.length);
+    }
     if (shouldSkip) {
-      job.stage = 'gather_evidence';
+      job.stage = 'extract';
       return;
     }
     const index = work.commentGuideIndex || 0;
-    if (index >= Math.min(guidesWithNotes.length, maxGuides)) {
-      job.stage = 'gather_evidence';
+    if (index >= work.commentGuideTotal) {
+      job.stage = 'extract';
       return;
     }
-    const guide = guidesWithNotes[index];
+    const guide = ranked[index];
     work.commentGuideIndex = index + 1;
     try {
       await xhsThrottle.wait(cookie, job.userId);
       const comments = await withXhsRetry(
-        () => fetchNoteComments(guide.noteId, cookie, { maxComments: 24, timeoutMs: 10000 }),
+        () => fetchNoteComments(guide.noteId, cookie, { maxComments: DEFAULT_MAX_COMMENTS, timeoutMs: 10000 }),
         { cookie, maxRetries: 1 },
       );
-      const insights = extractCommentInsights(comments, 6);
+      const insights = extractCommentInsights(comments, 8);
       if (insights.length) guide.commentInsights = insights;
     } catch (error) {
       if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
@@ -539,9 +550,8 @@ async function advance(job, ctx) {
       try {
         const result = await searchPlaces(job.draft.intent.destination, geoSearchOptions(ctx.config, { lang: locale }));
         const dest = String(job.draft.intent.destination || '').trim();
-        const ranked = (result.places || []).filter((place) => Number.isFinite(place?.lat) && Number.isFinite(place?.lng));
-        const first = ranked.find((place) => dest && String(place.address || '').includes(dest)) || ranked[0];
-        if (first) job.work.bias = { lat: first.lat, lng: first.lng, radius: 400000 };
+        const picked = pickDestinationBias(result.places, dest);
+        if (picked) job.work.bias = picked;
         else job.work.biasFailed = true;
       } catch (error) {
         job.work.biasFailed = true;
@@ -573,9 +583,10 @@ async function advance(job, ctx) {
           continue;
         }
         if (item?.boundaryRejected) {
+          const limitKm = Number(job.work.bias?.radiusKm) || MAX_FROM_DESTINATION_KM;
           addWarning(job, message(locale,
-            `「${item.query}」距目的地超过 ${MAX_FROM_DESTINATION_KM} 公里，已跳过`,
-            `"${item.query}" is more than ${MAX_FROM_DESTINATION_KM} km from the destination and was skipped`));
+            `「${item.query}」距目的地超过 ${limitKm} 公里，已跳过`,
+            `"${item.query}" is more than ${limitKm} km from the destination and was skipped`));
           continue;
         }
         if (item?.query) {
@@ -637,6 +648,12 @@ async function advance(job, ctx) {
     const gated = gateAndSchedule(job.draft.intent, job.work.evidence, limits, locale, job.work.copy);
     job.draft.days = gated.days;
     attachPreviewTips(job.draft);
+    job.draft.budget = estimateBudget({
+      destination: job.draft.intent?.destination,
+      dayCount: job.draft.intent?.dayCount,
+      guides: job.draft.guides,
+      llm: job.work.budgetHints,
+    });
     for (const warning of gated.warnings) addWarning(job, warning);
     if (!job.draft.days.some((day) => day.places.length)) {
       throw new Error(message(locale, '没有可发布的地点', 'No publishable places were found'));

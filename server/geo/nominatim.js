@@ -141,6 +141,7 @@ async function searchPlacesViaNominatim(query, options = {}) {
     const half = Math.min(5, bias.radius / 111320);
     params.set('viewbox', [bias.lng - half, bias.lat + half, bias.lng + half, bias.lat - half]
       .map((value) => value.toFixed(5)).join(','));
+    params.set('bounded', '1');
   }
   await throttleNominatim();
   let response;

@@ -4,6 +4,8 @@ const { isMarketingCandidate, filterMarketingGuides, scoreGuide } = require('./g
 
 const TOO_FAR_KM = 40;
 const MAX_FROM_DESTINATION_KM = 150;
+const REGION_RADIUS_KM = 400;
+const ABSOLUTE_MAX_FROM_DESTINATION_KM = 500;
 const REGION_CLUSTER_KM = 80;
 const REGION_SPLIT_MIN_SPAN_KM = 80;
 
@@ -346,6 +348,15 @@ const EXTRACTION_SCHEMA = {
         required: ['name'],
       },
     },
+    budget: {
+      type: 'object',
+      properties: {
+        currency: { type: 'string' },
+        economy: { type: 'object' },
+        comfort: { type: 'object' },
+        luxury: { type: 'object' },
+      },
+    },
   },
   required: ['candidates'],
 };
@@ -429,7 +440,12 @@ function extractionText(guides, intent) {
     'Do not list the destination itself, a province, city, country, or administrative region as a place.',
     'For each place include nameZh (Simplified Chinese official name), nameEn (English official name when known), reason (real user tips or pitfalls from the notes), durationMinutes, reservationRequired, and reservationTips when notes mention 预约/抢票/提前预约.',
     `Spread places across days with dayHint from 1 to ${intent.dayCount}.`,
+    'If notes mention prices (人均/门票/住宿/交通), also fill budget with currency and economy/comfort/luxury objects, each with numeric transport, lodging, tickets, food for the whole trip. Do not invent live market quotes.',
   ].filter(Boolean).join('\n');
+  const commentTips = (guides || [])
+    .flatMap((guide) => (guide.commentInsights || []).map((tip) => `- ${tip}`))
+    .slice(0, 20);
+  const commentBlock = commentTips.length ? `\nComment tips:\n${commentTips.join('\n')}` : '';
   const guideText = guides
     .slice()
     .sort((left, right) => scoreGuide(right).score - scoreGuide(left).score)
@@ -437,7 +453,7 @@ function extractionText(guides, intent) {
     .join('\n\n')
     .slice(0, 12000);
   if (guideText) {
-    return `${header}\n\nExtract named places from these notes first; preserve booking tips and user warnings from the notes. If they are thin, supplement with well-known places in the destination.\n\n${guideText}`;
+    return `${header}\n\nExtract named places from these notes first; preserve booking tips and user warnings from the notes. If they are thin, supplement with well-known places in the destination.${commentBlock}\n\n${guideText}`;
   }
   return `${header}\n\nNo travel notes were supplied. Propose well-known visitable places in the destination that match the interests.`;
 }
@@ -447,7 +463,7 @@ function extractionInstruction(intent, hasGuides) {
   const dest = intent.destination || 'the destination';
   const fields = 'Each candidate must include name, nameZh, nameEn, reason, durationMinutes, reservationRequired, reservationTips, dayHint, and guideId when sourced from a note. Use reservationRequired=true when notes mention 预约, 抢票, 提前预约, or 约满.';
   if (hasGuides) {
-    return `Extract specific visitable places from the notes. ${fields} Prefer first-person visit notes over sponsored or group-tour pitches. Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Keep real user tips in reason. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}. Target about ${target} places. Do not invent coordinates.`;
+    return `Extract specific visitable places from the notes. ${fields} Prefer first-person visit notes over sponsored or group-tour pitches. Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Keep real user tips in reason. When notes mention prices, also fill budget with currency and three tiers (economy, comfort, luxury), each with numeric transport, lodging, tickets, food for the whole trip. Do not invent live quotes. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}. Target about ${target} places. Do not invent coordinates.`;
   }
   return `No notes were supplied. Propose well-known visitable places in ${dest}. ${fields} Each name must be a specific attraction or neighborhood, not the destination, province, city, or country. Spread across ${intent.dayCount} days with dayHint. Target ${target} places. Do not invent coordinates.`;
 }
@@ -549,7 +565,7 @@ function progressForJob(job, locale) {
     return message(locale, '正在从攻略提取景点…', 'Extracting places from guides…');
   }
   if (stage === 'enrich_comments') {
-    const total = Math.min(2, (job.draft?.guides || []).filter((guide) => guide.noteId).length);
+    const total = Number(work.commentGuideTotal) || Math.min(5, (job.draft?.guides || []).filter((guide) => guide.noteId).length);
     const done = work.commentGuideIndex || 0;
     return message(locale,
       `正在读取评论区提示（${done}/${total || 1}）…`,
@@ -643,6 +659,86 @@ function finiteCoordinate(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function radiusKmFromPlace(place, destination) {
+  const dest = String(destination || place?.name || '').trim();
+  const types = (place?.types || []).map((item) => String(item).toLowerCase());
+  const hay = `${place?.name || ''} ${place?.address || ''} ${dest}`;
+  if (isMultiCityDestination(dest) || /(地区|自治州|自治区|盟|群岛)$/.test(dest) || /islands|prefecture/i.test(hay)) {
+    return REGION_RADIUS_KM;
+  }
+  if (types.some((type) => ['state', 'province', 'region'].includes(type))) return REGION_RADIUS_KM;
+  if (types.some((type) => ['county', 'municipality'].includes(type))) return 200;
+  if (types.some((type) => ['island', 'archipelago'].includes(type)) || /岛$|island/i.test(dest)) return 350;
+  return MAX_FROM_DESTINATION_KM;
+}
+
+function destinationRadiusKm(bias, destination) {
+  const km = Number(bias?.radiusKm);
+  if (Number.isFinite(km) && km > 0) return km;
+  return radiusKmFromPlace(bias, destination);
+}
+
+function destinationMentioned(text, destination) {
+  const hay = String(text || '');
+  const dest = String(destination || '').trim();
+  if (dest.length < 2) return false;
+  const lowerHay = hay.toLowerCase();
+  const lowerDest = dest.toLowerCase();
+  let from = 0;
+  while (from <= lowerHay.length - lowerDest.length) {
+    const idx = lowerHay.indexOf(lowerDest, from);
+    if (idx < 0) return false;
+    const window = hay.slice(Math.max(0, idx - 1), idx + dest.length + 1);
+    if ((dest === '京都' || lowerDest === 'kyoto') && /[东東]京都/.test(window)) {
+      from = idx + 1;
+      continue;
+    }
+    if (/^[a-z]/i.test(dest)) {
+      const before = idx === 0 ? ' ' : lowerHay[idx - 1];
+      const after = idx + dest.length >= lowerHay.length ? ' ' : lowerHay[idx + dest.length];
+      if (/[a-z0-9]/i.test(before) || /[a-z0-9]/i.test(after)) {
+        from = idx + 1;
+        continue;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+function addressMentionsDestination(place, destination) {
+  return destinationMentioned(`${place?.name || ''} ${place?.address || ''}`, destination);
+}
+
+function pickDestinationBias(places, destination) {
+  const ranked = (Array.isArray(places) ? places : []).filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
+  if (!ranked.length) return null;
+  const dest = String(destination || '').trim();
+  const admin = ranked.filter((item) => isAdministrativePlace(item));
+  const namedAdmin = admin.find((item) => dest && (destinationMentioned(item.name, dest) || addressMentionsDestination(item, dest)));
+  const named = ranked.find((item) => dest && (destinationMentioned(item.name, dest) || addressMentionsDestination(item, dest)));
+  const chosen = namedAdmin || named || admin[0] || ranked[0];
+  const radiusKm = radiusKmFromPlace(chosen, dest);
+  return {
+    lat: chosen.lat,
+    lng: chosen.lng,
+    radiusKm,
+    radius: Math.round(radiusKm * 1000),
+    types: Array.isArray(chosen.types) ? chosen.types : [],
+    name: chosen.name || dest,
+  };
+}
+
+function nearDestination(place, destination, bias) {
+  if (!finiteCoordinate(place?.lat) || !finiteCoordinate(place?.lng)) return false;
+  if (!bias || !finiteCoordinate(bias.lat) || !finiteCoordinate(bias.lng)) return true;
+  const distance = haversineKm(place, bias);
+  if (distance > ABSOLUTE_MAX_FROM_DESTINATION_KM) return false;
+  const radius = destinationRadiusKm(bias, destination);
+  if (distance <= radius) return true;
+  return addressMentionsDestination(place, destination) && distance <= REGION_RADIUS_KM;
+}
+
 function isLowQualityPlace(place) {
   const types = (place?.types || []).map((item) => String(item).toLowerCase());
   if (types.some((type) => [
@@ -664,7 +760,7 @@ function scoreSearchPlace(place, destination) {
   if (isAdministrativePlace(place)) score -= 8;
   if (isLowQualityPlace(place)) score -= 12;
   const dest = String(destination || '').trim();
-  if (dest.length >= 2 && `${place?.name || ''} ${place?.address || ''}`.includes(dest)) score += 1;
+  if (addressMentionsDestination(place, dest)) score += 2;
   return score;
 }
 function isAdministrativePlace(place) {
@@ -673,16 +769,6 @@ function isAdministrativePlace(place) {
     'boundary', 'administrative', 'province', 'state', 'country',
     'region', 'municipality', 'county', 'city', 'town',
   ].includes(type));
-}
-
-function nearDestination(place, destination, bias) {
-  const dest = String(destination || '').trim();
-  const haystack = `${place?.name || ''} ${place?.address || ''}`;
-  if (dest.length >= 2 && haystack.includes(dest)) return true;
-  if (bias && finiteCoordinate(bias.lat) && finiteCoordinate(bias.lng)) {
-    return haversineKm(place, bias) <= MAX_FROM_DESTINATION_KM;
-  }
-  return true;
 }
 
 function evidenceFromSearch(candidate, result, index, destination, bias) {
@@ -1038,6 +1124,8 @@ function publicDraft(job) {
     warnings: draft.warnings || [],
     days: draft.days || [],
     prepTips: Array.isArray(draft.prepTips) ? draft.prepTips : [],
+    reservations: Array.isArray(draft.reservations) ? draft.reservations : [],
+    budget: draft.budget && typeof draft.budget === 'object' ? draft.budget : null,
     extractMeta: job.work?.extractMeta || null,
     ...(job.error ? { error: job.error } : {}),
   };
@@ -1046,6 +1134,8 @@ function publicDraft(job) {
 module.exports = {
   TOO_FAR_KM,
   MAX_FROM_DESTINATION_KM,
+  REGION_RADIUS_KM,
+  ABSOLUTE_MAX_FROM_DESTINATION_KM,
   EXTRACTION_SCHEMA,
   PLACE_SEARCH_ALIASES,
   looksLikeShareCard,
@@ -1083,6 +1173,9 @@ module.exports = {
   placeSearchNames,
   guideSearchQueries,
   evidenceFromSearch,
+  nearDestination,
+  pickDestinationBias,
+  destinationRadiusKm,
   gateAndSchedule,
   splitRegions,
   publicDraft,
