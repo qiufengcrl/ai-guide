@@ -81,7 +81,10 @@ test('theme, accessibility, and responsive host states are explicitly supported'
   assert.match(html, /role=["']alert["']/);
   assert.match(html, /<body class="trek-ui">/);
   assert.match(html, /font-family:\s*var\(--font-system\)/);
-  assert.match(html, /html\.layout-phone \.app-shell/);
+  assert.match(html, /html\.layout-phone \.page/);
+  assert.match(html, /--ai-guide-dock/);
+  assert.match(appScript, /function syncDockInset/);
+  assert.match(appScript, /Math\.max\(readHostBottomInset\(ctx\), 120\)/);
   assert.match(html, /input\[type="date"\]\.trek-input/);
   assert.match(html, /color: inherit/);
   assert.match(appScript, /TREK UI kit is not loaded/);
@@ -114,5 +117,6 @@ test('AGENTS.md: kit classes first, tokens only, trek.session, native select', (
   assert.doesNotMatch(html, /\.app-shell \.trek-select \{/);
   assert.doesNotMatch(html, /class="app-shell trek-scroll"/);
   assert.match(html, /class="page trek-scroll/);
+  assert.match(html, /padding-bottom:\s*calc\(16px \+ var\(--ai-guide-dock/);
   assert.doesNotMatch(html, /\.trek-btn\s*\{[^}]*background:\s*var\(--accent\)/);
 });

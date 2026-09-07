@@ -27,11 +27,6 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      padding-bottom: var(--trek-inset-bottom, 0px);
-    }
-    html[data-form-factor="phone"] .app-shell,
-    html.layout-phone .app-shell {
-      padding-bottom: var(--trek-inset-bottom, 0px);
     }
     .toolbar { padding: 12px 16px; border-bottom: 1px solid var(--border-faint); }
     .toolbar-grow { flex: 1; min-width: 0; }
@@ -78,6 +73,24 @@
     .day-header { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
     .inspector { min-height: 0; display: flex; flex-direction: column; }
     .inspector-body { flex: 1; min-height: 0; padding: 12px; }
+    html[data-form-factor="phone"] .page,
+    html.layout-phone .page {
+      padding-bottom: calc(16px + var(--ai-guide-dock, 0px));
+    }
+    html[data-form-factor="phone"] .preview-board,
+    html.layout-phone .preview-board {
+      padding-bottom: calc(16px + var(--ai-guide-dock, 0px));
+    }
+    html[data-form-factor="phone"] .inspector-body,
+    html.layout-phone .inspector-body,
+    html[data-form-factor="phone"] .days-list,
+    html.layout-phone .days-list {
+      padding-bottom: calc(12px + var(--ai-guide-dock, 0px));
+    }
+    html[data-form-factor="phone"] .help-sheet,
+    html.layout-phone .help-sheet {
+      margin-bottom: var(--ai-guide-dock, 0px);
+    }
     .place-photo {
       width: 40px; height: 40px; flex: none;
       border-radius: var(--radius-md);
@@ -851,8 +864,27 @@
       try { return window.matchMedia('(max-width: 860px)').matches; } catch (_) { return false; }
     }
 
+    function readHostBottomInset(ctx) {
+      var vp = ctx && ctx.viewport;
+      if (vp && vp.insets && typeof vp.insets.bottom === 'number' && vp.insets.bottom > 0) {
+        return vp.insets.bottom;
+      }
+      try {
+        var cssInset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--trek-inset-bottom'));
+        if (cssInset > 0) return cssInset;
+      } catch (_) {}
+      return 0;
+    }
+
     function syncDockInset(ctx) {
-      /* Host kit already publishes --trek-inset-bottom. */
+      var dock = 0;
+      if (isPhoneLayout(ctx)) {
+        /* TREK's floating tab bar overlays the plugin iframe. Kit insets are
+           "space the host already keeps clear" and are often 0 here, so the
+           generate/commit buttons need a phone floor to scroll above the dock. */
+        dock = Math.max(readHostBottomInset(ctx), 120);
+      }
+      document.documentElement.style.setProperty('--ai-guide-dock', dock + 'px');
     }
 
     function applyLayoutMode(ctx) {
