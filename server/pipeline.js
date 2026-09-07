@@ -1030,6 +1030,7 @@ function publicDraft(job) {
     },
     warnings: draft.warnings || [],
     days: draft.days || [],
+    prepTips: Array.isArray(draft.prepTips) ? draft.prepTips : [],
     extractMeta: job.work?.extractMeta || null,
     ...(job.error ? { error: job.error } : {}),
   };

@@ -28,7 +28,7 @@ const {
   MAX_FROM_DESTINATION_KM,
   filterMarketingGuides,
 } = require('./pipeline');
-const { isMarketingGuide, commentTipsForPlace, extractCommentInsights } = require('./guide-quality');
+const { isMarketingGuide, commentTipsForPlace, extractCommentInsights, attachPreviewTips } = require('./guide-quality');
 const { loadTrekCategoryMap, buildTrekPlacePayload } = require('./trek-handoff');
 const { fetchPublicNote, fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const {
@@ -630,6 +630,7 @@ async function advance(job, ctx) {
   if (job.stage === 'gate') {
     const gated = gateAndSchedule(job.draft.intent, job.work.evidence, limits, locale, job.work.copy);
     job.draft.days = gated.days;
+    attachPreviewTips(job.draft);
     for (const warning of gated.warnings) addWarning(job, warning);
     if (!job.draft.days.some((day) => day.places.length)) {
       throw new Error(message(locale, '没有可发布的地点', 'No publishable places were found'));
