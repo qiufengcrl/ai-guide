@@ -32,7 +32,7 @@ test('redesign covers the complete planning and preview workflow', () => {
     'renderWarnings', 'renderSources', 'renderDays', 'syncDayState',
     'showStage', 'renderPrepTips', 'renderPlaceDetail', 'setActiveDay',
     'invokeErrorMessage', 'conflict', 'isTransientInvokeError', 'stillWorking',
-    'sourceSummary', 'sourcesEmpty',
+    'sourceSummary', 'sourcesEmpty', 'trek.session.set', 'restorePlanForm',
   ]) assert.ok(appScript.includes(hook), hook);
   assert.match(appScript, /if \(!xhsSearchAllowed\) checkbox\.checked = false/);
   assert.doesNotMatch(appScript, /checkbox\.checked = false;\s*checkbox\.disabled/);
@@ -90,4 +90,27 @@ test('theme, accessibility, and responsive host states are explicitly supported'
   assert.match(html, /color: inherit/);
   assert.match(appScript, /TREK UI kit is not loaded/);
   assert.match(html, /:focus-visible|\.trek-ui :focus-visible/);
+});
+
+test('AGENTS.md: design kit tokens, no hardcoded palette, trek.session for tab state', () => {
+  const markerAt = html.indexOf('<!-- trek:ui -->');
+  assert.ok(markerAt >= 0, 'missing trek:ui marker');
+  assert.ok(html.indexOf('<style') > markerAt, 'plugin CSS must come after trek:ui so kit tokens win');
+  assert.match(html, /<html lang="zh-CN">/);
+  assert.doesNotMatch(html, /<script[^>]+\bsrc=/i);
+  assert.doesNotMatch(html, /<link[^>]+\brel=["']?stylesheet/i);
+  assert.doesNotMatch(html, /googleapis|cdn\.jsdelivr|unpkg\.com|tailwindcss/i);
+  assert.doesNotMatch(html, /#111827|#2563eb|#64748b|#ffffff|#fffbeb|#f8fafc/);
+  assert.doesNotMatch(html, /var\(--bg-input,\s*#|var\(--text-primary,\s*#|var\(--trek-accent|var\(--trek-muted|--bg-muted/);
+  assert.doesNotMatch(html, /body\s*\{[^}]*background:\s*#fff/i);
+  assert.doesNotMatch(appScript, /localStorage|sessionStorage/);
+  assert.match(appScript, /trek\.session\.set\('planForm'/);
+  assert.match(appScript, /trek\.session\.get\('planForm'\)/);
+  assert.match(appScript, /scope:\s*'plugin'/);
+  assert.match(html, /class="[^"]*trek-label/);
+  assert.match(html, /class="[^"]*trek-stack/);
+  assert.match(html, /class="[^"]*trek-cluster/);
+  assert.match(html, /class="[^"]*trek-title/);
+  assert.match(html, /class="[^"]*trek-btn trek-btn--primary/);
+  assert.match(html, /<select class="trek-select"/);
 });
