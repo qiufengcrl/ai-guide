@@ -6,151 +6,35 @@
   <title>AI 攻略</title>
   <!-- trek:ui -->
   <style>
-    :root { --ai-guide-dock: 120px; }
-    html, body, body.trek-ui {
+    html, body {
       height: 100%;
       margin: 0;
-      /* Host --font-system may be just "Poppins"; that file is not in the iframe. */
-      font-family: var(--font-system), "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
-      color: var(--text-primary);
       background: transparent;
+      font-family: var(--font-system), system-ui, sans-serif;
     }
-    button, input, textarea, select { font-family: inherit; }
-    button { -webkit-tap-highlight-color: transparent; }
-    svg { display: block; }
-
     .hidden { display: none !important; }
     .icon-library { position: absolute; width: 0; height: 0; overflow: hidden; }
     .icon {
-      width: 18px; height: 18px; flex: none;
+      width: 16px; height: 16px; flex: none;
       fill: none; stroke: currentColor; stroke-width: 1.8;
       stroke-linecap: round; stroke-linejoin: round;
     }
-    .icon--sm { width: 15px; height: 15px; }
-    .icon--lg { width: 22px; height: 22px; }
+    svg { display: block; }
 
     .app-shell {
-      position: relative;
       height: 100%;
       min-height: 100%;
-      isolation: isolate;
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      color: var(--text-primary);
-      background: var(--bg-secondary);
+      padding-bottom: var(--trek-inset-bottom, 0px);
     }
-    .app-shell::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      z-index: -1;
-      pointer-events: none;
-      opacity: .22;
-      background-image:
-        linear-gradient(color-mix(in oklch, var(--border-faint) 70%, transparent) 1px, transparent 1px),
-        linear-gradient(90deg, color-mix(in oklch, var(--border-faint) 70%, transparent) 1px, transparent 1px);
-      background-size: 56px 56px;
-      mask-image: linear-gradient(to bottom, black, transparent 72%);
+    html[data-form-factor="phone"] .app-shell,
+    html.layout-phone .app-shell {
+      padding-bottom: var(--trek-inset-bottom, 0px);
     }
-
-    /* Studio chrome — always visible, no marketing hero. */
-    .studio-bar {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
-      gap: 12px;
-      align-items: center;
-      flex: none;
-      padding: 10px 12px;
-      border-bottom: 1px solid color-mix(in oklch, var(--border-primary) 78%, transparent);
-      background: color-mix(in oklch, var(--bg-card) 88%, transparent);
-    }
-    .studio-brand {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-    }
-    .studio-mark {
-      display: grid;
-      place-items: center;
-      width: 28px; height: 28px;
-      border-radius: 9px;
-      background: var(--accent);
-      color: var(--accent-text);
-    }
-    .studio-brand strong {
-      font-size: 14px;
-      font-weight: 650;
-      letter-spacing: -.03em;
-    }
-    .studio-brand span { display: none; }
-    .stage-tabs {
-      display: inline-flex;
-      justify-self: center;
-      padding: 3px;
-      border: 1px solid var(--border-primary);
-      border-radius: 999px;
-      background: var(--bg-tertiary);
-    }
-    .stage-tab {
-      appearance: none;
-      border: 0;
-      background: transparent;
-      color: var(--text-muted);
-      min-height: 32px;
-      padding: 0 14px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .stage-tab[aria-selected="true"] {
-      background: var(--bg-card);
-      color: var(--text-primary);
-      box-shadow: var(--shadow-sm);
-    }
-    .stage-tab:disabled { opacity: .42; cursor: not-allowed; }
-    .stage-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    .studio-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-    .studio-tools .trek-btn { min-height: 34px; padding-inline: 8px; }
-    .studio-tools .trek-btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-
-    .status-line {
-      display: none;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-      color: var(--text-muted);
-      font-size: 12px;
-    }
-    .status-dot {
-      width: 7px; height: 7px; flex: none; border-radius: 50%;
-      background: var(--text-faint);
-    }
-    .status-line[data-state="working"] .status-dot {
-      background: var(--info);
-      box-shadow: 0 0 0 4px var(--info-soft);
-      animation: status-pulse 1.6s ease-in-out infinite;
-    }
-    .status-line[data-state="success"] .status-dot { background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); }
-    .status-line[data-state="error"] { color: var(--danger); }
-    .status-line[data-state="error"] .status-dot { background: var(--danger); box-shadow: 0 0 0 4px var(--danger-soft); }
-    .progress {
-      position: relative;
-      height: 3px;
-      overflow: hidden;
-      background: var(--bg-tertiary);
-    }
-    .progress > i {
-      position: absolute;
-      inset-block: 0;
-      left: -38%;
-      width: 38%;
-      background: linear-gradient(90deg, transparent, var(--accent), transparent);
-      animation: progress-route 1.45s var(--trek-ease-quint, ease) infinite;
-    }
-
+    .toolbar { padding: 12px 16px; border-bottom: 1px solid var(--border-faint); }
+    .toolbar-grow { flex: 1; min-width: 0; }
     .stage-view {
       flex: 1;
       min-height: 0;
@@ -158,566 +42,70 @@
       display: flex;
       flex-direction: column;
     }
-    .stage-view.hidden { display: none !important; }
-
-    .page {
-      width: min(100%, 1180px);
-      margin: 0 auto;
-      padding: 12px;
+    .page { flex: 1; min-height: 0; padding: 16px; }
+    .field-grid { display: grid; gap: 12px; }
+    @media (min-width: 720px) {
+      .field-grid { grid-template-columns: 1fr 1fr; }
+      .field-grid--travel { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     }
-    .plan-view .page { overflow: auto; height: 100%; }
-
-    .planner-panel {
-      padding: 0;
+    .progress { height: 3px; background: var(--bg-secondary); overflow: hidden; }
+    .progress > i {
+      display: block; height: 100%; width: 40%;
+      background: var(--accent);
     }
-    .panel-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 16px 16px 12px;
-    }
-    .panel-header-main { flex: 1; min-width: 0; }
-    .panel-header-tools { display: flex; gap: 8px; }
-    .phone-title { display: block; font-size: 20px; margin: 0; letter-spacing: -.03em; }
-    .panel-kicker,
-    .panel-header .desktop-title,
-    .panel-header p,
-    .panel-header .trek-chip { display: none; }
-    .panel-kicker {
-      align-items: center;
-      gap: 8px;
-      color: var(--text-muted);
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: .12em;
-      text-transform: uppercase;
-    }
-    .panel-kicker .trek-title {
-      margin: 0;
-      font-size: inherit;
-      font-weight: inherit;
-      letter-spacing: inherit;
-      color: inherit;
-      text-transform: inherit;
-    }
-    .panel-kicker .number {
-      display: grid; place-items: center;
-      width: 24px; height: 24px; border-radius: 50%;
-      background: var(--accent); color: var(--accent-text); font-size: 10px; letter-spacing: 0;
-    }
-    .form-body { padding: 0 16px 18px; }
-    .form-section { padding: 16px 0; border-bottom: 1px solid var(--border-faint); }
-    .form-section:last-of-type { border-bottom: 0; }
-    .section-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-    .section-heading p { display: none; }
-    .section-icon {
-      display: grid; place-items: center; flex: none;
-      width: 32px; height: 32px; border-radius: 10px;
-      background: var(--accent-subtle); color: var(--accent);
-    }
-    .section-heading h3 { margin: 0; font-size: 14px; font-weight: 600; }
-    .field-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
-    .field-grid--travel { grid-template-columns: minmax(0, 1fr); }
-    .field { display: grid; gap: 8px; width: 100%; min-width: 0; }
-    .field-label {
-      display: flex; align-items: center; justify-content: space-between; gap: 8px;
-      margin-bottom: 0;
-      color: var(--text-secondary); font-size: 12px; font-weight: 600;
-    }
-    .field-label-main { display: inline-flex; align-items: center; gap: 0; }
-    .field-label-main .icon { display: none; }
-    .optional {
-      color: var(--text-faint);
-      font-size: 10px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase;
-    }
-    .app-shell .trek-input,
-    .app-shell .trek-textarea,
-    .app-shell .trek-select-trigger { min-height: 44px; }
-    .trek-textarea { line-height: 1.65; resize: vertical; }
-    .source-fields { display: grid; gap: 12px; }
-    .source-field {
-      display: grid; width: 100%; min-width: 0;
-      padding: 14px;
-      border: 1px solid var(--border-primary);
-      border-radius: 16px;
-      background: color-mix(in oklch, var(--bg-input) 88%, transparent);
-    }
-    .source-field:focus-within {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 10%, transparent);
-    }
-    .source-field .trek-textarea {
-      display: block; width: 100%; min-width: 0; max-width: 100%;
-      min-height: 74px; padding: 10px 0 0; border: 0; border-radius: 0;
-      background: transparent; box-shadow: none;
-    }
-    .source-field--note .trek-textarea { min-height: 110px; }
-    .toggle-row {
-      display: grid; grid-template-columns: auto minmax(0, 1fr);
-      gap: 12px; align-items: start; cursor: pointer;
-    }
-    .toggle-row input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent); }
-    .toggle-copy { display: grid; gap: 4px; }
-    .toggle-copy strong { font-size: 14px; }
-    .toggle-copy span { color: var(--text-muted); font-size: 12px; line-height: 1.45; }
-    .submit-zone { display: grid; gap: 12px; padding-top: 8px; }
-    .generate-btn { width: 100%; min-height: 48px; border-radius: 14px; font-weight: 600; }
-    .button-arrow { display: grid; place-items: center; margin-left: 4px; }
-    .status-area { min-width: 0; }
-    .plan-view .status-line { display: flex; min-height: 20px; }
-
-    .cookie-hint-row {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 10px;
-      margin-top: 10px;
-      padding: 12px 14px;
-      border: 1px dashed color-mix(in oklch, var(--info) 28%, var(--border-primary));
-      border-radius: 14px;
-      background: color-mix(in oklch, var(--info-soft, var(--accent-subtle)) 40%, var(--bg-card));
-    }
-    .cookie-hint-row p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
-    .cookie-hint-row strong { display: block; margin-bottom: 2px; font-size: 12px; }
-
-    /* Preview board — only the active pane scrolls. */
     .preview-board {
-      flex: 1;
-      min-height: 0;
-      display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr);
-      padding: 0;
+      flex: 1; min-height: 0;
+      display: flex; flex-direction: column; gap: 12px;
+      padding: 12px 16px 16px;
     }
-    .warning-panel {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
-      gap: 10px;
-      align-items: start;
-      margin: 8px 12px 0;
-      padding: 12px 14px;
-      border-color: color-mix(in oklch, var(--warning) 25%, var(--border-primary));
-      background: color-mix(in oklch, var(--warning-soft) 64%, var(--bg-card));
-      border-radius: 14px;
-    }
-    .warning-icon {
-      display: grid; place-items: center;
-      width: 28px; height: 28px; border-radius: 9px;
-      background: var(--warning-soft); color: var(--warning);
-    }
-    .warning-copy strong { font-size: 12px; }
-    .warning-list {
-      display: grid; gap: 4px; margin: 4px 0 0; padding: 0;
-      color: var(--text-secondary); font-size: 11px; line-height: 1.5; list-style: none;
-    }
-    .warning-list li::before { content: "—"; margin-right: 6px; color: var(--warning); }
-    .warning-count { color: var(--warning); }
-
-    .day-rail {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      padding: 10px 12px;
-      scrollbar-width: thin;
-    }
-    .day-chip {
-      appearance: none;
-      flex: none;
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 8px;
-      align-items: center;
-      min-width: 148px;
-      padding: 8px 10px;
-      border: 1px solid var(--border-primary);
-      border-radius: 14px;
-      background: var(--bg-card);
-      color: inherit;
-      text-align: left;
-      cursor: pointer;
-    }
-    .day-chip[aria-selected="true"] {
-      border-color: var(--accent);
-      background: var(--accent-subtle);
-    }
-    .day-chip .choice { pointer-events: auto; }
-    .day-chip-copy strong { display: block; font-size: 12px; }
-    .day-chip-copy span { color: var(--text-muted); font-size: 10px; }
-
     .board-split {
-      min-height: 0;
+      flex: 1; min-height: 0;
       display: grid;
-      grid-template-rows: minmax(0, 1fr) auto;
-      gap: 0;
+      grid-template-rows: minmax(0, 1fr) minmax(160px, 40%);
+      gap: 12px;
     }
-    .days-list { min-height: 0; overflow: auto; padding: 0 12px 12px; }
-    .day-card { display: none; padding: 0; overflow: hidden; border-radius: 18px; }
+    @media (min-width: 900px) {
+      .board-split {
+        grid-template-columns: minmax(0, 1fr) 320px;
+        grid-template-rows: minmax(0, 1fr);
+      }
+    }
+    .days-wrap { min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+    .day-rail { display: flex; gap: 8px; overflow-x: auto; }
+    .days-list { flex: 1; min-height: 0; }
+    .day-card { display: none; }
     .day-card.is-active { display: block; }
-    .day-card.is-off { opacity: .62; }
-    .day-header { display: none; }
-    .place-list { padding: 4px 8px 8px; }
-    .place-row {
-      display: grid;
-      grid-template-columns: auto 28px 44px minmax(0, 1fr);
-      grid-template-areas:
-        "check marker photo copy"
-        ". . . meta";
-      gap: 10px;
-      align-items: center;
-      min-height: 64px;
-      padding: 10px 8px;
-      cursor: pointer;
-      border-bottom: 1px solid var(--border-faint);
-      border-radius: 12px;
-    }
-    .place-row.is-active {
-      background: color-mix(in oklch, var(--accent) 8%, var(--bg-card));
-    }
-    .place-check { grid-area: check; }
-    .place-marker {
-      grid-area: marker;
-      display: grid; place-items: center;
-      width: 28px; height: 28px;
-      border: 1px solid var(--border-primary);
-      border-radius: 50%;
-      background: var(--bg-card);
-      color: var(--text-muted);
-      font-size: 9px; font-weight: 700;
-    }
-    .place-row:has(.place-check:checked) .place-marker {
-      border-color: color-mix(in oklch, var(--accent) 35%, var(--border-primary));
-      background: var(--accent-subtle); color: var(--accent);
-    }
+    .day-header { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .inspector { min-height: 0; display: flex; flex-direction: column; }
+    .inspector-body { flex: 1; min-height: 0; padding: 12px; }
     .place-photo {
-      grid-area: photo;
-      width: 44px; height: 44px; border-radius: 12px;
-      object-fit: cover; background: var(--bg-secondary);
+      width: 40px; height: 40px; flex: none;
+      border-radius: var(--radius-md);
+      object-fit: cover;
+      background: var(--bg-secondary);
       border: 1px solid var(--border-faint);
     }
-    .place-photo--empty {
-      display: block;
-      background: linear-gradient(145deg, var(--bg-secondary), color-mix(in oklch, var(--accent) 8%, var(--bg-secondary)));
-    }
-    .place-copy { grid-area: copy; min-width: 0; }
-    .place-copy strong { display: block; font-size: 13px; font-weight: 600; }
-    .place-copy small {
-      display: -webkit-box;
-      margin-top: 3px; overflow: hidden;
-      color: var(--text-muted); font-size: 11px; line-height: 1.4;
-      -webkit-box-orient: vertical; -webkit-line-clamp: 1;
-    }
-    .place-meta {
-      grid-area: meta;
-      display: flex; flex-wrap: wrap; gap: 6px;
-      justify-content: flex-start;
-    }
-    .time-chip {
-      display: inline-flex; align-items: center; gap: 4px;
-      color: var(--text-faint); font-size: 10px;
-    }
-    .empty-day { padding: 28px 12px; color: var(--text-faint); font-size: 12px; }
-
-    .choice {
-      appearance: none;
-      display: inline-grid; place-content: center;
-      width: 20px; height: 20px; margin: 0; flex: none;
-      border: 1.5px solid var(--border-primary);
-      border-radius: 7px; background: var(--bg-input); cursor: pointer;
-    }
-    .choice::before {
-      content: "";
-      width: 9px; height: 5px;
-      border: solid var(--accent-text);
-      border-width: 0 0 2px 2px;
-      opacity: 0;
-      transform: rotate(-45deg) translateY(-1px) scale(.6);
-    }
-    .choice:checked, .choice:indeterminate { border-color: var(--accent); background: var(--accent); }
-    .choice:checked::before { opacity: 1; transform: rotate(-45deg) translateY(-1px) scale(1); }
-    .choice:indeterminate::before {
-      width: 9px; height: 0; border-width: 0 0 2px; opacity: 1; transform: none;
-    }
-    .choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-
-    .inspector {
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-      border-top: 1px solid var(--border-primary);
-      background: color-mix(in oklch, var(--bg-card) 92%, transparent);
-    }
-    .inspector-tabs {
-      display: flex;
-      gap: 0;
-      overflow-x: auto;
-      border-bottom: 1px solid var(--border-faint);
-    }
-    .inspector-tab {
-      appearance: none;
-      flex: none;
-      border: 0;
-      background: transparent;
-      color: var(--text-muted);
-      min-height: 40px;
-      padding: 0 14px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-    }
-    .inspector-tab[aria-selected="true"] {
-      color: var(--text-primary);
-      border-bottom-color: var(--accent);
-    }
-    .inspector-body {
-      min-height: 140px;
-      max-height: 32vh;
-      overflow: auto;
-      padding: 14px 16px 18px;
-    }
-    .inspector-pane.hidden { display: none !important; }
-    .place-detail-title { margin: 0 0 6px; font-size: 16px; letter-spacing: -.02em; }
-    .place-detail-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-    .detail-block { margin: 0 0 12px; }
-    .detail-block h4 {
-      margin: 0 0 6px;
-      color: var(--text-muted);
-      font-size: 10px;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-    }
-    .detail-block p, .detail-block li {
-      margin: 0;
-      color: var(--text-secondary);
-      font-size: 13px;
-      line-height: 1.55;
-    }
-    .prep-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-    .prep-item {
-      padding: 10px 12px;
-      border-radius: 12px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-faint);
-    }
-    .prep-item .prep-cat {
-      display: inline-flex;
-      margin-bottom: 4px;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: .06em;
-      text-transform: uppercase;
-      color: var(--accent);
-    }
-    .source-list { display: grid; gap: 6px; }
-    .source-item {
-      display: grid;
-      grid-template-columns: 32px minmax(0, 1fr) auto;
-      gap: 10px;
-      align-items: center;
-      width: 100%;
-      padding: 8px;
-      border: 0;
-      border-radius: 12px;
-      background: transparent;
-      color: inherit;
-      text-align: left;
-    }
-    button.source-item { cursor: pointer; }
-    button.source-item:hover { background: var(--bg-hover); }
-    .source-item-icon {
-      display: grid; place-items: center;
-      width: 32px; height: 32px; border-radius: 10px;
-      background: var(--accent-subtle); color: var(--accent);
-    }
-    .source-item-copy strong {
-      display: block; overflow: hidden; font-size: 12px;
-      text-overflow: ellipsis; white-space: nowrap;
-    }
-    .source-item-copy span {
-      display: block; overflow: hidden; color: var(--text-faint); font-size: 10px;
-      text-overflow: ellipsis; white-space: nowrap;
-    }
-    .source-empty span { display: block; margin-top: 6px; color: var(--text-faint); font-size: 12px; line-height: 1.5; }
-    .commit-card { display: grid; gap: 12px; }
-    .selection-number { display: flex; align-items: baseline; gap: 6px; }
-    .selection-number strong { font-size: 32px; letter-spacing: -.04em; }
-    .selection-number span { color: var(--text-muted); font-size: 11px; }
-    .commit-button { width: 100%; min-height: 46px; border-radius: 14px; font-weight: 600; }
-    .commit-hint { display: flex; gap: 6px; margin: 0; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
-
+    .place-row.is-active { background: var(--accent-subtle); }
     .help-overlay {
-      position: fixed;
-      inset: 0;
-      z-index: 40;
-      display: grid;
-      place-items: end center;
-      background: color-mix(in oklch, var(--text-primary) 42%, transparent);
+      position: fixed; inset: 0; z-index: 40;
+      display: grid; place-items: center;
+      background: color-mix(in oklch, var(--text-primary) 40%, transparent);
     }
     .help-sheet {
-      width: min(100%, 560px);
+      width: min(calc(100% - 32px), 520px);
       max-height: 86vh;
       overflow: auto;
-      padding: 20px 18px 24px;
-      border-radius: 20px 20px 0 0;
-      background: var(--bg-card);
-      color: var(--text-primary);
     }
-    .help-sheet h2 { margin: 0 0 8px; font-size: 20px; letter-spacing: -.03em; }
-    .help-sheet .lead { margin: 0 0 16px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
-    .help-step { margin: 0 0 14px; padding: 12px 14px; border-radius: 14px; background: var(--bg-tertiary); }
-    .help-step strong { display: block; margin-bottom: 4px; font-size: 13px; }
-    .help-step p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
     .help-code {
       display: block;
       margin-top: 8px;
       padding: 8px 10px;
-      border-radius: 8px;
+      border-radius: var(--radius-sm);
       background: var(--bg-secondary);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 11px;
+      color: var(--text-secondary);
       word-break: break-all;
     }
-    .help-close { width: 100%; margin-top: 8px; min-height: 44px; }
-
-    @keyframes progress-route { from { transform: translateX(0); } to { transform: translateX(365%); } }
-    @keyframes status-pulse { 50% { transform: scale(.72); opacity: .62; } }
-
-    [data-no-transparency] .app-shell { background: var(--bg-secondary); }
-    [data-density="compact"] .form-section { padding-block: 12px; }
-    [data-density="compact"] .place-row { min-height: 54px; }
-
-    /* desktop only at 1180px — board layout, not a long marketing page */
-    @media (min-width: 1180px) {
-      .studio-tools .trek-btn span { position: static; width: auto; height: auto; clip: auto; overflow: visible; }
-      .studio-tools .trek-btn { min-height: 34px; padding-inline: 10px; }
-      .studio-brand span {
-        display: block;
-        color: var(--text-muted);
-        font-size: 11px;
-      }
-      .studio-tools .status-line { display: flex; max-width: 280px; }
-      .page { padding: 22px 28px 28px; width: min(100%, 1120px); }
-      .plan-view .page { padding-bottom: 36px; }
-      .phone-title, .panel-settings-btn { display: none; }
-      .panel-kicker, .panel-header .desktop-title, .panel-header p, .panel-header .trek-chip, .section-heading p { display: block; }
-      .panel-kicker { display: flex; }
-      .panel-header { padding: 24px 28px 18px; }
-      .panel-header h2 { margin: 8px 0 0; font-size: 26px; letter-spacing: -.035em; }
-      .panel-header p { max-width: 520px; margin: 6px 0 0; color: var(--text-muted); font-size: 13px; }
-      .form-body { padding: 0 28px 28px; }
-      .form-section { padding: 22px 0; }
-      .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .field-grid--travel { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-      .field-grid--travel .date-field { grid-column: span 2; }
-      .field-grid--travel .small-field { grid-column: span 1; }
-      .field-label-main { gap: 7px; }
-      .field-label-main .icon { display: block; }
-      .submit-zone { grid-template-columns: minmax(220px, auto) 1fr; align-items: center; }
-      .generate-btn { width: auto; }
-      .preview-board {
-        grid-template-rows: auto minmax(0, 1fr);
-        padding: 0 18px 18px;
-        height: 100%;
-      }
-      .board-split {
-        grid-template-columns: minmax(0, 1.15fr) 340px;
-        grid-template-rows: minmax(0, 1fr);
-        min-height: 0;
-        border: 1px solid var(--border-primary);
-        border-radius: 20px;
-        overflow: hidden;
-        background: var(--bg-card);
-      }
-      .day-rail {
-        flex-direction: column;
-        overflow: auto;
-        width: 168px;
-        padding: 12px 10px;
-        border-right: 1px solid var(--border-faint);
-      }
-      .days-wrap {
-        display: grid;
-        grid-template-columns: 168px minmax(0, 1fr);
-        min-height: 0;
-      }
-      .day-chip { min-width: 0; width: 100%; cursor: pointer; }
-      .days-list { padding: 8px 10px 12px; }
-      .place-row {
-        grid-template-columns: auto 30px 52px minmax(0, 1fr) auto;
-        grid-template-areas: none;
-      }
-      .place-check, .place-marker, .place-photo, .place-copy, .place-meta { grid-area: auto; }
-      .place-marker { width: 30px; height: 30px; }
-      .place-photo { width: 52px; height: 52px; }
-      .place-meta { justify-content: flex-end; max-width: 180px; }
-      .inspector {
-        border-top: 0;
-        border-left: 1px solid var(--border-primary);
-      }
-      .inspector-body { max-height: none; height: 100%; }
-      .help-overlay { place-items: center; }
-      .help-sheet { border-radius: 20px; max-height: 80vh; }
-    }
-
-    html[data-form-factor="phone"] .app-shell,
-    html.layout-phone .app-shell {
-      padding-bottom: calc(var(--ai-guide-dock, 120px) + env(safe-area-inset-bottom, 0px));
-    }
-    html[data-form-factor="phone"] .source-field .trek-textarea,
-    html.layout-phone .source-field .trek-textarea { font-size: 16px; }
-    html[data-form-factor="phone"] .trek-input,
-    html.layout-phone .trek-input,
-    html[data-form-factor="phone"] .trek-textarea,
-    html.layout-phone .trek-textarea,
-    html[data-form-factor="phone"] .trek-select-trigger,
-    html.layout-phone .trek-select-trigger { font-size: 16px; }
-    html[data-form-factor="phone"] .choice,
-    html.layout-phone .choice { width: 22px; height: 22px; }
-
-    [data-reduce-motion] .progress > i,
-    [data-reduce-motion] .status-dot { animation: none !important; }
-    @media (prefers-reduced-motion: reduce) {
-      .progress > i, .status-dot { animation: none !important; }
-    }
-  </style>
-  <style id="ai-guide-overrides">
-    .planner-panel.trek-glass { padding: 0; }
-    .source-field { display: grid; width: 100%; min-width: 0; }
-    .source-field .trek-textarea {
-      display: block; width: 100%; min-width: 0; max-width: 100%;
-    }
-    .app-shell .trek-input,
-    .app-shell .trek-textarea {
-      display: block; width: 100%; max-width: 100%; min-width: 0; min-height: 44px;
-    }
-    .app-shell input:not([type="date"]).trek-input,
-    .app-shell .trek-textarea {
-      appearance: none; -webkit-appearance: none;
-    }
-    .app-shell input[type="date"].trek-input {
-      appearance: none;
-      background: var(--bg-input);
-      color: var(--text-primary);
-      line-height: 1.4;
-      min-height: 44px;
-    }
-    .app-shell input[type="date"].trek-input::-webkit-date-and-time-value,
-    .app-shell input[type="date"].trek-input::-webkit-datetime-edit {
-      color: inherit;
-      text-align: left;
-      min-height: 1.25em;
-    }
-    .app-shell .trek-select-trigger {
-      display: flex; width: 100%; max-width: 100%; min-width: 0; min-height: 44px;
-    }
-    /* Kit hides the real <select>. Do not un-hide it with display/width/min-height. */
-    .app-shell select.trek-select-native-hidden {
-      display: revert;
-      width: 1px;
-      max-width: none;
-      min-width: 0;
-      min-height: 0;
-    }
+    input[type="date"].trek-input { color: inherit; }
   </style>
 </head>
 <body class="trek-ui">
@@ -742,187 +130,149 @@
   </svg>
 
   <div class="app-shell" id="app-shell" data-stage="plan">
-    <header class="studio-bar">
-      <div class="studio-brand">
-        <span class="studio-mark"><svg class="icon icon--sm" aria-hidden="true"><use href="#icon-sparkles"></use></svg></span>
-        <div>
-          <strong data-i18n="title">AI Guide</strong>
-          <span data-i18n="eyebrow">Notes to mapped itinerary</span>
-        </div>
+    <header class="toolbar trek-cluster">
+      <div class="toolbar-grow">
+        <div class="trek-title" data-i18n="title">AI Guide</div>
+        <div class="trek-faint" data-i18n="eyebrow">Notes to mapped itinerary</div>
       </div>
-      <nav class="stage-tabs" role="tablist" data-i18n-aria-label="workspaceTabs">
-        <button type="button" class="stage-tab" id="stage-plan" role="tab" aria-selected="true" data-i18n="stagePlan">Plan</button>
-        <button type="button" class="stage-tab" id="stage-preview" role="tab" aria-selected="false" disabled data-i18n="stagePreview">Itinerary</button>
+      <nav class="trek-segmented" role="tablist" data-i18n-aria-label="workspaceTabs">
+        <button type="button" id="stage-plan" role="tab" aria-selected="true" aria-pressed="true" data-i18n="stagePlan">Plan</button>
+        <button type="button" id="stage-preview" role="tab" aria-selected="false" aria-pressed="false" disabled data-i18n="stagePreview">Itinerary</button>
       </nav>
-      <div class="studio-tools trek-cluster">
-        <div class="status-line" id="status-line" data-state="idle" role="status" aria-live="polite"><i class="status-dot"></i><span id="status" data-i18n="idleStatus">Ready when you are</span></div>
-        <button class="trek-btn trek-btn--secondary" id="open-cookie-help" type="button">
-          <svg class="icon icon--sm" aria-hidden="true"><use href="#icon-help"></use></svg>
-          <span data-i18n="cookieHelp">Cookie help</span>
-        </button>
-        <button class="trek-btn trek-btn--secondary" id="open-settings" type="button">
-          <svg class="icon icon--sm" aria-hidden="true"><use href="#icon-settings"></use></svg>
-          <span data-i18n="settings">Plugin settings</span>
-        </button>
+      <div class="trek-cluster">
+        <div class="trek-cluster" id="status-line" data-state="idle" role="status" aria-live="polite">
+          <i class="trek-statusdot" data-status="info"></i>
+          <span class="trek-muted" id="status" data-i18n="idleStatus">Ready when you are</span>
+        </div>
+        <button class="trek-btn trek-btn--ghost" id="open-cookie-help" type="button" data-i18n="cookieHelp">Cookie help</button>
+        <button class="trek-btn trek-btn--secondary" id="open-settings" type="button" data-i18n="settings">Plugin settings</button>
       </div>
     </header>
     <div class="progress hidden" id="progress" role="progressbar" data-i18n-aria-label="working"><i></i></div>
 
     <section class="stage-view plan-view" id="plan-stage" role="tabpanel">
       <main class="page trek-scroll trek-page-enter">
-        <form id="plan-form" class="trek-glass planner-panel" aria-labelledby="planner-title">
-          <header class="panel-header">
-            <div class="panel-header-main">
-              <div class="panel-kicker"><span class="number">01</span><span class="trek-title" data-i18n="plannerKicker">Build your route</span></div>
-              <h2 class="phone-title" data-i18n="title">AI Guide</h2>
-              <h2 class="desktop-title" id="planner-title" data-i18n="plannerTitle">Start with the shape of your trip</h2>
-              <p data-i18n="plannerSubtitle">Add only what you know. AI Guide will resolve real places and leave every choice editable.</p>
-            </div>
-            <div class="panel-header-tools trek-cluster">
-              <span class="trek-chip trek-chip--accent"><svg class="icon icon--sm" aria-hidden="true"><use href="#icon-sparkles"></use></svg><span data-i18n="aiAssisted">AI assisted</span></span>
-              <button class="trek-btn trek-btn--secondary panel-settings-btn" id="open-settings-mobile" type="button">
-                <svg class="icon icon--sm" aria-hidden="true"><use href="#icon-settings"></use></svg>
-                <span data-i18n="settings">Plugin settings</span>
-              </button>
-            </div>
-          </header>
+        <form id="plan-form" class="trek-glass trek-stack" aria-labelledby="planner-title">
+          <div class="trek-cluster">
+            <div class="trek-title" data-i18n="plannerKicker">Build your route</div>
+            <span class="trek-chip trek-chip--accent" data-i18n="aiAssisted">AI assisted</span>
+          </div>
+          <h2 id="planner-title" data-i18n="plannerTitle">Start with the shape of your trip</h2>
+          <p class="trek-muted" data-i18n="plannerSubtitle">Add only what you know. AI Guide will resolve real places and leave every choice editable.</p>
 
-          <div class="form-body">
-            <section class="form-section">
-              <div class="section-heading">
-                <span class="section-icon"><svg class="icon"><use href="#icon-compass"></use></svg></span>
-                <div><h3 data-i18n="inspirationTitle">Destination & interests</h3><p data-i18n="inspirationHint">A city is enough; interests help refine the route.</p></div>
-              </div>
-              <div class="field-grid">
-                <label class="field">
-                  <span class="field-label trek-label"><span class="field-label-main"><svg class="icon icon--sm"><use href="#icon-pin"></use></svg><span data-i18n="destination">Destination</span></span></span>
-                  <input class="trek-input" id="destination" autocomplete="off" data-i18n-placeholder="destinationPlaceholder" placeholder="Kyoto" />
-                </label>
-                <label class="field">
-                  <span class="field-label trek-label"><span class="field-label-main"><svg class="icon icon--sm"><use href="#icon-sparkles"></use></svg><span data-i18n="interests">Interests</span></span><span class="optional" data-i18n="optional">Optional</span></span>
-                  <input class="trek-input" id="interests" autocomplete="off" data-i18n-placeholder="interestsPlaceholder" placeholder="Temples, coffee, quiet streets" />
-                </label>
-                <label class="field">
-                  <span class="field-label trek-label"><span class="field-label-main"><svg class="icon icon--sm"><use href="#icon-pin"></use></svg><span data-i18n="mustSee">Must-see places</span></span><span class="optional" data-i18n="optional">Optional</span></span>
-                  <input class="trek-input" id="must-see" autocomplete="off" data-i18n-placeholder="mustSeePlaceholder" placeholder="One per line or comma-separated" />
-                </label>
-              </div>
-            </section>
+          <div class="trek-title" data-i18n="inspirationTitle">Destination & interests</div>
+          <p class="trek-faint" data-i18n="inspirationHint">A city is enough; interests help refine the route.</p>
+          <div class="field-grid">
+            <label>
+              <span class="trek-label" data-i18n="destination">Destination</span>
+              <input class="trek-input" id="destination" autocomplete="off" data-i18n-placeholder="destinationPlaceholder" placeholder="Kyoto" />
+            </label>
+            <label>
+              <span class="trek-label"><span data-i18n="interests">Interests</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
+              <input class="trek-input" id="interests" autocomplete="off" data-i18n-placeholder="interestsPlaceholder" placeholder="Temples, coffee, quiet streets" />
+            </label>
+            <label>
+              <span class="trek-label"><span data-i18n="mustSee">Must-see places</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
+              <input class="trek-input" id="must-see" autocomplete="off" data-i18n-placeholder="mustSeePlaceholder" placeholder="One per line or comma-separated" />
+            </label>
+          </div>
 
-            <section class="form-section">
-              <div class="section-heading">
-                <span class="section-icon"><svg class="icon"><use href="#icon-calendar"></use></svg></span>
-                <div><h3 data-i18n="timingTitle">Timing & pace</h3><p data-i18n="timingHint">Dates are optional; choose a pace that feels like you.</p></div>
-              </div>
-              <div class="field-grid field-grid--travel">
-                <label class="field date-field">
-                  <span class="field-label trek-label"><span data-i18n="startDate">Start date</span><span class="optional" data-i18n="optional">Optional</span></span>
-                  <input class="trek-input" id="start-date" type="date" />
-                </label>
-                <label class="field date-field">
-                  <span class="field-label trek-label"><span data-i18n="endDate">End date</span><span class="optional" data-i18n="optional">Optional</span></span>
-                  <input class="trek-input" id="end-date" type="date" />
-                </label>
-                <label class="field small-field">
-                  <span class="field-label trek-label"><span data-i18n="days">Days</span></span>
-                  <input class="trek-input" id="day-count" type="number" min="1" max="14" value="5" inputmode="numeric" />
-                </label>
-                <label class="field small-field">
-                  <span class="field-label trek-label"><span data-i18n="pace">Pace</span></span>
-                  <select id="pace"><option value="relaxed" data-i18n="relaxed">Relaxed</option><option value="balanced" data-i18n="balanced">Balanced</option><option value="packed" data-i18n="packed">Packed</option></select>
-                </label>
-              </div>
-            </section>
+          <div class="trek-title" data-i18n="timingTitle">Timing & pace</div>
+          <p class="trek-faint" data-i18n="timingHint">Dates are optional; choose a pace that feels like you.</p>
+          <div class="field-grid field-grid--travel">
+            <label>
+              <span class="trek-label"><span data-i18n="startDate">Start date</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
+              <input class="trek-input" id="start-date" type="date" />
+            </label>
+            <label>
+              <span class="trek-label"><span data-i18n="endDate">End date</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
+              <input class="trek-input" id="end-date" type="date" />
+            </label>
+            <label>
+              <span class="trek-label" data-i18n="days">Days</span>
+              <input class="trek-input" id="day-count" type="number" min="1" max="14" value="5" inputmode="numeric" />
+            </label>
+            <label>
+              <span class="trek-label" data-i18n="pace">Pace</span>
+              <select id="pace"><option value="relaxed" data-i18n="relaxed">Relaxed</option><option value="balanced" data-i18n="balanced">Balanced</option><option value="packed" data-i18n="packed">Packed</option></select>
+            </label>
+          </div>
 
-            <section class="form-section">
-              <div class="section-heading">
-                <span class="section-icon"><svg class="icon"><use href="#icon-file"></use></svg></span>
-                <div><h3 data-i18n="sourcesTitle">Bring your inspiration</h3><p data-i18n="sourcesHint">Use links, pasted notes, or both. Every source stays traceable.</p></div>
-              </div>
-              <div class="source-fields trek-stack">
-                <div class="source-field">
-                  <label class="field-label trek-label" for="urls"><span class="field-label-main"><svg class="icon icon--sm"><use href="#icon-link"></use></svg><span data-i18n="urls">Xiaohongshu links</span></span><span class="optional" data-i18n="optional">Optional</span></label>
-                  <textarea class="trek-textarea" id="urls" rows="3" spellcheck="false" data-i18n-placeholder="urlsPlaceholder" placeholder="Paste one or more links, separated by a space"></textarea>
-                </div>
-                <div class="source-field source-field--note">
-                  <label class="field-label trek-label" for="source-text"><span class="field-label-main"><svg class="icon icon--sm"><use href="#icon-file"></use></svg><span data-i18n="paste">Pasted note text</span></span><span class="optional" data-i18n="optional">Optional</span></label>
-                  <textarea class="trek-textarea" id="source-text" rows="6" data-i18n-placeholder="pastePlaceholder" placeholder="Paste the useful parts of a travel note here…"></textarea>
-                </div>
-                <div class="source-field source-field--toggle hidden" id="xhs-search-field">
-                  <label class="toggle-row" for="xhs-keyword-search">
-                    <input type="checkbox" id="xhs-keyword-search" />
-                    <span class="toggle-copy">
-                      <strong data-i18n="xhsKeywordSearch">Search guides via Xiaohongshu</strong>
-                      <span data-i18n="xhsKeywordSearchHint">When checked, search by destination keyword and merge with links or pasted text. Requires your Cookie in plugin settings.</span>
-                    </span>
-                  </label>
-                </div>
-                <div class="cookie-hint-row">
-                  <p><strong data-i18n="cookieHintTitle">Linux / TREK server?</strong><span data-i18n="cookieHint">Your private Cookie stays on the plugin server. Do not log in on the server itself.</span></p>
-                  <button class="trek-btn trek-btn--secondary" id="open-cookie-help-form" type="button" data-i18n="cookieHelpOpen">How to copy</button>
-                </div>
-              </div>
-            </section>
-
-            <div class="submit-zone">
-              <button class="trek-btn trek-btn--primary generate-btn" type="submit" id="generate">
-                <svg class="icon" aria-hidden="true"><use href="#icon-wand"></use></svg>
-                <span data-i18n="generate">Generate preview</span>
-                <span class="button-arrow"><svg class="icon icon--sm" aria-hidden="true"><use href="#icon-arrow"></use></svg></span>
-              </button>
-              <div class="status-area">
-                <div class="status-line" data-state="idle"><i class="status-dot"></i><span data-i18n="idleStatus">Ready when you are</span></div>
-              </div>
+          <div class="trek-title" data-i18n="sourcesTitle">Bring your inspiration</div>
+          <p class="trek-faint" data-i18n="sourcesHint">Use links, pasted notes, or both. Every source stays traceable.</p>
+          <div class="trek-stack">
+            <label>
+              <span class="trek-label"><span data-i18n="urls">Xiaohongshu links</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
+              <textarea class="trek-textarea" id="urls" rows="3" spellcheck="false" data-i18n-placeholder="urlsPlaceholder" placeholder="Paste one or more links, separated by a space"></textarea>
+            </label>
+            <label>
+              <span class="trek-label"><span data-i18n="paste">Pasted note text</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
+              <textarea class="trek-textarea" id="source-text" rows="6" data-i18n-placeholder="pastePlaceholder" placeholder="Paste the useful parts of a travel note here…"></textarea>
+            </label>
+            <label class="trek-row hidden" id="xhs-search-field" for="xhs-keyword-search">
+              <input type="checkbox" id="xhs-keyword-search" />
+              <span class="trek-stack">
+                <strong data-i18n="xhsKeywordSearch">Search guides via Xiaohongshu</strong>
+                <span class="trek-faint" data-i18n="xhsKeywordSearchHint">When checked, search by destination keyword and merge with links or pasted text. Requires your Cookie in plugin settings.</span>
+              </span>
+            </label>
+            <div class="trek-card trek-cluster">
+              <p class="trek-muted"><strong data-i18n="cookieHintTitle">Linux / TREK server?</strong> <span data-i18n="cookieHint">Your private Cookie stays on the plugin server. Do not log in on the server itself.</span></p>
+              <button class="trek-btn trek-btn--secondary" id="open-cookie-help-form" type="button" data-i18n="cookieHelpOpen">How to copy</button>
             </div>
           </div>
+
+          <button class="trek-btn trek-btn--primary" type="submit" id="generate">
+            <span data-i18n="generate">Generate preview</span>
+          </button>
         </form>
       </main>
     </section>
 
     <section class="stage-view preview-view hidden" id="preview" role="tabpanel" aria-labelledby="preview-title">
       <div class="preview-board">
-        <section id="warnings" class="trek-card warning-panel hidden" role="alert">
-          <span class="warning-icon"><svg class="icon"><use href="#icon-alert"></use></svg></span>
-          <div class="warning-copy"><strong data-i18n="warnings">A few things to review</strong><ul class="warning-list" id="warning-list"></ul></div>
-          <span class="trek-chip trek-chip--warning warning-count" id="warning-count">0</span>
+        <section id="warnings" class="trek-card hidden" role="alert">
+          <strong data-i18n="warnings">A few things to review</strong>
+          <span class="trek-chip trek-chip--warning" id="warning-count">0</span>
+          <ul id="warning-list" class="trek-stack"></ul>
         </section>
 
         <div class="board-split">
           <div class="days-wrap">
-            <nav class="day-rail" id="day-rail" role="tablist" aria-label="Days" data-i18n-aria-label="dayRail"></nav>
+            <nav class="day-rail trek-cluster" id="day-rail" role="tablist" aria-label="Days" data-i18n-aria-label="dayRail"></nav>
             <div id="days" class="days-list trek-scroll trek-stagger"></div>
           </div>
-          <aside class="inspector" id="inspector">
-            <div class="inspector-tabs" role="tablist">
-              <button type="button" class="inspector-tab" id="tab-place" role="tab" data-pane="place" aria-selected="true" data-i18n="inspectorPlace">Place</button>
-              <button type="button" class="inspector-tab" id="tab-prep" role="tab" data-pane="prep" aria-selected="false" data-i18n="inspectorPrep">Before you go</button>
-              <button type="button" class="inspector-tab" id="tab-sources" role="tab" data-pane="sources" aria-selected="false" data-i18n="inspectorSources">Sources</button>
-              <button type="button" class="inspector-tab" id="tab-commit" role="tab" data-pane="commit" aria-selected="false" data-i18n="inspectorCommit">Create trip</button>
+          <aside class="inspector trek-card" id="inspector">
+            <div class="trek-segmented" role="tablist">
+              <button type="button" class="inspector-tab" id="tab-place" role="tab" data-pane="place" aria-selected="true" aria-pressed="true" data-i18n="inspectorPlace">Place</button>
+              <button type="button" class="inspector-tab" id="tab-prep" role="tab" data-pane="prep" aria-selected="false" aria-pressed="false" data-i18n="inspectorPrep">Before you go</button>
+              <button type="button" class="inspector-tab" id="tab-sources" role="tab" data-pane="sources" aria-selected="false" aria-pressed="false" data-i18n="inspectorSources">Sources</button>
+              <button type="button" class="inspector-tab" id="tab-commit" role="tab" data-pane="commit" aria-selected="false" aria-pressed="false" data-i18n="inspectorCommit">Create trip</button>
             </div>
             <div class="inspector-body trek-scroll">
               <div class="inspector-pane" id="pane-place">
                 <div id="place-detail"><p class="trek-faint" data-i18n="noPlaceSelected">Select a place to read tips, hours and reservations.</p></div>
               </div>
               <div class="inspector-pane hidden" id="pane-prep">
-                <h3 class="place-detail-title" data-i18n="prepTitle">Before you go</h3>
-                <p class="lead trek-faint" data-i18n="prepHint">Pitfalls, booking, packing and transit notes collected from the guides.</p>
-                <ul class="prep-list" id="prep-tips"></ul>
+                <div class="trek-title" data-i18n="prepTitle">Before you go</div>
+                <p class="trek-faint" data-i18n="prepHint">Pitfalls, booking, packing and transit notes collected from the guides.</p>
+                <ul class="trek-stack" id="prep-tips"></ul>
               </div>
               <div class="inspector-pane hidden" id="pane-sources">
-                <section class="source-card" id="source-card">
-                  <div class="source-head"><strong data-i18n="sources">Sources used</strong><span class="trek-chip" id="source-count">0</span></div>
-                  <div id="sources" class="source-list"></div>
+                <section id="source-card" class="trek-stack">
+                  <div class="trek-cluster"><strong data-i18n="sources">Sources used</strong><span class="trek-chip" id="source-count">0</span></div>
+                  <div id="sources" class="trek-stack"></div>
                 </section>
               </div>
               <div class="inspector-pane hidden" id="pane-commit">
-                <section class="commit-card">
-                  <div class="selection-number"><strong id="selected-number">0</strong><span id="selection-count" data-i18n="selectedPlaces">places selected</span></div>
-                  <label class="field"><span class="field-label trek-label" data-i18n="tripTitle">New trip title</span><input class="trek-input" id="trip-title" autocomplete="off" /></label>
-                  <button class="trek-btn trek-btn--primary commit-button" id="commit" type="button">
-                    <span data-i18n="commit">Create new trip</span>
-                    <svg class="icon icon--sm" aria-hidden="true"><use href="#icon-arrow"></use></svg>
-                  </button>
-                  <p class="commit-hint"><svg class="icon icon--sm"><use href="#icon-shield"></use></svg><span data-i18n="commitHint">Only the checked places will be added to a new TREK trip.</span></p>
+                <section class="trek-stack">
+                  <div class="trek-cluster"><strong id="selected-number">0</strong><span class="trek-muted" id="selection-count" data-i18n="selectedPlaces">places selected</span></div>
+                  <label>
+                    <span class="trek-label" data-i18n="tripTitle">New trip title</span>
+                    <input class="trek-input" id="trip-title" autocomplete="off" />
+                  </label>
+                  <button class="trek-btn trek-btn--primary" id="commit" type="button" data-i18n="commit">Create new trip</button>
+                  <p class="trek-faint" data-i18n="commitHint">Only the checked places will be added to a new TREK trip.</p>
                 </section>
               </div>
             </div>
@@ -934,31 +284,31 @@
   </div>
 
   <div class="help-overlay hidden" id="cookie-help" role="dialog" aria-modal="true" aria-labelledby="cookie-help-title">
-    <div class="help-sheet trek-card">
+    <div class="help-sheet trek-card trek-stack">
       <h2 id="cookie-help-title" data-i18n="cookieHelpTitle">Get a Xiaohongshu Cookie</h2>
-      <p class="lead" data-i18n="cookieHelpLead">TREK runs on your Linux server. Do not log into Xiaohongshu on that server. Copy the Cookie from a normal browser on your own computer or phone, then paste it into plugin settings.</p>
-      <div class="help-step">
+      <p class="trek-muted" data-i18n="cookieHelpLead">TREK runs on your Linux server. Do not log into Xiaohongshu on that server. Copy the Cookie from a normal browser on your own computer or phone, then paste it into plugin settings.</p>
+      <div class="trek-card">
         <strong data-i18n="cookieHelpStep1Title">1. Log in on your own device</strong>
-        <p data-i18n="cookieHelpStep1">Open www.xiaohongshu.com in Chrome or Firefox on your laptop or phone and log in. A headless Linux server has no QR-scan surface and is a poor place to keep a personal session.</p>
+        <p class="trek-muted" data-i18n="cookieHelpStep1">Open www.xiaohongshu.com in Chrome or Firefox on your laptop or phone and log in. A headless Linux server has no QR-scan surface and is a poor place to keep a personal session.</p>
       </div>
-      <div class="help-step">
+      <div class="trek-card">
         <strong data-i18n="cookieHelpStep2Title">2. Copy the Cookie</strong>
-        <p data-i18n="cookieHelpStep2">DevTools → Network → any edith.xiaohongshu.com request → Headers → Request Headers → Cookie. You can also use Application → Cookies. The value must include a1 and web_session.</p>
+        <p class="trek-muted" data-i18n="cookieHelpStep2">DevTools → Network → any edith.xiaohongshu.com request → Headers → Request Headers → Cookie. You can also use Application → Cookies. The value must include a1 and web_session.</p>
         <code class="help-code">a1=…; web_session=…; xsecappid=xhs-pc-web</code>
       </div>
-      <div class="help-step">
+      <div class="trek-card">
         <strong data-i18n="cookieHelpStep3Title">3. Paste into TREK</strong>
-        <p data-i18n="cookieHelpStep3">In TREK: Settings → Plugins → AI 攻略 → 小红书 Web Cookie. Save, then run “测试小红书会话”. The Cookie stays on the plugin server and never enters this page or the AI prompt.</p>
+        <p class="trek-muted" data-i18n="cookieHelpStep3">In TREK: Settings → Plugins → AI 攻略 → 小红书 Web Cookie. Save, then run “测试小红书会话”. The Cookie stays on the plugin server and never enters this page or the AI prompt.</p>
       </div>
-      <div class="help-step">
+      <div class="trek-card">
         <strong data-i18n="cookieHelpIpTitle">IP mismatch and 461</strong>
-        <p data-i18n="cookieHelpIp">The Cookie is used from the TREK server’s public IP, not your laptop’s. A home/phone login (IP1) reused on a cloud host (IP2) often triggers 461. Run “Test Xiaohongshu session” after saving. If it 461s, skip keyword search and paste links or note text instead — those paths do not need a Cookie.</p>
+        <p class="trek-muted" data-i18n="cookieHelpIp">The Cookie is used from the TREK server’s public IP, not your laptop’s. A home/phone login (IP1) reused on a cloud host (IP2) often triggers 461. Run “Test Xiaohongshu session” after saving. If it 461s, skip keyword search and paste links or note text instead — those paths do not need a Cookie.</p>
       </div>
-      <div class="help-step">
+      <div class="trek-card">
         <strong data-i18n="cookieHelpLinuxTitle">If your only computer is Linux</strong>
-        <p data-i18n="cookieHelpLinux">Use a desktop Linux session with Chromium/Firefox — not the TREK Docker/host. SSH port-forwarding a GUI browser is fine; running a headless login bot on the server is not. Cookie lasts about a week; refresh when search starts failing.</p>
+        <p class="trek-muted" data-i18n="cookieHelpLinux">Use a desktop Linux session with Chromium/Firefox — not the TREK Docker/host. SSH port-forwarding a GUI browser is fine; running a headless login bot on the server is not. Cookie lasts about a week; refresh when search starts failing.</p>
       </div>
-      <button class="trek-btn trek-btn--primary help-close" id="close-cookie-help" type="button" data-i18n="cookieHelpClose">Got it</button>
+      <button class="trek-btn trek-btn--primary" id="close-cookie-help" type="button" data-i18n="cookieHelpClose">Got it</button>
     </div>
   </div>
 
@@ -1371,14 +721,18 @@
       document.getElementById('plan-stage').classList.toggle('hidden', !plan);
       document.getElementById('preview').classList.toggle('hidden', plan);
       document.getElementById('stage-plan').setAttribute('aria-selected', plan ? 'true' : 'false');
+      document.getElementById('stage-plan').setAttribute('aria-pressed', plan ? 'true' : 'false');
       document.getElementById('stage-preview').setAttribute('aria-selected', plan ? 'false' : 'true');
+      document.getElementById('stage-preview').setAttribute('aria-pressed', plan ? 'false' : 'true');
       document.getElementById('stage-preview').disabled = !currentDraft;
     }
 
     function showInspector(name) {
       activeInspector = name || 'place';
       document.querySelectorAll('.inspector-tab').forEach(function (tab) {
-        tab.setAttribute('aria-selected', tab.dataset.pane === activeInspector ? 'true' : 'false');
+        var on = tab.dataset.pane === activeInspector;
+        tab.setAttribute('aria-selected', on ? 'true' : 'false');
+        tab.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
       ['place', 'prep', 'sources', 'commit'].forEach(function (pane) {
         var el = document.getElementById('pane-' + pane);
@@ -1498,18 +852,7 @@
     }
 
     function syncDockInset(ctx) {
-      var phone = isPhoneLayout(ctx);
-      var bottomInset = 120;
-      var vp = ctx && ctx.viewport;
-      if (vp && vp.insets && typeof vp.insets.bottom === 'number' && vp.insets.bottom > 0) {
-        bottomInset = Math.max(vp.insets.bottom + 56, 136);
-      } else if (phone) {
-        try {
-          var cssInset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--trek-inset-bottom'));
-          if (cssInset > 0) bottomInset = Math.max(cssInset + 56, 136);
-        } catch (_) {}
-      }
-      document.documentElement.style.setProperty('--ai-guide-dock', bottomInset + 'px');
+      /* Host kit already publishes --trek-inset-bottom. */
     }
 
     function applyLayoutMode(ctx) {
@@ -1543,8 +886,6 @@
     }
 
     document.getElementById('open-settings').addEventListener('click', openPluginSettings);
-    var mobileSettings = document.getElementById('open-settings-mobile');
-    if (mobileSettings) mobileSettings.addEventListener('click', openPluginSettings);
     document.getElementById('open-cookie-help').addEventListener('click', function () { setCookieHelpOpen(true, this); });
     document.getElementById('open-cookie-help-form').addEventListener('click', function () { setCookieHelpOpen(true, this); });
     document.getElementById('close-cookie-help').addEventListener('click', function () { setCookieHelpOpen(false); });
@@ -1736,7 +1077,7 @@
       if (!guides.length) {
         document.getElementById('source-count').textContent = '0';
         var empty = document.createElement('div');
-        empty.className = 'source-empty';
+        empty.className = 'trek-stack';
         var title = document.createElement('strong');
         title.textContent = t('sourcesEmpty');
         var hint = document.createElement('span');
@@ -1753,7 +1094,7 @@
 
       guides.forEach(function (guide) {
         var row = document.createElement(guide.url ? 'button' : 'div');
-        row.className = 'source-item';
+        row.className = 'trek-row source-item';
         if (guide.url) {
           row.type = 'button';
           var href = safeExternalUrl(guide.url);
@@ -1770,6 +1111,7 @@
         var title = document.createElement('strong');
         title.textContent = guide.title || guide.noteId || t('untitledSource');
         var detail = document.createElement('span');
+        detail.className = 'trek-faint';
         detail.textContent = guide.url || sourceType(guide);
         text.appendChild(title);
         text.appendChild(detail);
@@ -1787,16 +1129,16 @@
       var items = normalizePrepTips(tips);
       if (!items.length) {
         var empty = document.createElement('li');
-        empty.className = 'prep-item';
+        empty.className = 'trek-card';
         empty.textContent = t('prepEmpty');
         root.appendChild(empty);
         return;
       }
       items.forEach(function (tip) {
         var row = document.createElement('li');
-        row.className = 'prep-item';
+        row.className = 'trek-card trek-stack';
         var cat = document.createElement('span');
-        cat.className = 'prep-cat';
+        cat.className = 'trek-chip trek-chip--accent';
         cat.textContent = prepCategoryLabel(tip.category);
         var body = document.createElement('div');
         body.textContent = tip.text;
@@ -1820,10 +1162,12 @@
     function addDetailBlock(root, titleKey, text) {
       if (!text) return;
       var block = document.createElement('div');
-      block.className = 'detail-block';
+      block.className = 'trek-stack';
       var heading = document.createElement('h4');
+      heading.className = 'trek-title';
       heading.textContent = t(titleKey);
       var body = document.createElement('p');
+      body.className = 'trek-muted';
       body.textContent = text;
       block.appendChild(heading);
       block.appendChild(body);
@@ -1841,11 +1185,11 @@
         return;
       }
       var title = document.createElement('h3');
-      title.className = 'place-detail-title';
+      title.className = 'trek-title';
       title.textContent = place.name || '';
       root.appendChild(title);
       var meta = document.createElement('div');
-      meta.className = 'place-detail-meta';
+      meta.className = 'trek-cluster';
       if (place.stayMinutes) {
         var time = document.createElement('span');
         time.className = 'trek-chip';
@@ -1890,7 +1234,10 @@
         card.classList.toggle('is-active', Number(card.dataset.day) === activeDayIndex);
       });
       document.querySelectorAll('.day-chip').forEach(function (chip) {
-        chip.setAttribute('aria-selected', Number(chip.dataset.day) === activeDayIndex ? 'true' : 'false');
+        var on = Number(chip.dataset.day) === activeDayIndex;
+        chip.setAttribute('aria-selected', on ? 'true' : 'false');
+        chip.classList.toggle('trek-btn--secondary', on);
+        chip.classList.toggle('trek-btn--ghost', !on);
       });
       var first = document.querySelector('.day-card.is-active .place-row');
       if (first && first.dataset.evidence) selectPlace(first.dataset.evidence);
@@ -1903,7 +1250,7 @@
       root.innerHTML = '';
       days.forEach(function (day, dayIndex) {
         var chip = document.createElement('div');
-        chip.className = 'day-chip';
+        chip.className = 'trek-btn trek-btn--ghost day-chip';
         chip.dataset.day = String(dayIndex);
         chip.setAttribute('role', 'tab');
         chip.tabIndex = 0;
@@ -1926,7 +1273,7 @@
           updateSelection();
         });
         var copyWrap = document.createElement('span');
-        copyWrap.className = 'day-chip-copy';
+        copyWrap.className = 'trek-stack';
         var title = document.createElement('strong');
         title.textContent = day.title || interpolate('placesCount', { count: (day.places || []).length });
         var meta = document.createElement('span');
@@ -1985,17 +1332,17 @@
         section.appendChild(heading);
 
         var placeList = document.createElement('div');
-        placeList.className = 'place-list';
+        placeList.className = 'trek-stack';
         if (places.length === 0) {
           var empty = document.createElement('div');
-          empty.className = 'empty-day';
+          empty.className = 'trek-faint';
           empty.textContent = t('emptyDay');
           placeList.appendChild(empty);
         }
 
         places.forEach(function (place, placeIndex) {
           var row = document.createElement('div');
-          row.className = 'place-row';
+          row.className = 'trek-row place-row';
           row.dataset.evidence = place.evidenceId || '';
 
           var check = document.createElement('input');
@@ -2034,6 +1381,7 @@
           var placeName = document.createElement('strong');
           placeName.textContent = place.name || '';
           var notes = document.createElement('small');
+          notes.className = 'trek-faint';
           var noteParts = [];
           if (place.notes) noteParts.push(place.notes);
           if (place.commentTips && place.commentTips.length) {
@@ -2047,7 +1395,7 @@
           meta.className = 'place-meta';
           if (place.stayMinutes) {
             var duration = document.createElement('span');
-            duration.className = 'time-chip';
+            duration.className = 'trek-chip';
             duration.appendChild(icon('clock', 'icon icon--sm'));
             var durationText = document.createElement('span');
             durationText.textContent = interpolate('minutes', { count: place.stayMinutes });

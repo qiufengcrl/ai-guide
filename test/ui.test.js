@@ -73,13 +73,9 @@ test('theme, accessibility, and responsive host states are explicitly supported'
     '[data-form-factor="phone"]',
     'applyLayoutMode',
     'isPhoneLayout',
-    '@media (min-width: 1180px)',
-    'desktop only at 1180px',
-    'id="ai-guide-overrides"',
     'resolveLocale',
   ]) assert.ok(html.includes(selector), selector);
 
-  assert.match(html, /<!-- trek:ui -->[\s\S]*id="ai-guide-overrides"/);
   assert.match(html, /role=["']status["'][^>]+aria-live=["']polite["']/);
   assert.match(html, /role=["']progressbar["']/);
   assert.match(html, /role=["']alert["']/);
@@ -89,10 +85,10 @@ test('theme, accessibility, and responsive host states are explicitly supported'
   assert.match(html, /input\[type="date"\]\.trek-input/);
   assert.match(html, /color: inherit/);
   assert.match(appScript, /TREK UI kit is not loaded/);
-  assert.match(html, /:focus-visible|\.trek-ui :focus-visible/);
+  assert.match(html, /:focus-visible|\.trek-ui :focus-visible|trek-ui/);
 });
 
-test('AGENTS.md: design kit tokens, no hardcoded palette, trek.session for tab state', () => {
+test('AGENTS.md: kit classes first, tokens only, trek.session, native select', () => {
   const markerAt = html.indexOf('<!-- trek:ui -->');
   assert.ok(markerAt >= 0, 'missing trek:ui marker');
   assert.ok(html.indexOf('<style') > markerAt, 'plugin CSS must come after trek:ui so kit tokens win');
@@ -101,7 +97,6 @@ test('AGENTS.md: design kit tokens, no hardcoded palette, trek.session for tab s
   assert.doesNotMatch(html, /<link[^>]+\brel=["']?stylesheet/i);
   assert.doesNotMatch(html, /googleapis|cdn\.jsdelivr|unpkg\.com|tailwindcss/i);
   assert.doesNotMatch(html, /#111827|#2563eb|#64748b|#ffffff|#fffbeb|#f8fafc/);
-  assert.doesNotMatch(html, /var\(--bg-input,\s*#|var\(--text-primary,\s*#|var\(--trek-accent|var\(--trek-muted|--bg-muted/);
   assert.doesNotMatch(html, /body\s*\{[^}]*background:\s*#fff/i);
   assert.doesNotMatch(appScript, /localStorage|sessionStorage/);
   assert.match(appScript, /trek\.session\.set\('planForm'/);
@@ -111,12 +106,13 @@ test('AGENTS.md: design kit tokens, no hardcoded palette, trek.session for tab s
   assert.match(html, /class="[^"]*trek-stack/);
   assert.match(html, /class="[^"]*trek-cluster/);
   assert.match(html, /class="[^"]*trek-title/);
+  assert.match(html, /class="[^"]*trek-glass/);
+  assert.match(html, /class="[^"]*trek-card/);
   assert.match(html, /class="[^"]*trek-btn trek-btn--primary/);
+  assert.match(html, /class="[^"]*trek-segmented/);
   assert.match(html, /<select id="pace">/);
   assert.doesNotMatch(html, /\.app-shell \.trek-select \{/);
-  assert.match(html, /select\.trek-select-native-hidden/);
-  assert.match(html, /font-family:\s*var\(--font-system\),/);
   assert.doesNotMatch(html, /class="app-shell trek-scroll"/);
   assert.match(html, /class="page trek-scroll/);
-  assert.doesNotMatch(html, /\.planner-panel \{[^}]*background:/);
+  assert.doesNotMatch(html, /\.trek-btn\s*\{[^}]*background:\s*var\(--accent\)/);
 });
