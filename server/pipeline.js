@@ -1,6 +1,6 @@
 const { extractXhsUrls } = require('./xhs/url');
 const { scoreRow: geoScoreRow } = require('./geo/nominatim');
-const { isMarketingCandidate, filterMarketingGuides } = require('./guide-quality');
+const { isMarketingCandidate, filterMarketingGuides, scoreGuide } = require('./guide-quality');
 
 const TOO_FAR_KM = 40;
 const MAX_FROM_DESTINATION_KM = 150;
@@ -426,6 +426,8 @@ function extractionText(guides, intent) {
     `Spread places across days with dayHint from 1 to ${intent.dayCount}.`,
   ].filter(Boolean).join('\n');
   const guideText = guides
+    .slice()
+    .sort((left, right) => scoreGuide(right).score - scoreGuide(left).score)
     .map((guide) => `[${guide.id}] ${guide.title || ''}\n${String(guide.text || '').slice(0, 4000)}`)
     .join('\n\n')
     .slice(0, 12000);
@@ -440,7 +442,7 @@ function extractionInstruction(intent, hasGuides) {
   const dest = intent.destination || 'the destination';
   const fields = 'Each candidate must include name, nameZh, nameEn, reason, durationMinutes, reservationRequired, reservationTips, dayHint, and guideId when sourced from a note. Use reservationRequired=true when notes mention 预约, 抢票, 提前预约, or 约满.';
   if (hasGuides) {
-    return `Extract specific visitable places from the notes. ${fields} Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Keep real user tips in reason. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}. Target about ${target} places. Do not invent coordinates.`;
+    return `Extract specific visitable places from the notes. ${fields} Prefer first-person visit notes over sponsored or group-tour pitches. Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Keep real user tips in reason. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}. Target about ${target} places. Do not invent coordinates.`;
   }
   return `No notes were supplied. Propose well-known visitable places in ${dest}. ${fields} Each name must be a specific attraction or neighborhood, not the destination, province, city, or country. Spread across ${intent.dayCount} days with dayHint. Target ${target} places. Do not invent coordinates.`;
 }

@@ -28,13 +28,13 @@ const {
   MAX_FROM_DESTINATION_KM,
   filterMarketingGuides,
 } = require('./pipeline');
-const { isMarketingGuide, commentTipsForPlace, extractCommentInsights, attachPreviewTips } = require('./guide-quality');
+const { isMarketingGuide, commentTipsForPlace, extractCommentInsights, attachPreviewTips, selectSearchNotes } = require('./guide-quality');
 const { loadTrekCategoryMap, buildTrekPlacePayload } = require('./trek-handoff');
 const { fetchPublicNote, fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const {
   normalizeXhsCookie,
-  searchNotes,
   searchNotesDetailed,
+  SEARCH_PAGE_SIZE,
   fetchSessionNote,
   formatXhsWarning,
   isXhsAuthError,
@@ -230,11 +230,12 @@ async function runKeywordSearch(job, work, cookie, limits, locale, ctx) {
   let lastError = null;
   for (const query of queries) {
     try {
-      const { notes: automatic } = await withXhsRetry(() => searchNotesDetailed(query, cookie, remaining), { cookie });
+      const pool = Math.min(SEARCH_PAGE_SIZE, Math.max(remaining * 3, remaining));
+      const { notes: automatic } = await withXhsRetry(() => searchNotesDetailed(query, cookie, pool), { cookie });
       work.lastSearchQuery = query;
       work.lastSearchCount = automatic.length;
       if (automatic.length) {
-        for (const item of automatic) {
+        for (const item of selectSearchNotes(automatic, remaining)) {
           if (seen.has(item.noteId) || seen.size >= limits.maxNotes) continue;
           seen.add(item.noteId);
           work.pendingNotes.push({ ...item, via: 'search' });
@@ -303,7 +304,9 @@ async function advance(job, ctx) {
           if (!(await ensureXhsSignedAccess(job, work, cookie, locale, ctx))) return;
           const remaining = remainingXhsNoteSlots(job.draft.guides, work.pendingNotes, limits.maxNotes);
           const seen = collectXhsNoteIds(job.draft.guides, work.pendingNotes);
-          for (const item of await withXhsRetry(() => searchNotes(keyword, cookie, remaining || limits.maxNotes), { cookie })) {
+          const pool = Math.min(SEARCH_PAGE_SIZE, Math.max(remaining || limits.maxNotes, 8));
+          const found = await withXhsRetry(() => searchNotesDetailed(keyword, cookie, pool), { cookie });
+          for (const item of selectSearchNotes(found.notes, remaining || limits.maxNotes)) {
             if (seen.has(item.noteId) || seen.size >= limits.maxNotes) continue;
             seen.add(item.noteId);
             work.pendingNotes.push(item);

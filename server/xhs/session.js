@@ -140,6 +140,8 @@ function parseSearchNotes(data, maxNotes = 4) {
       noteId,
       xsecToken,
       title: String(card.display_title || card.title || item?.display_title || ''),
+      desc: String(card.desc || card.corner_tag || ''),
+      likedCount: Number(card.interact_info?.liked_count || card.interactInfo?.likedCount || 0) || 0,
       url: exploreNoteUrl(noteId, xsecToken, 'pc_search'),
       via: 'search',
     });

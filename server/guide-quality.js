@@ -1,4 +1,10 @@
-const MARKETING_TEXT_RE = /跟团|定制游|私信|加微信|加[Vv]|微信号|旅社|旅行社|包车游|一日游套餐|点击链接|代购|推广|商务合作|合作微信|报名咨询|vx[:：]|扫码咨询|纯玩团|当地向导|免费咨询/i;
+const MARKETING_TEXT_RE = /跟团|定制游|私信|加微信|加[Vv]|微信号|旅社|旅行社|包车游|一日游套餐|点击链接|代购|推广|商务合作|合作微信|报名咨询|vx[:：]|扫码咨询|纯玩团|当地向导|免费咨询|报名立减|进群优惠|导游微信|旅行顾问|点击主页|橱窗同款|佣金|广告合作|探店合作/i;
+
+const PERSONAL_RE = /我去了|我们去|打卡|踩坑|人均|住在|吃了|走了|排了|人少|人多|建议提前|别去|值得|不值得|第[一二三四五六七八]天|day\s*[1-8]|上午|下午|傍晚|清晨|闭馆|预约|避坑/i;
+
+const AD_PLACE_RE = /网红店合作|探店合作|广告植入|赞助商|种草合作/;
+
+const QUALITY_MIN_SCORE = 22;
 
 const PREP_LINE_RE = /避坑|提前预约|预约|穿衣|签证|换汇|交通卡|交通|地铁|门票|开放时间|注意事项|携带|旺季|淡季|排队|抢票|限流|闭馆|周一闭馆|周二闭馆/i;
 
@@ -18,29 +24,87 @@ function isMarketingText(text) {
   return MARKETING_TEXT_RE.test(String(text || ''));
 }
 
-function isMarketingGuide(guide) {
+function countReHits(re, text) {
+  const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+  const matches = String(text || '').match(new RegExp(re.source, flags));
+  return matches ? matches.length : 0;
+}
+
+function scoreGuide(guide) {
   const title = String(guide?.title || '');
-  const body = String(guide?.text || '').slice(0, 4000);
-  return isMarketingText(`${title}\n${body}`);
+  const body = String(guide?.text || guide?.desc || '').slice(0, 4000);
+  const blob = `${title}\n${body}`;
+  const liked = Number(guide?.likedCount || guide?.liked_count || 0);
+  const reasons = [];
+  if (isMarketingText(blob) || AD_PLACE_RE.test(blob)) {
+    return { score: 0, reject: true, reasons: ['marketing'] };
+  }
+  let score = 40;
+  const personalHits = countReHits(PERSONAL_RE, blob);
+  if (personalHits) {
+    score += Math.min(24, personalHits * 6);
+    reasons.push('personal');
+  }
+  if (/第[一二三四五]天|day\s*[1-5]/i.test(blob)) {
+    score += 10;
+    reasons.push('itinerary');
+  }
+  if (body.length >= 180 && body.length <= 3500) score += 8;
+  else if (body.length > 0 && body.length < 60) {
+    score -= 12;
+    reasons.push('thin');
+  }
+  const hashCount = (blob.match(/#/g) || []).length;
+  if (hashCount >= 8) {
+    score -= 12;
+    reasons.push('hashtags');
+  }
+  if (liked > 0) score += Math.min(8, Math.floor(Math.log10(liked + 1) * 4));
+  score = Math.max(0, Math.min(100, score));
+  return { score, reject: false, reasons };
+}
+
+function isMarketingGuide(guide) {
+  return scoreGuide(guide).reject;
 }
 
 function isMarketingCandidate(candidate) {
   const reason = String(candidate?.reason || '');
   const name = String(candidate?.name || '');
-  return isMarketingText(`${name}\n${reason}`);
+  return isMarketingText(`${name}\n${reason}`) || AD_PLACE_RE.test(`${name}\n${reason}`);
 }
 
 function filterMarketingGuides(guides) {
   const kept = [];
   let skipped = 0;
   for (const guide of guides || []) {
-    if (isMarketingGuide(guide)) {
+    const rating = scoreGuide(guide);
+    if (rating.reject || rating.score < QUALITY_MIN_SCORE) {
       skipped += 1;
       continue;
     }
-    kept.push(guide);
+    kept.push({ ...guide, qualityScore: rating.score });
   }
+  kept.sort((left, right) => (right.qualityScore || 0) - (left.qualityScore || 0));
   return { guides: kept, skipped };
+}
+
+function selectSearchNotes(notes, limit) {
+  const cap = Math.max(0, Number(limit) || 0);
+  return (notes || [])
+    .map((note) => ({
+      note,
+      rating: scoreGuide({
+        title: note?.title,
+        text: note?.desc || note?.text || '',
+        likedCount: note?.likedCount,
+      }),
+    }))
+    .filter((row) => !row.rating.reject)
+    .sort((left, right) => right.rating.score - left.rating.score
+      || Number(right.note?.likedCount || 0) - Number(left.note?.likedCount || 0))
+    .slice(0, cap)
+    .map((row) => row.note);
 }
 
 function extractCommentInsights(comments, limit = 6) {
@@ -180,9 +244,13 @@ function buildTrekPlaceNotes(item, guides, locale = 'zh') {
 }
 
 module.exports = {
+  MARKETING_TEXT_RE,
+  QUALITY_MIN_SCORE,
+  scoreGuide,
   isMarketingGuide,
   isMarketingCandidate,
   filterMarketingGuides,
+  selectSearchNotes,
   extractPrepTips,
   categorizePrepTip,
   toPrepTipItems,
