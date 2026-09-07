@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, inferDestinationFromGuides, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES } = require('../server/pipeline');
+const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, inferDestinationFromGuides, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES, guideSearchQueries } = require('../server/pipeline');
 const { normalizeXhsCookie, formatXhsWarning, formatXhsDegradedWarning, isXhsAuthError, XhsSessionError } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces, isRateLimitError } = require('../server/geo/nominatim');
@@ -26,7 +26,7 @@ const {
   MAX_INTERVAL_MS,
 } = require('../server/xhs/throttle');
 const { readXhsCookieUpdatedAt } = require('../server/xhs/freshness');
-const { isMarketingGuide, filterMarketingGuides, buildTrekPlaceNotes, extractCommentInsights, commentTipsForPlace, attachPreviewTips, extractPrepTips, categorizePrepTip } = require('../server/guide-quality');
+const { isMarketingGuide, filterMarketingGuides, buildTrekPlaceNotes, extractCommentInsights, commentTipsForPlace, attachPreviewTips, extractPrepTips, categorizePrepTip, scoreGuide, selectSearchNotes } = require('../server/guide-quality');
 const { buildTrekPlacePayload } = require('../server/trek-handoff');
 
 setGeoThrottleInterval(0);
@@ -109,7 +109,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.39');
+  assert.equal(manifest.version, '1.1.43');
 });
 
 function memoryDb() {
@@ -761,7 +761,7 @@ test('extract prompt 强调预约、避坑与中英名称', () => {
   const instruction = extractionInstruction({ destination: '京都', dayCount: 3 }, true);
   assert.match(instruction, /nameZh/);
   assert.match(instruction, /reservationRequired/);
-  assert.match(instruction, /reason/);
+  assert.match(instruction, /first-person/);
   const text = extractionText([{ id: 'g_1', title: '测试', text: '需要提前预约故宫' }], {
     destination: '北京',
     dayCount: 2,
@@ -1551,15 +1551,37 @@ test('deleteUserData 清除该用户 cookie clock', async () => {
   assert.equal(fixture.db.userMeta.size, 0);
 });
 
+test('多维度搜索关键词模板', () => {
+  const queries = guideSearchQueries('京都', ['历史']);
+  assert.ok(queries.includes('京都旅游攻略'));
+  assert.ok(queries.includes('京都避坑'));
+  assert.ok(queries.includes('京都美食'));
+  assert.ok(queries.includes('京都拍照机位'));
+  assert.ok(queries.includes('京都历史攻略'));
+});
+
 test('营销帖过滤与 TREK 地点备注构建', () => {
   assert.equal(isMarketingGuide({ title: '云南跟团私信定制', text: '加微信' }), true);
   assert.equal(isMarketingGuide({ title: '京都三日', text: '伏见稻荷清晨人少' }), false);
+  assert.ok(scoreGuide({
+    title: '京都五天不赶路',
+    text: '第一天我去了伏见稻荷，清晨人少。第二天清水寺预约后走人少路线。人均和避坑都写在下面。',
+  }).score > scoreGuide({ title: '京都景点清单', text: '推荐几个地方玩玩' }).score);
   const filtered = filterMarketingGuides([
-    { title: '真实体验', text: '很好玩' },
+    { title: '真实体验', text: '很好玩，伏见稻荷清晨人少，建议提前预约' },
     { title: '加微信定制游', text: '价格优惠' },
+    { title: '购物橱窗', text: '点击主页下单佣金' },
   ]);
-  assert.equal(filtered.skipped, 1);
+  assert.equal(filtered.skipped, 2);
   assert.equal(filtered.guides.length, 1);
+  assert.equal(filtered.guides[0].title, '真实体验');
+  assert.ok(filtered.guides[0].qualityScore >= 22);
+  const ranked = selectSearchNotes([
+    { noteId: 'ad', title: '私信定制跟团', desc: '加微信报名' },
+    { noteId: 'good', title: '京都五日', desc: '第一天我去了伏见稻荷，清晨人少' },
+    { noteId: 'thin', title: '景点列表', desc: '推荐' },
+  ], 1);
+  assert.deepEqual(ranked.map((item) => item.noteId), ['good']);
   const notes = buildTrekPlaceNotes({
     reason: '清晨人少',
     reservationRequired: true,

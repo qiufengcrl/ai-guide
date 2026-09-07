@@ -28,13 +28,13 @@ const {
   MAX_FROM_DESTINATION_KM,
   filterMarketingGuides,
 } = require('./pipeline');
-const { isMarketingGuide, commentTipsForPlace, extractCommentInsights, attachPreviewTips } = require('./guide-quality');
+const { isMarketingGuide, commentTipsForPlace, extractCommentInsights, attachPreviewTips, selectSearchNotes } = require('./guide-quality');
 const { loadTrekCategoryMap, buildTrekPlacePayload } = require('./trek-handoff');
 const { fetchPublicNote, fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const {
   normalizeXhsCookie,
-  searchNotes,
   searchNotesDetailed,
+  SEARCH_PAGE_SIZE,
   fetchSessionNote,
   formatXhsWarning,
   isXhsAuthError,
@@ -224,24 +224,27 @@ async function runKeywordSearch(job, work, cookie, limits, locale, ctx) {
 
   if (!(await ensureXhsSignedAccess(job, work, cookie, locale, ctx))) return;
 
-  const queries = (job.draft.intent.searchQueries || [job.draft.intent.guideQuery]).slice(0, 2);
+  const queries = (job.draft.intent.searchQueries || [job.draft.intent.guideQuery]).slice(0, 4);
   const seen = collectXhsNoteIds(job.draft.guides, work.pendingNotes);
   const beforePending = work.pendingNotes.length;
   let lastError = null;
+  let queriesUsed = [];
   for (const query of queries) {
+    const slotsLeft = remainingXhsNoteSlots(job.draft.guides, work.pendingNotes, limits.maxNotes);
+    if (slotsLeft <= 0) break;
     try {
-      const { notes: automatic } = await withXhsRetry(() => searchNotesDetailed(query, cookie, remaining), { cookie });
+      const pool = Math.min(SEARCH_PAGE_SIZE, Math.max(slotsLeft * 3, slotsLeft));
+      const { notes: automatic } = await withXhsRetry(() => searchNotesDetailed(query, cookie, pool), { cookie });
       work.lastSearchQuery = query;
       work.lastSearchCount = automatic.length;
-      if (automatic.length) {
-        for (const item of automatic) {
-          if (seen.has(item.noteId) || seen.size >= limits.maxNotes) continue;
-          seen.add(item.noteId);
-          work.pendingNotes.push({ ...item, via: 'search' });
-        }
-        lastError = null;
-        break;
+      if (!automatic.length) continue;
+      queriesUsed.push(query);
+      for (const item of selectSearchNotes(automatic, slotsLeft)) {
+        if (seen.has(item.noteId) || seen.size >= limits.maxNotes) continue;
+        seen.add(item.noteId);
+        work.pendingNotes.push({ ...item, via: 'search', searchQuery: query });
       }
+      lastError = null;
     } catch (error) {
       lastError = error;
       if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
@@ -250,6 +253,7 @@ async function runKeywordSearch(job, work, cookie, limits, locale, ctx) {
       }
     }
   }
+  if (queriesUsed.length) work.searchQueriesUsed = queriesUsed;
 
   const added = work.pendingNotes.length - beforePending;
   if (added > 0) return;
@@ -303,7 +307,9 @@ async function advance(job, ctx) {
           if (!(await ensureXhsSignedAccess(job, work, cookie, locale, ctx))) return;
           const remaining = remainingXhsNoteSlots(job.draft.guides, work.pendingNotes, limits.maxNotes);
           const seen = collectXhsNoteIds(job.draft.guides, work.pendingNotes);
-          for (const item of await withXhsRetry(() => searchNotes(keyword, cookie, remaining || limits.maxNotes), { cookie })) {
+          const pool = Math.min(SEARCH_PAGE_SIZE, Math.max(remaining || limits.maxNotes, 8));
+          const found = await withXhsRetry(() => searchNotesDetailed(keyword, cookie, pool), { cookie });
+          for (const item of selectSearchNotes(found.notes, remaining || limits.maxNotes)) {
             if (seen.has(item.noteId) || seen.size >= limits.maxNotes) continue;
             seen.add(item.noteId);
             work.pendingNotes.push(item);
@@ -403,8 +409,8 @@ async function advance(job, ctx) {
     const filteredGuides = filterMarketingGuides(job.draft.guides);
     if (filteredGuides.skipped > 0) {
       addWarning(job, message(locale,
-        `已过滤 ${filteredGuides.skipped} 篇疑似营销帖`,
-        `Filtered ${filteredGuides.skipped} suspected marketing posts`));
+        `已过滤 ${filteredGuides.skipped} 篇低质量或疑似营销帖`,
+        `Filtered ${filteredGuides.skipped} low-quality or suspected marketing posts`));
     }
     job.draft.guides = filteredGuides.guides;
     if (!job.draft.intent.destination) {
@@ -498,7 +504,7 @@ async function advance(job, ctx) {
   if (job.stage === 'enrich_comments') {
     const cookie = normalizeXhsCookie(await ctx.settings.get('xhs_cookie'));
     const work = job.work;
-    const maxGuides = 2;
+    const maxGuides = 3;
     const guidesWithNotes = (job.draft.guides || []).filter((guide) => guide.noteId);
     const shouldSkip = !cookie || work.xhsSignedApiBlocked || !guidesWithNotes.length || !limits.xhsEnabled;
     if (shouldSkip) {
