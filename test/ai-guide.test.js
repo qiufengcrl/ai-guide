@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, inferDestinationFromGuides, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES } = require('../server/pipeline');
+const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, nearDestination, pickDestinationBias, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, inferDestinationFromGuides, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES } = require('../server/pipeline');
 const { normalizeXhsCookie, formatXhsWarning, formatXhsDegradedWarning, isXhsAuthError, XhsSessionError } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces, isRateLimitError } = require('../server/geo/nominatim');
@@ -109,7 +109,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.39');
+  assert.equal(manifest.version, '1.1.41');
 });
 
 function memoryDb() {
@@ -406,21 +406,59 @@ test('分享口令里的 xhslink.cn 会被抽成笔记链接，大兴安岭有�
 
 test('地图证据会丢掉远离目的地的误匹配', () => {
   const candidate = { name: '洛古河', durationMinutes: 90, dayHint: 1 };
-  const bias = { lat: 52.3, lng: 124.7 };
+  const bias = { lat: 52.3, lng: 124.7, radiusKm: 400 };
   assert.equal(evidenceFromSearch(candidate, {
     source: 'nominatim',
     places: [{ name: '古塔', lat: 48.95, lng: 27.05, types: ['tourism'], address: '乌克兰' }],
   }, 0, '大兴安岭', bias), null);
+  assert.equal(evidenceFromSearch(candidate, {
+    source: 'nominatim',
+    places: [{ name: '北极镇', lat: 53.48, lng: 122.35, types: ['town'], address: '北极镇, 漠河市, 大兴安岭地区, 黑龙江省, 中国' }],
+  }, 0, '大兴安岭', { lat: 43.0, lng: 118.0, radiusKm: 400 }), null);
   const labeled = evidenceFromSearch(candidate, {
     source: 'nominatim',
     places: [{ name: '北极镇', lat: 53.48, lng: 122.35, types: ['town'], address: '北极镇, 漠河市, 大兴安岭地区, 黑龙江省, 中国' }],
-  }, 0, '大兴安岭', { lat: 43.0, lng: 118.0 });
+  }, 0, '大兴安岭', bias);
   assert.equal(labeled.name, '北极镇');
   const near = evidenceFromSearch(candidate, {
     source: 'nominatim',
     places: [{ name: '洛古河村', lat: 53.3, lng: 122.35, types: ['village'], address: '洛古河村, 漠河市, 大兴安岭地区' }],
   }, 0, '大兴安岭', bias);
   assert.equal(near.name, '洛古河村');
+});
+
+test('地理边界会拒绝跨城同名，且京都不会误匹配东京都', () => {
+  const xian = pickDestinationBias([
+    { name: '西安市', lat: 34.27, lng: 108.95, address: '陕西省西安市', types: ['city'] },
+    { name: '西安路', lat: 39.12, lng: 117.20, address: '天津市和平区西安路', types: ['route'] },
+  ], '西安');
+  assert.equal(xian.name, '西安市');
+  assert.equal(xian.radiusKm, 150);
+  assert.equal(nearDestination(
+    { name: '故宫博物院', lat: 39.92, lng: 116.39, address: '北京市东城区景山前街4号' },
+    '西安',
+    xian,
+  ), false);
+  assert.equal(evidenceFromSearch({ name: '故宫', durationMinutes: 90, dayHint: 1 }, {
+    source: 'nominatim',
+    places: [{ name: '故宫博物院', lat: 39.92, lng: 116.39, types: ['attraction'], address: '北京市东城区' }],
+  }, 0, '西安', xian), null);
+
+  const kyoto = pickDestinationBias([
+    { name: '京都市', lat: 35.01, lng: 135.77, address: '京都府京都市', types: ['city'] },
+    { name: '新宿', lat: 35.69, lng: 139.70, address: '東京都新宿区', types: ['attraction'] },
+  ], '京都');
+  assert.equal(kyoto.name, '京都市');
+  assert.equal(nearDestination(
+    { name: '新宿站', lat: 35.69, lng: 139.70, address: '東京都新宿区' },
+    '京都',
+    kyoto,
+  ), false);
+  assert.equal(nearDestination(
+    { name: '伏见稻荷大社', lat: 34.97, lng: 135.77, address: '京都府京都市伏见区' },
+    '京都',
+    kyoto,
+  ), true);
 });
 
 test('组合检索无结果时下一拍改搜景点本名', async () => {
@@ -675,6 +713,31 @@ test('deleteUserData 幂等清除该用户任务，export 不含 Cookie 或正�
   await fixture.app.deleteUserData(7);
   await fixture.app.deleteUserData(7);
   assert.equal(fixture.db.jobs.size, 0);
+});
+
+test('Nominatim 有目的地偏差时会 bounded 限制 viewbox', async () => {
+  const original = global.fetch;
+  let href = '';
+  global.fetch = async (url) => {
+    href = String(url);
+    return {
+      ok: true,
+      status: 200,
+      headers: { get() { return null; } },
+      async json() { return []; },
+    };
+  };
+  try {
+    await searchPlaces('故宫 西安', {
+      lang: 'zh',
+      locationBias: { lat: 34.27, lng: 108.95, radius: 150000 },
+    });
+    const params = new URL(href).searchParams;
+    assert.equal(params.get('bounded'), '1');
+    assert.ok(params.get('viewbox'));
+  } finally {
+    global.fetch = original;
+  }
 });
 
 test('Nominatim 优先返回景点而不是行政区', async () => {

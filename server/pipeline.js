@@ -4,6 +4,8 @@ const { isMarketingCandidate, filterMarketingGuides } = require('./guide-quality
 
 const TOO_FAR_KM = 40;
 const MAX_FROM_DESTINATION_KM = 150;
+const REGION_RADIUS_KM = 400;
+const ABSOLUTE_MAX_FROM_DESTINATION_KM = 500;
 const REGION_CLUSTER_KM = 80;
 const REGION_SPLIT_MIN_SPAN_KM = 80;
 
@@ -636,6 +638,86 @@ function finiteCoordinate(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function radiusKmFromPlace(place, destination) {
+  const dest = String(destination || place?.name || '').trim();
+  const types = (place?.types || []).map((item) => String(item).toLowerCase());
+  const hay = `${place?.name || ''} ${place?.address || ''} ${dest}`;
+  if (isMultiCityDestination(dest) || /(地区|自治州|自治区|盟|群岛)$/.test(dest) || /islands|prefecture/i.test(hay)) {
+    return REGION_RADIUS_KM;
+  }
+  if (types.some((type) => ['state', 'province', 'region'].includes(type))) return REGION_RADIUS_KM;
+  if (types.some((type) => ['county', 'municipality'].includes(type))) return 200;
+  if (types.some((type) => ['island', 'archipelago'].includes(type)) || /岛$|island/i.test(dest)) return 350;
+  return MAX_FROM_DESTINATION_KM;
+}
+
+function destinationRadiusKm(bias, destination) {
+  const km = Number(bias?.radiusKm);
+  if (Number.isFinite(km) && km > 0) return km;
+  return radiusKmFromPlace(bias, destination);
+}
+
+function destinationMentioned(text, destination) {
+  const hay = String(text || '');
+  const dest = String(destination || '').trim();
+  if (dest.length < 2) return false;
+  const lowerHay = hay.toLowerCase();
+  const lowerDest = dest.toLowerCase();
+  let from = 0;
+  while (from <= lowerHay.length - lowerDest.length) {
+    const idx = lowerHay.indexOf(lowerDest, from);
+    if (idx < 0) return false;
+    const window = hay.slice(Math.max(0, idx - 1), idx + dest.length + 1);
+    if ((dest === '京都' || lowerDest === 'kyoto') && /[东東]京都/.test(window)) {
+      from = idx + 1;
+      continue;
+    }
+    if (/^[a-z]/i.test(dest)) {
+      const before = idx === 0 ? ' ' : lowerHay[idx - 1];
+      const after = idx + dest.length >= lowerHay.length ? ' ' : lowerHay[idx + dest.length];
+      if (/[a-z0-9]/i.test(before) || /[a-z0-9]/i.test(after)) {
+        from = idx + 1;
+        continue;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+function addressMentionsDestination(place, destination) {
+  return destinationMentioned(`${place?.name || ''} ${place?.address || ''}`, destination);
+}
+
+function pickDestinationBias(places, destination) {
+  const ranked = (Array.isArray(places) ? places : []).filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
+  if (!ranked.length) return null;
+  const dest = String(destination || '').trim();
+  const admin = ranked.filter((item) => isAdministrativePlace(item));
+  const namedAdmin = admin.find((item) => dest && (destinationMentioned(item.name, dest) || addressMentionsDestination(item, dest)));
+  const named = ranked.find((item) => dest && (destinationMentioned(item.name, dest) || addressMentionsDestination(item, dest)));
+  const chosen = namedAdmin || named || admin[0] || ranked[0];
+  const radiusKm = radiusKmFromPlace(chosen, dest);
+  return {
+    lat: chosen.lat,
+    lng: chosen.lng,
+    radiusKm,
+    radius: Math.round(radiusKm * 1000),
+    types: Array.isArray(chosen.types) ? chosen.types : [],
+    name: chosen.name || dest,
+  };
+}
+
+function nearDestination(place, destination, bias) {
+  if (!finiteCoordinate(place?.lat) || !finiteCoordinate(place?.lng)) return false;
+  if (!bias || !finiteCoordinate(bias.lat) || !finiteCoordinate(bias.lng)) return true;
+  const distance = haversineKm(place, bias);
+  if (distance > ABSOLUTE_MAX_FROM_DESTINATION_KM) return false;
+  const radius = destinationRadiusKm(bias, destination);
+  if (distance <= radius) return true;
+  return addressMentionsDestination(place, destination) && distance <= REGION_RADIUS_KM;
+}
+
 function isLowQualityPlace(place) {
   const types = (place?.types || []).map((item) => String(item).toLowerCase());
   if (types.some((type) => [
@@ -657,7 +739,7 @@ function scoreSearchPlace(place, destination) {
   if (isAdministrativePlace(place)) score -= 8;
   if (isLowQualityPlace(place)) score -= 12;
   const dest = String(destination || '').trim();
-  if (dest.length >= 2 && `${place?.name || ''} ${place?.address || ''}`.includes(dest)) score += 1;
+  if (addressMentionsDestination(place, dest)) score += 2;
   return score;
 }
 function isAdministrativePlace(place) {
@@ -666,16 +748,6 @@ function isAdministrativePlace(place) {
     'boundary', 'administrative', 'province', 'state', 'country',
     'region', 'municipality', 'county', 'city', 'town',
   ].includes(type));
-}
-
-function nearDestination(place, destination, bias) {
-  const dest = String(destination || '').trim();
-  const haystack = `${place?.name || ''} ${place?.address || ''}`;
-  if (dest.length >= 2 && haystack.includes(dest)) return true;
-  if (bias && finiteCoordinate(bias.lat) && finiteCoordinate(bias.lng)) {
-    return haversineKm(place, bias) <= MAX_FROM_DESTINATION_KM;
-  }
-  return true;
 }
 
 function evidenceFromSearch(candidate, result, index, destination, bias) {
@@ -1039,6 +1111,8 @@ function publicDraft(job) {
 module.exports = {
   TOO_FAR_KM,
   MAX_FROM_DESTINATION_KM,
+  REGION_RADIUS_KM,
+  ABSOLUTE_MAX_FROM_DESTINATION_KM,
   EXTRACTION_SCHEMA,
   PLACE_SEARCH_ALIASES,
   looksLikeShareCard,
@@ -1076,6 +1150,9 @@ module.exports = {
   placeSearchNames,
   guideSearchQueries,
   evidenceFromSearch,
+  nearDestination,
+  pickDestinationBias,
+  destinationRadiusKm,
   gateAndSchedule,
   splitRegions,
   publicDraft,

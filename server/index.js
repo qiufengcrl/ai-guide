@@ -25,6 +25,7 @@ const {
   collectXhsNoteIds,
   mapConcurrent,
   resolveCandidateEvidence,
+  pickDestinationBias,
   MAX_FROM_DESTINATION_KM,
   filterMarketingGuides,
 } = require('./pipeline');
@@ -533,9 +534,8 @@ async function advance(job, ctx) {
       try {
         const result = await searchPlaces(job.draft.intent.destination, geoSearchOptions(ctx.config, { lang: locale }));
         const dest = String(job.draft.intent.destination || '').trim();
-        const ranked = (result.places || []).filter((place) => Number.isFinite(place?.lat) && Number.isFinite(place?.lng));
-        const first = ranked.find((place) => dest && String(place.address || '').includes(dest)) || ranked[0];
-        if (first) job.work.bias = { lat: first.lat, lng: first.lng, radius: 400000 };
+        const picked = pickDestinationBias(result.places, dest);
+        if (picked) job.work.bias = picked;
         else job.work.biasFailed = true;
       } catch (error) {
         job.work.biasFailed = true;
@@ -567,9 +567,10 @@ async function advance(job, ctx) {
           continue;
         }
         if (item?.boundaryRejected) {
+          const limitKm = Number(job.work.bias?.radiusKm) || MAX_FROM_DESTINATION_KM;
           addWarning(job, message(locale,
-            `「${item.query}」距目的地超过 ${MAX_FROM_DESTINATION_KM} 公里，已跳过`,
-            `"${item.query}" is more than ${MAX_FROM_DESTINATION_KM} km from the destination and was skipped`));
+            `「${item.query}」距目的地超过 ${limitKm} 公里，已跳过`,
+            `"${item.query}" is more than ${limitKm} km from the destination and was skipped`));
           continue;
         }
         if (item?.query) {
