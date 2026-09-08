@@ -21,12 +21,33 @@ ssh "${USER}@${HOST}" "mkdir -p '${PLUGIN_DIR}'"
 scp "$ZIP" "${USER}@${HOST}:/tmp/ai-guide-plugin.zip"
 ssh "${USER}@${HOST}" bash -s <<EOF
 set -euo pipefail
-TMP=\$(mktemp -d)
-unzip -oq /tmp/ai-guide-plugin.zip -d "\$TMP"
-rsync -a --delete "\$TMP/" "${PLUGIN_DIR}/"
-rm -rf "\$TMP" /tmp/ai-guide-plugin.zip
-echo "Deployed to ${PLUGIN_DIR}"
+python3 - << 'PY'
+import json, os, shutil, tempfile, time, zipfile
+plugin_dir = "${PLUGIN_DIR}"
+os.makedirs(plugin_dir, exist_ok=True)
+bak = plugin_dir + ".bak.deploy.%d" % int(time.time())
+if os.path.isdir(plugin_dir) and os.listdir(plugin_dir):
+    shutil.copytree(plugin_dir, bak)
+tmp = tempfile.mkdtemp()
+with zipfile.ZipFile("/tmp/ai-guide-plugin.zip") as z:
+    z.extractall(tmp)
+if os.path.isdir(plugin_dir):
+    shutil.rmtree(plugin_dir)
+shutil.copytree(tmp, plugin_dir)
+shutil.rmtree(tmp)
+os.remove("/tmp/ai-guide-plugin.zip")
+man = json.load(open(os.path.join(plugin_dir, "trek-plugin.json")))
+print("Deployed", man.get("id"), man.get("version"), "to", plugin_dir)
+PY
+# Coolify names the container; compose service is "app".
+if docker ps --format '{{.Names}}' | grep -qx trek; then
+  docker restart trek
+else
+  docker ps -q | while read -r id; do
+    mounts=\$(docker inspect -f '{{range .Mounts}}{{.Source}} {{end}}' "\$id")
+    case "\$mounts" in
+      */opt/trek/data*) docker restart "\$id"; break ;;
+    esac
+  done
+fi
 EOF
-
-echo "Restart TREK if plugins are not hot-reloaded:"
-echo "  ssh ${USER}@${HOST} 'cd /opt/trek && docker compose restart trek'"

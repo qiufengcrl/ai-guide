@@ -730,7 +730,7 @@ function progressStepForJob(job) {
   if (stage === 'ready') return 4;
   if (['schedule', 'write_copy', 'gate'].includes(stage)) return 4;
   if (stage === 'gather_evidence') return 3;
-  if (stage === 'extract') return 2;
+  if (stage === 'extract' || stage === 'enrich_comments') return 2;
   return 1;
 }
 

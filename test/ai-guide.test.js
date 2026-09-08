@@ -2014,6 +2014,7 @@ test('粘贴盒拆出链接和正文，过远点可保留，进度为 4 步', ()
 
   assert.equal(progressStepForJob({ stage: 'fetch_guides' }), 1);
   assert.equal(progressStepForJob({ stage: 'extract' }), 2);
+  assert.equal(progressStepForJob({ stage: 'enrich_comments' }), 2);
   assert.equal(progressStepForJob({ stage: 'gather_evidence' }), 3);
   assert.equal(progressStepForJob({ stage: 'gate' }), 4);
   assert.equal(publicDraft({ stage: 'extract', payload: { locale: 'zh' }, draft: { guides: [], intent: {} }, work: {} }).progress.totalSteps, 4);
