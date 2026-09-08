@@ -1,4 +1,4 @@
-const { extractXhsUrls } = require('./xhs/url');
+const { splitGuidePaste } = require('./xhs/url');
 const { scoreRow: geoScoreRow } = require('./geo/nominatim');
 const { isMarketingCandidate, filterMarketingGuides, scoreGuide } = require('./guide-quality');
 
@@ -418,8 +418,9 @@ function normalizeInput(body, limits) {
     : requestedDays;
   const dayCount = Math.min(limits.maxDays, Math.max(1, datedDays));
   const pace = ['relaxed', 'balanced', 'packed'].includes(input.pace) ? input.pace : 'balanced';
-  const sourceText = String(input.sourceText || '').trim().slice(0, 12000);
-  const urls = extractXhsUrls(input.urls, sourceText).slice(0, limits.maxNotes);
+  const split = splitGuidePaste(input.urls, input.sourceText);
+  const urls = split.urls.slice(0, limits.maxNotes);
+  const sourceText = split.sourceText || '';
   return {
     destination,
     startDate,
@@ -640,10 +641,15 @@ async function resolveCandidateEvidence(candidate, index, intent, searchPlacesFn
         const places = (result?.places || []).filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
         const nearby = places.filter((item) => nearDestination(item, destination, bias));
         if (places.length && !nearby.length) boundaryRejected = true;
-        const evidence = result
+        const nearbyEvidence = result
           ? evidenceFromSearch(candidate, result, index, destination, bias)
           : null;
-        if (evidence) return { evidence, query, boundaryRejected: false };
+        if (nearbyEvidence) return { evidence: nearbyEvidence, query, boundaryRejected: false };
+        const farEvidence = result
+          ? evidenceFromSearch(candidate, result, index, destination, bias, { allowFar: true })
+          : null;
+        if (farEvidence) return { evidence: farEvidence, query, boundaryRejected: true };
+        if (places.length && !nearby.length) boundaryRejected = true;
         break;
       } catch (error) {
         lastError = error;
@@ -717,6 +723,15 @@ function progressForJob(job, locale) {
     return message(locale, '预览已就绪', 'Preview is ready');
   }
   return message(locale, '处理中…', 'Working…');
+}
+
+function progressStepForJob(job) {
+  const stage = String(job.stage || '');
+  if (stage === 'ready') return 4;
+  if (['schedule', 'write_copy', 'gate'].includes(stage)) return 4;
+  if (stage === 'gather_evidence') return 3;
+  if (stage === 'extract') return 2;
+  return 1;
 }
 
 function progressCounts(job) {
@@ -908,10 +923,11 @@ function pickSearchPlace(candidate, ranked) {
     || null;
 }
 
-function evidenceFromSearch(candidate, result, index, destination, bias) {
+function evidenceFromSearch(candidate, result, index, destination, bias, options = {}) {
   const places = (result?.places || []).filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
   const nearby = places.filter((item) => nearDestination(item, destination, bias));
-  const ranked = nearby
+  const pool = nearby.length ? nearby : (options.allowFar ? places : []);
+  const ranked = pool
     .filter((item) => !isLowQualityPlace(item))
     .slice()
     .sort((left, right) => scoreSearchPlace(right, destination) - scoreSearchPlace(left, destination));
@@ -938,6 +954,7 @@ function evidenceFromSearch(candidate, result, index, destination, bias) {
     dayHint: candidate.dayHint,
     photoUrl: '',
     unmapped: false,
+    tooFarFromDestination: !nearby.length && options.allowFar === true,
   };
 }
 
@@ -1209,13 +1226,9 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
     const key = mapped
       ? `${item.name.toLowerCase()}|${item.lat.toFixed(5)}|${item.lng.toFixed(5)}`
       : `${String(item.name || '').toLowerCase()}|unmapped|${item.id || unique.length}`;
-    if (seen.has(key)) {
-      warnings.push(message(locale, `「${item.name}」重复，已跳过`, `"${item.name}" was duplicated and skipped`));
-      continue;
-    }
+    if (seen.has(key)) continue;
     seen.add(key);
     if (!mapped) {
-      warnings.push(message(locale, `「${item.name}」未能匹配地图，已保留在行程中`, `"${item.name}" could not be mapped and was kept in the itinerary`));
       unique.push({ ...item, unmapped: true });
       continue;
     }
@@ -1256,9 +1269,10 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
       reservationTips: item.reservationHint || '',
       photoUrl: item.photoUrl || '',
       commentTips: item.commentTips || [],
-      tooFar: false,
+      tooFar: item.tooFarFromDestination === true,
       unmapped: item.unmapped === true,
-      selected: true,
+      selected: item.tooFarFromDestination !== true,
+      tooFarFromDestination: item.tooFarFromDestination === true,
     });
   }
   for (const day of days) {
@@ -1269,6 +1283,14 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
   }
   rebalanceDays(days);
   markDistance(days, tooFarLimitKm(unique));
+  for (const day of days) {
+    for (const place of day.places) {
+      if (place.tooFarFromDestination) {
+        place.tooFar = true;
+        place.selected = false;
+      }
+    }
+  }
   if (unique.length > intent.dayCount * perDay) {
     warnings.push(message(locale, '地点超过行程容量，已截断', 'Places exceeded itinerary capacity and were truncated'));
   }
@@ -1295,6 +1317,8 @@ function publicDraft(job) {
     progress: {
       ...progressCounts(job),
       message: progressForJob(job, job.payload?.locale || 'en'),
+      step: progressStepForJob(job),
+      totalSteps: 4,
     },
     warnings: draft.warnings || [],
     days: draft.days || [],
@@ -1324,6 +1348,7 @@ module.exports = {
   mapConcurrent,
   resolveCandidateEvidence,
   progressForJob,
+  progressStepForJob,
   progressCounts,
   isZh,
   message,

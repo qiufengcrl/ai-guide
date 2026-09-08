@@ -12,9 +12,9 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, nearDestination, pickDestinationBias, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, inferDestinationFromGuides, inferDayCountFromGuides, filterInventedCandidates, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES, guideSearchQueries } = require('../server/pipeline');
+const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, nearDestination, pickDestinationBias, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, progressStepForJob, inferDestinationFromGuides, inferDayCountFromGuides, filterInventedCandidates, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES, guideSearchQueries } = require('../server/pipeline');
 const { normalizeXhsCookie, formatXhsWarning, formatXhsDegradedWarning, isXhsAuthError, XhsSessionError } = require('../server/xhs/session');
-const { parseInitialState } = require('../server/xhs/url');
+const { parseInitialState, splitGuidePaste } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces, isRateLimitError } = require('../server/geo/nominatim');
 const {
   isXhsRateLimitError,
@@ -110,7 +110,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.51');
+  assert.equal(manifest.version, '1.1.52');
 });
 
 function memoryDb() {
@@ -367,7 +367,7 @@ test('Gate 去重后保留无坐标点，过远点默认不选', () => {
   assert.equal(result.days[0].places[1].selected, false);
   assert.equal(result.days[0].places[2].unmapped, true);
   assert.equal(result.days[0].places[2].selected, true);
-  assert.equal(result.warnings.length, 2);
+  assert.equal(result.warnings.length, 0);
 });
 
 test('无攻略时过滤省/市名与兴趣词，mustSee 仍可补点', () => {
@@ -627,7 +627,9 @@ test('无 Cookie 的纯表单仍形成地图预览，并只使用 extract.result
   const far = state.days.flatMap((day) => day.places).find((place) => place.name === '远点' || place.name === 'Far');
   assert.equal(far.tooFar, true);
   assert.equal(far.selected, false);
-  assert.ok(state.warnings.some((warning) => warning.includes('无坐标店')));
+  const missing = state.days.flatMap((day) => day.places).find((place) => place.unmapped || /无坐标/.test(place.name || ''));
+  assert.ok(missing);
+  assert.equal(missing.unmapped, true);
 });
 
 test('模型只返回省名时会被过滤，需靠 LLM/攻略给出具体景点', async () => {
@@ -1973,5 +1975,67 @@ test('commit 写入 TREK 分类与配图字段', async () => {
   assert.equal(created.category_id, 2);
   assert.match(String(created.notes || ''), /清晨人少/);
   assert.equal(created.description, '清晨人少，适合拍照');
+});
+
+test('粘贴盒拆出链接和正文，过远点可保留，进度为 4 步', () => {
+  const split = splitGuidePaste('去清水寺\nhttps://www.xiaohongshu.com/explore/64f000000000000000000001 值得去');
+  assert.equal(split.urls.length, 1);
+  assert.match(split.sourceText, /去清水寺/);
+  assert.doesNotMatch(split.sourceText, /xiaohongshu/);
+
+  const mixed = normalizeInput({
+    destination: '京都',
+    sourceText: '正文 https://www.xiaohongshu.com/explore/64f000000000000000000001 继续',
+  }, { maxDays: 8, maxNotes: 4 });
+  assert.equal(mixed.urls.length, 1);
+  assert.match(mixed.sourceText, /正文/);
+  assert.doesNotMatch(mixed.sourceText, /xiaohongshu/);
+
+  const far = evidenceFromSearch(
+    { name: '西街', nameZh: '西街', dayHint: 1 },
+    { source: 'places', places: [{ name: '西街', lat: 25.0, lng: 110.0, types: ['attraction'], address: '阳朔西街' }] },
+    0,
+    '衡阳',
+    { lat: 26.9, lng: 112.6, radiusKm: 80 },
+    { allowFar: true },
+  );
+  assert.equal(far.name, '西街');
+  assert.equal(far.tooFarFromDestination, true);
+
+  const gated = gateAndSchedule(
+    { destination: '衡阳', dayCount: 1, pace: 'balanced', startDate: null },
+    [far],
+    { maxPlacesPerDay: 6 },
+    'zh',
+    '',
+  );
+  assert.equal(gated.days[0].places[0].tooFar, true);
+  assert.equal(gated.days[0].places[0].selected, false);
+
+  assert.equal(progressStepForJob({ stage: 'fetch_guides' }), 1);
+  assert.equal(progressStepForJob({ stage: 'extract' }), 2);
+  assert.equal(progressStepForJob({ stage: 'gather_evidence' }), 3);
+  assert.equal(progressStepForJob({ stage: 'gate' }), 4);
+  assert.equal(publicDraft({ stage: 'extract', payload: { locale: 'zh' }, draft: { guides: [], intent: {} }, work: {} }).progress.totalSteps, 4);
+});
+
+test('commit 接受手工补坐标，无坐标不阻断其余地点写入', async () => {
+  const fixture = buildHost();
+  const { jobId, state } = await makeReady(fixture);
+  const missing = state.days.flatMap((day) => day.places).find((place) => place.unmapped);
+  const mapped = state.days.flatMap((day) => day.places).find((place) => !place.unmapped && !place.tooFar);
+  assert.ok(missing);
+  assert.ok(mapped);
+  const committed = await fixture.app.route({ method: 'POST', path: '/commit' }, {
+    body: {
+      jobId,
+      title: '补点测试',
+      evidenceIds: [mapped.evidenceId, missing.evidenceId],
+      placePatches: [{ evidenceId: missing.evidenceId, lat: 35.02, lng: 135.03, address: '手工坐标' }],
+    },
+  });
+  assert.equal(committed.status, 200);
+  assert.deepEqual(committed.body.skippedUnmapped, []);
+  assert.equal(fixture.trips[committed.body.tripId].places.length, 2);
 });
 

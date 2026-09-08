@@ -19,9 +19,10 @@ test('page keeps the TREK kit contract and has valid application JavaScript', ()
 test('redesign covers the complete planning and preview workflow', () => {
   const requiredIds = [
     'plan-form', 'destination', 'interests', 'must-see', 'start-date', 'end-date', 'day-count',
-    'pace', 'urls', 'source-text', 'xhs-keyword-search', 'xhs-search-field', 'generate', 'status', 'progress', 'warnings',
-    'warning-list', 'preview', 'sources', 'days', 'trip-title', 'commit',
+    'pace', 'guide-paste', 'xhs-keyword-search', 'xhs-search-field', 'generate', 'status', 'progress',
+    'needs-confirm', 'preview', 'sources', 'days', 'trip-title', 'commit',
     'prep-tips', 'prep-reservations', 'budget-card', 'budget-tiers', 'stage-plan', 'stage-preview', 'cookie-help', 'day-rail', 'inspector',
+    'generate-progress', 'progress-steps', 'more-options',
   ];
   for (const id of requiredIds) assert.match(html, new RegExp(`id=["']${id}["']`), id);
 
@@ -29,7 +30,7 @@ test('redesign covers the complete planning and preview workflow', () => {
     "trek.onContext", "trek.invoke('/prefs'", "trek.invoke('/plan'", "trek.invoke('/commit'",
     "progress.message", "place-photo", "photoUrl",
     "trek.navigate('/settings?tab=plugins')", "trek.openExternal",
-    'renderWarnings', 'renderSources', 'renderDays', 'syncDayState',
+    'renderNeedsConfirm', 'renderSources', 'renderDays', 'syncDayState',
     'showStage', 'renderPrepTips', 'renderPlaceDetail', 'setActiveDay',
     'renderBudget', 'renderReservations',
     'invokeErrorMessage', 'conflict', 'isTransientInvokeError', 'stillWorking',
@@ -79,7 +80,7 @@ test('theme, accessibility, and responsive host states are explicitly supported'
 
   assert.match(html, /role=["']status["'][^>]+aria-live=["']polite["']/);
   assert.match(html, /role=["']progressbar["']/);
-  assert.match(html, /role=["']alert["']/);
+  assert.match(html, /id=["']needs-confirm["']/);
   assert.match(html, /<body class="trek-ui">/);
   assert.match(html, /font-family:\s*var\(--font-system\)/);
   assert.match(html, /html\.layout-phone \.app-shell/);
