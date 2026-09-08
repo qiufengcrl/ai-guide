@@ -1,0 +1,16 @@
+---
+description: 浏览器/computerUse 必须 inherit 父会话模型，禁止自行改用 Claude
+alwaysApply: true
+---
+
+# computerUse 模型固定为 inherit
+
+拉起 `Task` 且 `subagent_type` 为 `computerUse`（浏览器操作、GUI 验收、录屏过程中的点击/输入）时：
+
+- **必须**省略 `model`，或显式设为 `inherit`（与当前 Cloud Agent 父模型一致）
+- **禁止**自行传入 `claude-4.5-sonnet`、`claude-sonnet-5` 或其他非 inherit 型号
+- 只有用户在**本会话里点名**某个允许的模型时，才可以改 `model`
+
+`RecordScreen` 本身没有模型；录屏期间的页面操作仍走上面的 `computerUse` + inherit。
+
+`videoReview` 是平台专用视觉模型，不要为了 inherit 去改它。
