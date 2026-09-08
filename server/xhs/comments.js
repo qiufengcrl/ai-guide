@@ -1,11 +1,13 @@
-const { fetchWithTimeout } = require('./url');
-const { createSignedGet } = require('./signature');
-const { XhsSessionError, throwForHttpStatus, assertSessionResponse } = require('./errors');
+const { get } = require('./client');
+const { XhsSessionError } = require('./errors');
+const { withXhsRetry } = require('./throttle');
 
 const COMMENT_PAGE_PATH = '/api/sns/web/v2/comment/page';
 const COMMENT_SUB_PAGE_PATH = '/api/sns/web/v2/comment/sub/page';
 const DEFAULT_MAX_COMMENTS = 40;
 const COMMENT_GUIDE_LIMIT = 5;
+const DEFAULT_MAX_PAGES = 2;
+const DEFAULT_MAX_SUB_PARENTS = 3;
 
 function pushComment(item, texts, maxComments) {
   const content = String(item?.content || '').trim();
@@ -28,6 +30,11 @@ function parseCommentTexts(data, maxComments = DEFAULT_MAX_COMMENTS) {
   return texts;
 }
 
+function commentItems(data) {
+  const comments = data?.data?.comments || data?.comments;
+  return Array.isArray(comments) ? comments : [];
+}
+
 function commentQuery(noteId, options = {}) {
   return {
     note_id: String(noteId || '').trim(),
@@ -38,27 +45,48 @@ function commentQuery(noteId, options = {}) {
   };
 }
 
-async function signedGetJson(path, params, cookie, options = {}) {
-  let signed;
-  try {
-    signed = createSignedGet(path, params, cookie, options);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : 'Xiaohongshu request signing failed';
-    const code = /missing the a1|missing the web_session|cookie is empty/i.test(detail) ? 'auth' : 'fetch';
-    throw new XhsSessionError(detail, code);
+function subCommentQuery(noteId, rootCommentId, options = {}) {
+  return {
+    note_id: String(noteId || '').trim(),
+    root_comment_id: String(rootCommentId || ''),
+    num: String(options.num || 10),
+    cursor: String(options.cursor || ''),
+    image_formats: 'jpg,webp,avif',
+    top_comment_id: '',
+    xsec_token: String(options.xsecToken || options.xsec_token || ''),
+  };
+}
+
+async function signedCommentGet(path, params, cookie, options = {}) {
+  return withXhsRetry(
+    () => get(path, params, cookie, options),
+    {
+      cookie,
+      userId: options.userId,
+      wait: options.wait !== false,
+      maxRetries: options.maxRetries,
+    },
+  );
+}
+
+async function fetchSubComments(noteId, cookie, parent, options = {}) {
+  const texts = [];
+  const maxComments = Number(options.maxComments) > 0 ? Number(options.maxComments) : DEFAULT_MAX_COMMENTS;
+  let cursor = String(parent.sub_comment_cursor || parent.subCommentCursor || '');
+  let hasMore = true;
+  let pages = 0;
+  while (hasMore && texts.length < maxComments && pages < 2) {
+    const data = await signedCommentGet(COMMENT_SUB_PAGE_PATH, subCommentQuery(noteId, parent.id, {
+      ...options,
+      cursor,
+    }), cookie, options);
+    const pageTexts = parseCommentTexts({ data: { comments: commentItems(data) } }, maxComments - texts.length);
+    texts.push(...pageTexts);
+    hasMore = Boolean(data?.data?.has_more ?? data?.has_more);
+    cursor = String(data?.data?.cursor || data?.cursor || '');
+    pages += 1;
   }
-  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 10000;
-  let response;
-  try {
-    response = await fetchWithTimeout(signed.url, {
-      method: 'GET',
-      headers: signed.headers,
-    }, timeoutMs);
-  } catch (error) {
-    throw new XhsSessionError(error instanceof Error ? error.message : 'Xiaohongshu network error', 'fetch');
-  }
-  throwForHttpStatus(response);
-  return assertSessionResponse(await response.json());
+  return texts;
 }
 
 async function fetchNoteComments(noteId, cookie, options = {}) {
@@ -66,9 +94,35 @@ async function fetchNoteComments(noteId, cookie, options = {}) {
   if (!id) throw new XhsSessionError('note_id is required for comments', 'fetch');
   if (!cookie) throw new XhsSessionError('Xiaohongshu Cookie is empty', 'auth');
 
-  const data = await signedGetJson(COMMENT_PAGE_PATH, commentQuery(id, options), cookie, options);
   const maxComments = Number(options.maxComments) > 0 ? Number(options.maxComments) : DEFAULT_MAX_COMMENTS;
-  return parseCommentTexts(data, maxComments);
+  const maxPages = Math.min(3, Number(options.maxPages) > 0 ? Number(options.maxPages) : DEFAULT_MAX_PAGES);
+  const texts = [];
+  let cursor = String(options.cursor || '');
+  let hasMore = true;
+  let pages = 0;
+  let subParents = 0;
+
+  while (hasMore && texts.length < maxComments && pages < maxPages) {
+    const data = await signedCommentGet(COMMENT_PAGE_PATH, commentQuery(id, { ...options, cursor }), cookie, options);
+    texts.push(...parseCommentTexts(data, maxComments - texts.length));
+    if (options.subComments !== false) {
+      for (const item of commentItems(data)) {
+        if (texts.length >= maxComments) break;
+        if (subParents >= DEFAULT_MAX_SUB_PARENTS) break;
+        if (!item?.sub_comment_has_more && !item?.subCommentHasMore) continue;
+        subParents += 1;
+        const extras = await fetchSubComments(id, cookie, item, {
+          ...options,
+          maxComments: maxComments - texts.length,
+        });
+        texts.push(...extras.slice(0, maxComments - texts.length));
+      }
+    }
+    hasMore = Boolean(data?.data?.has_more);
+    cursor = String(data?.data?.cursor || '');
+    pages += 1;
+  }
+  return texts;
 }
 
 module.exports = {

@@ -42,6 +42,7 @@ const {
   isXhsAuthError,
   isXhsVerificationError,
 } = require('./xhs/session');
+const { pong } = require('./xhs/client');
 const { withXhsRetry, xhsThrottle, isXhsRateLimitError } = require('./xhs/throttle');
 const {
   XHS_COOKIE_STALE_MS,
@@ -85,7 +86,7 @@ async function ensureXhsSignedAccess(job, work, cookie, locale, ctx) {
   if (work.xhsHealthChecked) return true;
   work.xhsHealthChecked = true;
   try {
-    await withXhsRetry(() => searchNotesDetailed('旅行', cookie, 1), { cookie });
+    await withXhsRetry(() => pong(cookie), { cookie });
     await writeXhsCookieUpdatedAt(ctx, job.userId, cookie);
     return true;
   } catch (error) {
@@ -237,7 +238,7 @@ async function runKeywordSearch(job, work, cookie, limits, locale, ctx) {
     if (slotsLeft <= 0) break;
     try {
       const pool = Math.min(SEARCH_PAGE_SIZE, Math.max(slotsLeft * 3, slotsLeft));
-      const { notes: automatic } = await withXhsRetry(() => searchNotesDetailed(query, cookie, pool), { cookie });
+      const { notes: automatic } = await searchNotesDetailed(query, cookie, pool);
       work.lastSearchQuery = query;
       work.lastSearchCount = automatic.length;
       if (!automatic.length) continue;
@@ -311,7 +312,7 @@ async function advance(job, ctx) {
           const remaining = remainingXhsNoteSlots(job.draft.guides, work.pendingNotes, limits.maxNotes);
           const seen = collectXhsNoteIds(job.draft.guides, work.pendingNotes);
           const pool = Math.min(SEARCH_PAGE_SIZE, Math.max(remaining || limits.maxNotes, 8));
-          const found = await withXhsRetry(() => searchNotesDetailed(keyword, cookie, pool), { cookie });
+          const found = await searchNotesDetailed(keyword, cookie, pool);
           for (const item of selectSearchNotes(found.notes, remaining || limits.maxNotes)) {
             if (seen.has(item.noteId) || seen.size >= limits.maxNotes) continue;
             seen.add(item.noteId);
@@ -534,15 +535,11 @@ async function advance(job, ctx) {
     const guide = ranked[index];
     work.commentGuideIndex = index + 1;
     try {
-      await xhsThrottle.wait(cookie, job.userId);
-      const comments = await withXhsRetry(
-        () => fetchNoteComments(guide.noteId, cookie, {
-          maxComments: DEFAULT_MAX_COMMENTS,
-          timeoutMs: 10000,
-          xsecToken: guide.xsecToken,
-        }),
-        { cookie, maxRetries: 1 },
-      );
+      const comments = await fetchNoteComments(guide.noteId, cookie, {
+        maxComments: DEFAULT_MAX_COMMENTS,
+        timeoutMs: 10000,
+        xsecToken: guide.xsecToken,
+      });
       const insights = extractCommentInsights(comments, 8);
       if (insights.length) guide.commentInsights = insights;
     } catch (error) {
@@ -683,10 +680,12 @@ async function testXhs(ctx, locale = 'en', keyword = '旅行', userId = null) {
   try {
     const searchKeyword = String(keyword || '旅行').trim() || '旅行';
     // TREK settings actions time out at 15s; keep health checks single-shot and fast.
-    const { notes, debug } = await withXhsRetry(
-      () => searchNotesDetailed(searchKeyword, cookie, 4, { timeoutMs: 8000 }),
-      { cookie, maxRetries: 0, wait: false },
-    );
+    const { notes, debug } = await searchNotesDetailed(searchKeyword, cookie, 4, {
+      timeoutMs: 8000,
+      maxRetries: 0,
+      wait: false,
+      maxPages: 1,
+    });
     await writeXhsCookieUpdatedAt(ctx, uid, cookie);
     if (!notes.length) {
       return {

@@ -1,14 +1,15 @@
-const { fetchWithTimeout, fetchHtmlNote, exploreNoteUrl } = require('./url');
-const { createSearchId, createSignedPost } = require('./signature');
+const { fetchHtmlNote, exploreNoteUrl } = require('./url');
+const { createSearchId } = require('./signature');
 const { isXhsRateLimitError, withXhsRetry } = require('./throttle');
 const {
   XhsSessionError,
   isXhsAuthError,
   isXhsVerificationError,
   isXhsNotFoundError,
-  throwForHttpStatus,
   assertSessionResponse,
 } = require('./errors');
+const { post, pong } = require('./client');
+const { SearchSortType, SearchNoteType } = require('./field');
 
 const SEARCH_PAGE_SIZE = 20;
 const SKIP_SEARCH_MODELS = new Set(['rec_query', 'hot_query', 'user']);
@@ -74,30 +75,6 @@ function formatXhsDegradedWarning(error, locale, messageFn) {
   return formatXhsWarning(error, locale, messageFn);
 }
 
-async function post(path, body, cookie, options = {}) {
-  let signed;
-  try {
-    signed = createSignedPost(path, body, cookie);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : 'Xiaohongshu request signing failed';
-    const code = /missing the a1|missing the web_session|cookie is empty/i.test(detail) ? 'auth' : 'fetch';
-    throw new XhsSessionError(detail, code);
-  }
-  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 12000;
-  let response;
-  try {
-    response = await fetchWithTimeout(`https://edith.xiaohongshu.com${path}`, {
-      method: 'POST',
-      headers: signed.headers,
-      body: signed.body,
-    }, timeoutMs);
-  } catch (error) {
-    throw new XhsSessionError(error instanceof Error ? error.message : 'Xiaohongshu network error', 'fetch');
-  }
-  throwForHttpStatus(response);
-  return assertSessionResponse(await response.json());
-}
-
 function parseSearchNotes(data, maxNotes = 4) {
   const items = data?.data?.items || data?.data?.notes || [];
   if (!Array.isArray(items)) return [];
@@ -132,36 +109,61 @@ async function searchNotes(keyword, cookie, maxNotes = 4) {
 
 async function searchNotesDetailed(keyword, cookie, maxNotes = 4, options = {}) {
   if (!cookie) throw new XhsSessionError('Xiaohongshu Cookie is empty', 'auth');
-  const sort = options.sort === 'time_descending' || options.sort === 'popularity_descending'
+  const sort = options.sort === SearchSortType.LATEST || options.sort === SearchSortType.MOST_POPULAR
     ? options.sort
-    : 'general';
-  const page = Number(options.page) > 0 ? Number(options.page) : 1;
+    : SearchSortType.GENERAL;
+  const noteType = Number.isFinite(Number(options.noteType)) ? Number(options.noteType) : SearchNoteType.ALL;
   const searchId = String(options.searchId || options.search_id || createSearchId());
-  const data = await post('/api/sns/web/v1/search/notes', {
-    keyword: String(keyword || '').trim(),
-    page,
-    page_size: SEARCH_PAGE_SIZE,
-    search_id: searchId,
-    sort,
-    note_type: Number.isFinite(Number(options.noteType)) ? Number(options.noteType) : 0,
-    ext_flags: [],
-    filters: [
-      { tags: [sort === 'time_descending' ? 'time_descending' : sort === 'popularity_descending' ? 'popularity_descending' : 'general'], type: 'sort_type' },
-      { tags: ['不限'], type: 'filter_note_type' },
-      { tags: ['不限'], type: 'filter_note_time' },
-      { tags: ['不限'], type: 'filter_note_range' },
-      { tags: ['不限'], type: 'filter_pos_distance' },
-    ],
-    geo: '',
-    image_formats: ['jpg', 'webp', 'avif'],
-  }, cookie, options);
-  const payload = data?.data && typeof data.data === 'object' ? data.data : {};
+  const maxPages = Math.min(3, Number(options.maxPages) > 0 ? Number(options.maxPages) : 2);
+  const startPage = Number(options.page) > 0 ? Number(options.page) : 1;
+  const collected = [];
+  const seen = new Set();
+  let hasMore = false;
+  let lastPage = startPage;
+  let lastDebug = null;
+
+  for (let page = startPage; page < startPage + maxPages && collected.length < maxNotes; page += 1) {
+    lastPage = page;
+    const remaining = maxNotes - collected.length;
+    const data = await withXhsRetry(
+      () => post('/api/sns/web/v1/search/notes', {
+        keyword: String(keyword || '').trim(),
+        page,
+        page_size: SEARCH_PAGE_SIZE,
+        search_id: searchId,
+        sort,
+        note_type: noteType,
+        ext_flags: [],
+        filters: [
+          { tags: [sort], type: 'sort_type' },
+          { tags: ['不限'], type: 'filter_note_type' },
+          { tags: ['不限'], type: 'filter_note_time' },
+          { tags: ['不限'], type: 'filter_note_range' },
+          { tags: ['不限'], type: 'filter_pos_distance' },
+        ],
+        geo: '',
+        image_formats: ['jpg', 'webp', 'avif'],
+      }, cookie, options),
+      { cookie, wait: options.wait !== false, maxRetries: options.maxRetries },
+    );
+    lastDebug = inspectSearchData(data);
+    const payload = data?.data && typeof data.data === 'object' ? data.data : {};
+    hasMore = Boolean(payload.has_more);
+    for (const note of parseSearchNotes(data, remaining)) {
+      if (seen.has(note.noteId)) continue;
+      seen.add(note.noteId);
+      collected.push(note);
+      if (collected.length >= maxNotes) break;
+    }
+    if (!hasMore) break;
+  }
+
   return {
-    notes: parseSearchNotes(data, maxNotes),
-    hasMore: Boolean(payload.has_more),
+    notes: collected,
+    hasMore,
     searchId,
-    page,
-    debug: inspectSearchData(data),
+    page: lastPage,
+    debug: lastDebug,
   };
 }
 
@@ -293,4 +295,5 @@ module.exports = {
   fetchSessionNote,
   fetchNoteCoverImage,
   parseSearchNotes,
+  pong,
 };

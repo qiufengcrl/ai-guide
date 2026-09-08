@@ -110,7 +110,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.45');
+  assert.equal(manifest.version, '1.1.46');
 });
 
 function memoryDb() {
@@ -200,6 +200,33 @@ function memoryDb() {
     cookieClock,
   };
   return api;
+}
+
+function xhsJson(body, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get() { return null; } },
+    async json() { return body; },
+  };
+}
+
+function xhsSelfinfoOk() {
+  return xhsJson({ success: true, data: { result: { success: true }, user_id: 'u1' } });
+}
+
+function xhsEmptySearch() {
+  return xhsJson({ success: true, data: { items: [] } });
+}
+
+function xhsSessionThen(handler) {
+  return (url) => {
+    const href = String(url);
+    if (href.includes('/user/selfinfo')) return xhsSelfinfoOk();
+    if (typeof handler === 'function') return handler(href);
+    if (href.includes('edith.xiaohongshu.com')) return xhsEmptySearch();
+    throw new Error(`Unexpected fetch: ${href}`);
+  };
 }
 
 function buildHost(options = {}) {
@@ -553,18 +580,7 @@ test('Cookie 搜索为空时给出说明，兴趣词不会变成景点', async (
       { name: '白马寺', dayHint: 2 },
     ] }],
   });
-  const xhsFallback = async (url) => {
-    const href = String(url);
-    if (href.includes('edith.xiaohongshu.com')) {
-      return {
-        ok: true,
-        status: 200,
-        headers: { get() { return null; } },
-        async json() { return { success: true, data: { items: [] } }; },
-      };
-    }
-    throw new Error(`Unexpected fetch: ${href}`);
-  };
+  const xhsFallback = xhsSessionThen();
   const { state } = await makeReady(fixture, {
     destination: '河南',
     dayCount: 2,
@@ -1482,6 +1498,48 @@ test('设置页 testXhs 在无 userId 时不写无主 clock', async () => {
   }
 });
 
+test('设置页 testXhs 即使 has_more 也只请求一页搜索', async () => {
+  const fixture = buildHost({
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+  });
+  await fixture.app.load();
+  const original = global.fetch;
+  let fetchCount = 0;
+  global.fetch = async (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      fetchCount += 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() {
+          return {
+            success: true,
+            data: {
+              has_more: true,
+              items: [{
+                model_type: 'note',
+                id: '64f000000000000000000001',
+                xsec_token: 'tok',
+                note_card: { display_title: '京都一日' },
+              }],
+            },
+          };
+        },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  try {
+    const result = await fixture.app.action('testXhs');
+    assert.equal(fetchCount, 1);
+    assert.equal(result.ok, true);
+    assert.match(result.message, /搜到 1 篇/);
+  } finally {
+    global.fetch = original;
+  }
+});
+
 test('设置页 testXhs 遇限流不重试，避免超过 TREK 15s action 超时', async () => {
   const fixture = buildHost({
     userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
@@ -1520,17 +1578,7 @@ test('settings 旧时间戳不会盖住健康检查写入的新值', async () =>
       xhs_cookie_updated_at: String(eightDaysAgo),
     },
   });
-  const xhsFallback = (url) => {
-    if (String(url).includes('edith.xiaohongshu.com')) {
-      return {
-        ok: true,
-        status: 200,
-        headers: { get() { return null; } },
-        async json() { return { success: true, data: { items: [] } }; },
-      };
-    }
-    throw new Error(`Unexpected fetch: ${url}`);
-  };
+  const xhsFallback = xhsSessionThen();
   const first = await makeReady(fixture, {
     destination: '京都',
     locale: 'zh',
@@ -1552,6 +1600,14 @@ test('session 429 后剩余笔记改走公开页，且文案不再提关键词�
   let publicCalls = 0;
   const xhsFallback = (url) => {
     const href = String(url);
+    if (href.includes('/user/selfinfo')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() { return { success: true, data: { result: { success: true }, user_id: 'u1' } }; },
+      };
+    }
     if (href.includes('/search/notes')) {
       return {
         ok: true,
@@ -1599,17 +1655,7 @@ test('deleteUserData 清除该用户 cookie clock', async () => {
     config: { xhs_enabled: true },
     userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
   });
-  const xhsFallback = (url) => {
-    if (String(url).includes('edith.xiaohongshu.com')) {
-      return {
-        ok: true,
-        status: 200,
-        headers: { get() { return null; } },
-        async json() { return { success: true, data: { items: [] } }; },
-      };
-    }
-    throw new Error(`Unexpected fetch: ${url}`);
-  };
+  const xhsFallback = xhsSessionThen();
   await makeReady(fixture, { destination: '京都', xhsKeywordSearch: true, locale: 'zh' }, xhsFallback);
   assert.ok(fixture.db.cookieClock.size > 0);
   assert.ok([...fixture.db.cookieClock.values()].every((row) => row.user_id === 7));
