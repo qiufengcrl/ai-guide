@@ -115,5 +115,9 @@ test('AGENTS.md: kit classes first, tokens only, trek.session, native select', (
   assert.doesNotMatch(html, /\.app-shell \.trek-select \{/);
   assert.doesNotMatch(html, /class="app-shell trek-scroll"/);
   assert.match(html, /class="page trek-scroll/);
+  assert.match(html, /class="preview-board trek-scroll/);
+  assert.match(html, /html\.layout-phone \.page\.trek-scroll/);
+  assert.match(html, /padding-bottom:\s*max\(var\(--trek-inset-bottom/);
+  assert.doesNotMatch(html, /class="day-rail trek-cluster"/);
   assert.doesNotMatch(html, /\.trek-btn\s*\{[^}]*background:\s*var\(--accent\)/);
 });

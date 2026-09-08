@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>AI 攻略</title>
   <!-- trek:ui -->
   <style>
@@ -23,7 +23,7 @@
 
     .app-shell {
       height: 100%;
-      min-height: 100%;
+      min-height: 0;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -31,7 +31,8 @@
     }
     html[data-form-factor="phone"] .app-shell,
     html.layout-phone .app-shell {
-      padding-bottom: var(--trek-inset-bottom, 0px);
+      /* Host dock overlays the iframe; fall back when inset is missing/too small. */
+      padding-bottom: max(var(--trek-inset-bottom, 0px), 88px);
     }
     .toolbar { padding: 12px 16px; border-bottom: 1px solid var(--border-faint); }
     .toolbar-grow { flex: 1; min-width: 0; }
@@ -42,7 +43,15 @@
       display: flex;
       flex-direction: column;
     }
-    .page { flex: 1; min-height: 0; padding: 16px; }
+    .page {
+      flex: 1;
+      min-height: 0;
+      padding: 16px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+    }
     .field-grid { display: grid; gap: 12px; }
     @media (min-width: 720px) {
       .field-grid { grid-template-columns: 1fr 1fr; }
@@ -57,6 +66,10 @@
       flex: 1; min-height: 0;
       display: flex; flex-direction: column; gap: 12px;
       padding: 12px 16px 16px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
     }
     .board-split {
       flex: 1; min-height: 0;
@@ -71,13 +84,58 @@
       }
     }
     .days-wrap { min-height: 0; display: flex; flex-direction: column; gap: 8px; }
-    .day-rail { display: flex; gap: 8px; overflow-x: auto; }
+    .day-rail {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 8px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
     .days-list { flex: 1; min-height: 0; }
     .day-card { display: none; }
     .day-card.is-active { display: block; }
     .day-header { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
     .inspector { min-height: 0; display: flex; flex-direction: column; }
     .inspector-body { flex: 1; min-height: 0; padding: 12px; }
+
+    /* Phone: one scroll surface per stage. Nested height:100% trek-scroll
+       boxes trap touch events and clip the generate / commit buttons. */
+    html.layout-phone .page.trek-scroll,
+    html.layout-phone .preview-board.trek-scroll,
+    html[data-fill].layout-phone .page.trek-scroll,
+    html[data-fill].layout-phone .preview-board.trek-scroll {
+      height: auto;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    html.layout-phone .toolbar { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+    html.layout-phone .toolbar > .trek-cluster:last-child { width: 100%; }
+    html.layout-phone .board-split {
+      display: flex;
+      flex-direction: column;
+      flex: none;
+      height: auto;
+      min-height: 0;
+    }
+    html.layout-phone .days-wrap,
+    html.layout-phone .days-list,
+    html.layout-phone .inspector {
+      flex: none;
+      height: auto;
+      min-height: 0;
+    }
+    html.layout-phone .days-list.trek-scroll,
+    html.layout-phone .inspector-body.trek-scroll,
+    html[data-fill].layout-phone .days-list.trek-scroll,
+    html[data-fill].layout-phone .inspector-body.trek-scroll {
+      height: auto;
+      overflow: visible;
+    }
+    html.layout-phone .inspector-body { padding: 12px 0 8px; }
+    html.layout-phone #warnings { flex: none; }
+    html.layout-phone #plan-form { padding-bottom: 8px; }
     .place-photo {
       width: 40px; height: 40px; flex: none;
       border-radius: var(--radius-md);
@@ -230,7 +288,7 @@
     </section>
 
     <section class="stage-view preview-view hidden" id="preview" role="tabpanel" aria-labelledby="preview-title">
-      <div class="preview-board">
+      <div class="preview-board trek-scroll">
         <section id="warnings" class="trek-card hidden" role="alert">
           <strong data-i18n="warnings">A few things to review</strong>
           <span class="trek-chip trek-chip--warning" id="warning-count">0</span>
@@ -248,7 +306,7 @@
 
         <div class="board-split">
           <div class="days-wrap">
-            <nav class="day-rail trek-cluster" id="day-rail" role="tablist" aria-label="Days" data-i18n-aria-label="dayRail"></nav>
+            <nav class="day-rail" id="day-rail" role="tablist" aria-label="Days" data-i18n-aria-label="dayRail"></nav>
             <div id="days" class="days-list trek-scroll trek-stagger"></div>
           </div>
           <aside class="inspector trek-card" id="inspector">
@@ -893,7 +951,11 @@
     }
 
     function syncDockInset(ctx) {
-      /* Host kit already publishes --trek-inset-bottom. */
+      var ins = ctx && ctx.viewport && ctx.viewport.insets;
+      var bottom = ins && Number(ins.bottom);
+      if (Number.isFinite(bottom) && bottom > 0) {
+        document.documentElement.style.setProperty('--trek-inset-bottom', bottom + 'px');
+      }
     }
 
     function applyLayoutMode(ctx) {
