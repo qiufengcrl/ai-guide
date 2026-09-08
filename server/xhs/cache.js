@@ -43,6 +43,15 @@ async function writeRow(ctx, table, userId, noteId, payload) {
   if (!ctx?.db || !uid || !id || !payload || typeof payload !== 'object') return;
   try {
     await ctx.db.exec(
+      `DELETE FROM ${table} WHERE user_id = ? AND fetched_at < ?`,
+      uid,
+      Date.now() - TTL_MS,
+    );
+  } catch {
+    // Best-effort sweep; write still proceeds.
+  }
+  try {
+    await ctx.db.exec(
       `INSERT INTO ${table} (user_id, note_id, payload_json, fetched_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, note_id) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at`,
       uid,
       id,
@@ -64,7 +73,7 @@ async function writeNote(ctx, userId, noteId, note) {
     noteId: note.noteId || noteId,
     xsecToken: note.xsecToken || '',
     title: note.title || '',
-    text: note.text || '',
+    text: String(note.text || '').slice(0, 4000),
     url: note.url || '',
     via: note.via || 'search',
   });

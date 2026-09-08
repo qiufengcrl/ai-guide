@@ -36,12 +36,26 @@ function memoryCacheDb() {
         return { changes: 1 };
       }
       if (/DELETE FROM xhs_note_cache/i.test(sql)) {
+        if (sql.includes('fetched_at')) {
+          let changes = 0;
+          for (const [id, row] of notes) {
+            if (row.user_id === args[0] && Number(row.fetched_at) < args[1]) { notes.delete(id); changes += 1; }
+          }
+          return { changes };
+        }
         if (sql.includes('note_id')) return { changes: notes.delete(key(args[0], args[1])) ? 1 : 0 };
         let changes = 0;
         for (const [id, row] of notes) if (row.user_id === args[0]) { notes.delete(id); changes += 1; }
         return { changes };
       }
       if (/DELETE FROM xhs_comment_cache/i.test(sql)) {
+        if (sql.includes('fetched_at')) {
+          let changes = 0;
+          for (const [id, row] of comments) {
+            if (row.user_id === args[0] && Number(row.fetched_at) < args[1]) { comments.delete(id); changes += 1; }
+          }
+          return { changes };
+        }
         if (sql.includes('note_id')) return { changes: comments.delete(key(args[0], args[1])) ? 1 : 0 };
         let changes = 0;
         for (const [id, row] of comments) if (row.user_id === args[0]) { comments.delete(id); changes += 1; }
@@ -121,9 +135,45 @@ test('评论缓存命中后不再请求 comment/page', async () => {
   try {
     const first = await xhs.fetchComments('64f000000000000000000001', VALID_COOKIE, { ctx, userId: 7, maxComments: 10 });
     const second = await xhs.fetchComments('64f000000000000000000001', VALID_COOKIE, { ctx, userId: 7, maxComments: 10 });
+    const other = await xhs.fetchComments('64f000000000000000000001', VALID_COOKIE, { ctx, userId: 8, maxComments: 10 });
     assert.ok(first.some((line) => /门票/.test(line)));
     assert.deepEqual(second, first);
-    assert.equal(calls, 1);
+    assert.equal(calls, 2);
+    assert.ok(other.some((line) => /门票/.test(line)));
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('HTML 兜底不写入笔记缓存，下次仍打 signed feed', async () => {
+  const xhs = get('xhs');
+  const db = memoryCacheDb();
+  const ctx = { db };
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures/note.html'), 'utf8');
+  const originalFetch = global.fetch;
+  let feedCalls = 0;
+  global.fetch = async (url) => {
+    if (String(url).includes('/feed')) {
+      feedCalls += 1;
+      return { ok: false, status: 429, headers: { get() { return null; } }, async json() { return {}; } };
+    }
+    if (String(url).includes('xiaohongshu.com')) {
+      return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  try {
+    const item = {
+      noteId: '64f000000000000000000001',
+      xsecToken: 'tok',
+      url: 'https://www.xiaohongshu.com/explore/64f000000000000000000001',
+      via: 'search',
+    };
+    await assert.rejects(xhs.fetchNote(item, VALID_COOKIE, { ctx, userId: 7 }));
+    assert.equal(db.notes.size, 0);
+    const firstFeeds = feedCalls;
+    await assert.rejects(xhs.fetchNote(item, VALID_COOKIE, { ctx, userId: 7 }));
+    assert.ok(feedCalls > firstFeeds);
   } finally {
     global.fetch = originalFetch;
   }

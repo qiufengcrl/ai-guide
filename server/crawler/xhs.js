@@ -8,16 +8,9 @@ async function fetchNote(item, cookie, options = {}) {
     const hit = await cache.readNote(options.ctx, options.userId, item?.noteId);
     if (hit) return { ...hit, xsecToken: item?.xsecToken || hit.xsecToken || '' };
   }
-  try {
-    const note = await session.fetchSessionNote(item, cookie);
-    if (options.cache !== false) await cache.writeNote(options.ctx, options.userId, item?.noteId, note);
-    return note;
-  } catch (error) {
-    if (error?.fallbackNote && options.cache !== false) {
-      await cache.writeNote(options.ctx, options.userId, item?.noteId, error.fallbackNote);
-    }
-    throw error;
-  }
+  const note = await session.fetchSessionNote(item, cookie);
+  if (options.cache !== false) await cache.writeNote(options.ctx, options.userId, item?.noteId, note);
+  return note;
 }
 
 async function fetchComments(noteId, cookie, options = {}) {

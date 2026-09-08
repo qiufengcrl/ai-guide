@@ -182,6 +182,13 @@ function memoryDb() {
         return { changes: 1 };
       }
       if (/DELETE FROM xhs_note_cache/i.test(sql)) {
+        if (sql.includes('fetched_at')) {
+          let changes = 0;
+          for (const [key, row] of noteCache) {
+            if (row.user_id === args[0] && Number(row.fetched_at) < args[1]) { noteCache.delete(key); changes += 1; }
+          }
+          return { changes };
+        }
         if (sql.includes('note_id')) {
           return { changes: noteCache.delete(cacheKey(args[0], args[1])) ? 1 : 0 };
         }
@@ -190,6 +197,13 @@ function memoryDb() {
         return { changes };
       }
       if (/DELETE FROM xhs_comment_cache/i.test(sql)) {
+        if (sql.includes('fetched_at')) {
+          let changes = 0;
+          for (const [key, row] of commentCache) {
+            if (row.user_id === args[0] && Number(row.fetched_at) < args[1]) { commentCache.delete(key); changes += 1; }
+          }
+          return { changes };
+        }
         if (sql.includes('note_id')) {
           return { changes: commentCache.delete(cacheKey(args[0], args[1])) ? 1 : 0 };
         }
@@ -771,6 +785,20 @@ test('deleteUserData 幂等清除该用户任务，export 不含 Cookie 或正�
     JSON.stringify({ text: '伏见稻荷第一天不要写进导出' }),
     Date.now(),
   );
+  await fixture.db.exec(
+    'INSERT INTO xhs_note_cache (user_id, note_id, payload_json, fetched_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, note_id) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at',
+    8,
+    'n2',
+    JSON.stringify({ text: 'other-user-note' }),
+    Date.now(),
+  );
+  await fixture.db.exec(
+    'INSERT INTO xhs_comment_cache (user_id, note_id, payload_json, fetched_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, note_id) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at',
+    8,
+    'n2',
+    JSON.stringify({ texts: ['other-user-comment'] }),
+    Date.now(),
+  );
   const before = await fixture.app.exportUserData(7);
   assert.equal(JSON.stringify(before).includes('第一天'), false);
   assert.equal(JSON.stringify(before).includes('伏见稻荷'), false);
@@ -778,8 +806,9 @@ test('deleteUserData 幂等清除该用户任务，export 不含 Cookie 或正�
   await fixture.app.deleteUserData(7);
   await fixture.app.deleteUserData(7);
   assert.equal(fixture.db.jobs.size, 0);
-  assert.equal(fixture.db.noteCache.size, 0);
-  assert.equal(fixture.db.commentCache.size, 0);
+  assert.equal(fixture.db.noteCache.size, 1);
+  assert.equal(fixture.db.commentCache.size, 1);
+  assert.equal([...fixture.db.noteCache.values()][0].user_id, 8);
 });
 
 test('Nominatim 有目的地偏差时会 bounded 限制 viewbox', async () => {
