@@ -29,10 +29,16 @@
       overflow: hidden;
       padding-bottom: var(--trek-inset-bottom, 0px);
     }
+    /* Phone: do not shrink the iframe with a guess. The host dock overlays the
+       frame; clearance lives inside the scrollers so the last control can move
+       fully above the dock. */
     html[data-form-factor="phone"] .app-shell,
     html.layout-phone .app-shell {
-      /* Host dock overlays the iframe; fall back when inset is missing/too small. */
-      padding-bottom: max(var(--trek-inset-bottom, 0px), 88px);
+      padding-bottom: 0;
+    }
+    html.layout-phone,
+    html[data-form-factor="phone"] {
+      --app-dock-clearance: 220px;
     }
     .toolbar { padding: 12px 16px; border-bottom: 1px solid var(--border-faint); }
     .toolbar-grow { flex: 1; min-width: 0; }
@@ -98,17 +104,32 @@
     .inspector { min-height: 0; display: flex; flex-direction: column; }
     .inspector-body { flex: 1; min-height: 0; padding: 12px; }
 
-    /* Phone: one scroll surface per stage. Nested height:100% trek-scroll
-       boxes trap touch events and clip the generate / commit buttons. */
+    /* Phone: one scrollport per stage (flex 1 1 0 + height 0). iOS WebKit
+       omits the scroller's own padding-bottom from scrollHeight, so dock
+       clearance is a real last-child spacer, not padding on .page. */
     html.layout-phone .page.trek-scroll,
     html.layout-phone .preview-board.trek-scroll,
     html[data-fill].layout-phone .page.trek-scroll,
-    html[data-fill].layout-phone .preview-board.trek-scroll {
-      height: auto;
-      flex: 1 1 auto;
+    html[data-fill].layout-phone .preview-board.trek-scroll,
+    html[data-form-factor="phone"] .page.trek-scroll,
+    html[data-form-factor="phone"] .preview-board.trek-scroll {
+      height: 0;
+      flex: 1 1 0%;
       min-height: 0;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+    }
+    .dock-spacer { display: none; height: 0; }
+    html.layout-phone .dock-spacer,
+    html[data-form-factor="phone"] .dock-spacer {
+      display: block;
+      flex: none;
+      width: 100%;
+      height: var(--app-dock-clearance, 220px);
+      min-height: max(220px, calc(168px + env(safe-area-inset-bottom, 0px)));
+      pointer-events: none;
     }
     html.layout-phone .toolbar { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
     html.layout-phone .toolbar > .trek-cluster:last-child { width: 100%; }
@@ -135,7 +156,11 @@
     }
     html.layout-phone .inspector-body { padding: 12px 0 8px; }
     html.layout-phone #warnings { flex: none; }
-    html.layout-phone #plan-form { padding-bottom: 8px; }
+    html.layout-phone #plan-form { padding-bottom: 12px; }
+    html.layout-phone #generate,
+    html.layout-phone #commit {
+      scroll-margin-bottom: var(--app-dock-clearance, 220px);
+    }
     .place-photo {
       width: 40px; height: 40px; flex: none;
       border-radius: var(--radius-md);
@@ -284,6 +309,7 @@
             <span data-i18n="generate">Generate preview</span>
           </button>
         </form>
+        <div class="dock-spacer" aria-hidden="true"></div>
       </main>
     </section>
 
@@ -349,6 +375,7 @@
             </div>
           </aside>
         </div>
+        <div class="dock-spacer" aria-hidden="true"></div>
       </div>
       <h2 id="preview-title" class="hidden" data-i18n="preview">Preview the journey</h2>
     </section>
@@ -953,9 +980,12 @@
     function syncDockInset(ctx) {
       var ins = ctx && ctx.viewport && ctx.viewport.insets;
       var bottom = ins && Number(ins.bottom);
+      var clearance = 220;
       if (Number.isFinite(bottom) && bottom > 0) {
         document.documentElement.style.setProperty('--trek-inset-bottom', bottom + 'px');
+        clearance = Math.max(clearance, bottom + 48);
       }
+      document.documentElement.style.setProperty('--app-dock-clearance', clearance + 'px');
     }
 
     function applyLayoutMode(ctx) {

@@ -117,7 +117,11 @@ test('AGENTS.md: kit classes first, tokens only, trek.session, native select', (
   assert.match(html, /class="page trek-scroll/);
   assert.match(html, /class="preview-board trek-scroll/);
   assert.match(html, /html\.layout-phone \.page\.trek-scroll/);
-  assert.match(html, /padding-bottom:\s*max\(var\(--trek-inset-bottom/);
+  assert.match(html, /class="dock-spacer"/);
+  assert.match(html, /html\.layout-phone \.dock-spacer/);
+  assert.match(html, /--app-dock-clearance/);
+  assert.match(html, /flex:\s*1 1 0%/);
+  assert.equal([...html.matchAll(/class="dock-spacer"/g)].length, 2);
   assert.doesNotMatch(html, /class="day-rail trek-cluster"/);
   assert.doesNotMatch(html, /\.trek-btn\s*\{[^}]*background:\s*var\(--accent\)/);
 });
