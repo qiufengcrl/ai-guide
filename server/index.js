@@ -10,6 +10,7 @@ const {
   extractionInstruction,
   resolveExtractCandidates,
   inferDestinationFromGuides,
+  applyGuideDerivedIntent,
   mergeGuideTexts,
   guideTextForExtractRetry,
   extractRetryInstruction,
@@ -25,6 +26,7 @@ const {
   collectXhsNoteIds,
   mapConcurrent,
   resolveCandidateEvidence,
+  unmappedEvidenceFromCandidate,
   pickDestinationBias,
   MAX_FROM_DESTINATION_KM,
   filterMarketingGuides,
@@ -429,6 +431,7 @@ async function advance(job, ctx) {
           `Destination was empty; inferred "${inferred}" from note titles.`));
       }
     }
+    applyGuideDerivedIntent(job.draft.intent, job.draft.guides, limits);
     const hasGuides = (job.draft.guides || []).some((guide) => String(guide.text || '').trim());
     let extracted = {};
     let llmError = null;
@@ -595,10 +598,18 @@ async function advance(job, ctx) {
             `"${item.query}" is more than ${limitKm} km from the destination and was skipped`));
           continue;
         }
-        if (item?.query) {
+        const fallback = unmappedEvidenceFromCandidate(candidate, index);
+        fallback.commentTips = commentTipsForPlace(
+          fallback.name,
+          job.draft.guides,
+          fallback.fromGuideIds,
+        );
+        job.work.evidence.push(fallback);
+        const label = String(candidate?.nameZh || candidate?.name || item.query || '').trim();
+        if (label) {
           addWarning(job, message(locale,
-            `「${item.query}」无法匹配坐标，已跳过`,
-            `"${item.query}" could not be matched to coordinates and was skipped`));
+            `「${label}」未能匹配地图，已保留在行程中`,
+            `"${label}" could not be mapped and was kept in the itinerary`));
         }
         if (item?.error) {
           addWarning(job, message(locale,
@@ -876,6 +887,11 @@ module.exports = definePlugin({
         if (!selected.length) return response(400, {
           error: message(job.payload.locale, '草稿中没有仍被选中的证据点', 'No selected evidence remains in this draft'),
         });
+        const mappable = selected.filter((item) => typeof item.lat === 'number' && Number.isFinite(item.lat)
+          && typeof item.lng === 'number' && Number.isFinite(item.lng));
+        if (!mappable.length) return response(400, {
+          error: message(job.payload.locale, '勾选的地点还没有地图坐标，无法写入 TREK', 'Selected places have no map coordinates and cannot be written to TREK'),
+        });
         const intent = job.draft.intent;
         const trip = await ctx.trips.create({
           title: String(body.title || intent.destination || 'AI Guide').slice(0, 200),
@@ -888,7 +904,7 @@ module.exports = definePlugin({
         const categoryMap = await loadTrekCategoryMap(ctx);
         const createdPlaceIds = [];
         try {
-          for (const item of selected) {
+          for (const item of mappable) {
             const dayIndex = job.draft.days.indexOf(item.day);
             const day = days[dayIndex];
             if (!day) continue;

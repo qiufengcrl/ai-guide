@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, nearDestination, pickDestinationBias, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, inferDestinationFromGuides, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES, guideSearchQueries } = require('../server/pipeline');
+const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, nearDestination, pickDestinationBias, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, inferDestinationFromGuides, inferDayCountFromGuides, filterInventedCandidates, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES, guideSearchQueries } = require('../server/pipeline');
 const { normalizeXhsCookie, formatXhsWarning, formatXhsDegradedWarning, isXhsAuthError, XhsSessionError } = require('../server/xhs/session');
 const { parseInitialState } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces, isRateLimitError } = require('../server/geo/nominatim');
@@ -110,7 +110,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.47');
+  assert.equal(manifest.version, '1.1.50');
 });
 
 function memoryDb() {
@@ -348,7 +348,7 @@ test('公开页夹具解析 undefined，并规范化 Cookie', () => {
   assert.equal(normalizeXhsCookie('{"name":"sid","value":"abc"}'), 'sid=abc');
 });
 
-test('Gate 丢弃无坐标/重复，并保留过远点且默认不选', () => {
+test('Gate 去重后保留无坐标点，过远点默认不选', () => {
   const evidence = [
     { id: 'ev_1', name: 'A', lat: 35, lng: 135, dayHint: 1 },
     { id: 'ev_dup', name: 'A', lat: 35, lng: 135, dayHint: 1 },
@@ -362,9 +362,11 @@ test('Gate 丢弃无坐标/重复，并保留过远点且默认不选', () => {
     'zh',
     '',
   );
-  assert.deepEqual(result.days[0].places.map((place) => place.evidenceId), ['ev_1', 'ev_2']);
+  assert.deepEqual(result.days[0].places.map((place) => place.evidenceId), ['ev_1', 'ev_2', 'ev_bad']);
   assert.equal(result.days[0].places[1].tooFar, true);
   assert.equal(result.days[0].places[1].selected, false);
+  assert.equal(result.days[0].places[2].unmapped, true);
+  assert.equal(result.days[0].places[2].selected, true);
   assert.equal(result.warnings.length, 2);
 });
 
@@ -461,6 +463,36 @@ test('LLM 返回空时从衡阳东洲岛攻略正文规则提取景点', () => {
   assert.ok(!names.includes('廊桥登岛'));
   assert.ok(!names.includes('欣赏夜景'));
 
+  const twoDayGuides = [{
+    id: 'g_2',
+    title: '📍衡阳｜东洲岛 游玩攻略📝',
+    text: `两天一夜
+第一天
+▪️船山书院
+第二天
+▪️罗汉寺
+▪️夫之楼
+东洲岛是衡阳湘江上的一江心岛，与长沙橘子洲 、 岳阳君山并称湘江三大洲。`,
+  }];
+  const twoDay = candidatesFromGuideText(twoDayGuides, intent);
+  assert.equal(inferDayCountFromGuides(twoDayGuides), 2);
+  assert.equal(twoDay.find((item) => item.name === '船山书院').dayHint, 1);
+  assert.equal(twoDay.find((item) => item.name === '罗汉寺').dayHint, 2);
+  assert.ok(!twoDay.some((item) => item.name === '橘子洲'));
+
+  const invented = filterInventedCandidates(
+    [{ name: '橘子洲' }, { name: '船山书院' }],
+    twoDayGuides,
+  );
+  assert.deepEqual(invented.map((item) => item.name), ['船山书院']);
+
+  const merged = resolveExtractCandidates({
+    candidates: [{ name: '东洲岛停车场', reason: '船山书院、罗汉寺、夫之楼都值得去', dayHint: 1 }],
+  }, twoDayGuides, intent);
+  assert.ok(merged.candidates.some((item) => item.name === '船山书院'));
+  assert.ok(merged.candidates.some((item) => item.name === '罗汉寺'));
+  assert.ok(!merged.candidates.some((item) => /停车场/.test(item.name)));
+
   const resolved = resolveExtractCandidates({ candidates: [] }, guides, intent);
   assert.equal(resolved.source, 'guide_text');
   assert.ok(resolved.candidates.some((item) => item.name === '船山书院'));
@@ -500,12 +532,13 @@ test('地图证据会丢掉远离目的地的误匹配', () => {
     source: 'nominatim',
     places: [{ name: '北极镇', lat: 53.48, lng: 122.35, types: ['town'], address: '北极镇, 漠河市, 大兴安岭地区, 黑龙江省, 中国' }],
   }, 0, '大兴安岭', bias);
-  assert.equal(labeled.name, '北极镇');
+  assert.equal(labeled.name, '洛古河');
   const near = evidenceFromSearch(candidate, {
     source: 'nominatim',
     places: [{ name: '洛古河村', lat: 53.3, lng: 122.35, types: ['village'], address: '洛古河村, 漠河市, 大兴安岭地区' }],
   }, 0, '大兴安岭', bias);
-  assert.equal(near.name, '洛古河村');
+  assert.equal(near.name, '洛古河');
+  assert.equal(near.mapName, '洛古河村');
 });
 
 test('地理边界会拒绝跨城同名，且京都不会误匹配东京都', () => {
@@ -590,8 +623,8 @@ test('无 Cookie 的纯表单仍形成地图预览，并只使用 extract.result
   assert.ok(fixture.host.calls.some((call) => call.method === 'ai.extract'));
   assert.ok(!geoCalls.includes('MUST NOT USE'));
   assert.ok(geoCalls.includes('京都'));
-  assert.match(state.days[0].notes || '', /Near A/);
-  const far = state.days.flatMap((day) => day.places).find((place) => place.name === 'Far');
+  assert.match(state.days[0].notes || '', /近点A|Near A/);
+  const far = state.days.flatMap((day) => day.places).find((place) => place.name === '远点' || place.name === 'Far');
   assert.equal(far.tooFar, true);
   assert.equal(far.selected, false);
   assert.ok(state.warnings.some((warning) => warning.includes('无坐标店')));
@@ -922,6 +955,7 @@ test('extract prompt 强调预约、避坑与中英名称', () => {
   assert.match(instruction, /reservationRequired/);
   assert.match(instruction, /first-person/);
   assert.match(instruction, /economy/);
+  assert.match(instruction, /Do not invent places/);
   const text = extractionText([{ id: 'g_1', title: '测试', text: '需要提前预约故宫' }], {
     destination: '北京',
     dayCount: 2,
@@ -931,6 +965,7 @@ test('extract prompt 强调预约、避坑与中英名称', () => {
   });
   assert.match(text, /reservationTips/);
   assert.match(text, /pitfalls/);
+  assert.doesNotMatch(text, /supplement with well-known places/);
 });
 
 test('勾选搜索时会与链接和粘贴正文合并', async () => {

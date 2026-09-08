@@ -13,6 +13,11 @@ const GUIDE_RESERVATION_HINT = /预约|抢票|提前预约|约满|需预约|需�
 const GUIDE_SECTION_SKIP = /^(🍜|💡|#|美食推荐|避坑|小贴士)/;
 const GUIDE_ROUTE_SKIP = /^(廊桥|登岛|欣赏|观看|拍照|散步|环岛(?!步道)|灯光|喷泉|夜景灯光)/;
 const GUIDE_NAME_SUFFIX = /(登顶|数字展馆.*|与夜景.*|灯光.*|\/喷泉)$/u;
+const DAY_HEADER_RE = /^(?:📅\s*|【)?(?:第\s*([0-9一二三四五六七八九十两]+)\s*天|Day\s*([0-9]{1,2})|D([0-9]{1,2}))(?:\s*[】:：\-—·]|$)/i;
+const GUIDE_COMPARE_RE = /并称|相比|不同于|不是去|不要去|不如|不像|对比/;
+const CN_DAY_TOKEN = {
+  一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
+};
 
 function stripInvisible(text) {
   return String(text || '')
@@ -52,11 +57,116 @@ function reservationHintsFromLine(line) {
   };
 }
 
+function parseDayToken(raw) {
+  const text = String(raw || '').trim();
+  if (CN_DAY_TOKEN[text] != null) return CN_DAY_TOKEN[text];
+  const n = Number(text);
+  return Number.isInteger(n) && n >= 1 && n <= 14 ? n : 0;
+}
+
+function matchDayHeader(line) {
+  const trimmed = stripInvisible(line);
+  const match = trimmed.match(DAY_HEADER_RE);
+  if (!match) return null;
+  const day = parseDayToken(match[1] || match[2] || match[3]);
+  if (!day) return null;
+  const rest = stripInvisible(trimmed.slice(match[0].length).replace(/^[】:：\-—·\s]+/, ''));
+  return { day, rest };
+}
+
+function inferDayCountFromGuides(guides) {
+  let fromHeaders = 0;
+  let fromTitle = 0;
+  for (const guide of guides || []) {
+    const title = stripInvisible(guide?.title || '');
+    const titleDay = title.match(/(\d+)\s*天(?:\d+\s*[晚夜])?/);
+    if (titleDay) {
+      const n = Number(titleDay[1]);
+      if (n >= 1 && n <= 14) fromTitle = Math.max(fromTitle, n);
+    }
+    if (/两天(?:一夜|一晚)?/.test(title)) fromTitle = Math.max(fromTitle, 2);
+    for (const line of String(guide?.text || '').split(/\n/)) {
+      const header = matchDayHeader(line);
+      if (header) fromHeaders = Math.max(fromHeaders, header.day);
+    }
+  }
+  const inferred = Math.max(fromHeaders, fromTitle);
+  return inferred >= 1 && inferred <= 14 ? inferred : 0;
+}
+
+function applyGuideDerivedIntent(intent, guides, limits) {
+  if (!intent || typeof intent !== 'object') return intent;
+  const inferred = inferDayCountFromGuides(guides);
+  const maxDays = Math.max(1, Number(limits?.maxDays) || 14);
+  if (inferred >= 1) {
+    intent.dayCount = Math.min(maxDays, inferred);
+    intent.dayCountSource = 'guide';
+  }
+  return intent;
+}
+
+function guideCorpus(guides) {
+  return (guides || []).map((guide) => `${guide?.title || ''}\n${guide?.text || ''}`).join('\n\n');
+}
+
+function nameAppearsInText(name, text) {
+  const raw = String(name || '').trim();
+  if (raw.length < 2) return false;
+  if (String(text || '').includes(raw)) return true;
+  const foldedName = foldName(raw);
+  const foldedText = foldName(text);
+  return Boolean(foldedName) && foldedText.includes(foldedName);
+}
+
+function isComparisonOnlyMention(name, text) {
+  const lines = String(text || '').split(/\n/).map((line) => stripInvisible(line)).filter(Boolean);
+  let mentioned = 0;
+  let comparison = 0;
+  for (const line of lines) {
+    if (!nameAppearsInText(name, line)) continue;
+    mentioned += 1;
+    if (GUIDE_COMPARE_RE.test(line)) comparison += 1;
+  }
+  return mentioned > 0 && comparison === mentioned;
+}
+
+function namesOverlap(left, right) {
+  const a = foldName(left);
+  const b = foldName(right);
+  if (!a || !b || a.length < 2 || b.length < 2) return false;
+  return a.includes(b) || b.includes(a);
+}
+
+function filterInventedCandidates(candidates, guides) {
+  const corpus = guideCorpus(guides);
+  if (!stripInvisible(corpus)) return candidates;
+  return (candidates || []).filter((item) => {
+    const name = String(item?.nameZh || item?.name || '').trim();
+    if (!nameAppearsInText(name, corpus) && !nameAppearsInText(item?.name, corpus)) return false;
+    if (isComparisonOnlyMention(name, corpus)) return false;
+    return true;
+  });
+}
+
+function mergeExtractedCandidates(fromGuide, fromLlm) {
+  const seen = new Set();
+  const merged = [];
+  const push = (item) => {
+    const key = foldName(item?.name);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    merged.push(item);
+  };
+  for (const item of fromGuide || []) push(item);
+  for (const item of fromLlm || []) push(item);
+  return merged;
+}
+
 function candidatesFromGuideText(guides, intent) {
-  const target = targetPlaceCount(intent);
+  const cap = Math.max(targetPlaceCount(intent), 16);
   const seen = new Set();
   const results = [];
-  const push = (rawName, guideId, reason, lineContext) => {
+  const push = (rawName, guideId, reason, lineContext, dayHint) => {
     const reservation = reservationHintsFromLine(lineContext || reason);
     for (const name of guidePlaceNamesFromSegment(rawName, intent)) {
       if (isWeakPlaceName(name, intent) || isGenericPlaceName(name, intent.destination)) continue;
@@ -66,13 +176,13 @@ function candidatesFromGuideText(guides, intent) {
       results.push(toCandidate({
         name,
         nameZh: name,
-        reason: String(reason || '').trim(),
+        reason: String(reason || '').trim().slice(0, 240),
         guideId,
-        dayHint: 1,
+        dayHint: dayHint || 1,
         reservationRequired: reservation.reservationRequired,
         reservationTips: reservation.reservationTips,
       }, intent));
-      if (results.length >= target) return true;
+      if (results.length >= cap) return true;
     }
     return false;
   };
@@ -82,10 +192,17 @@ function candidatesFromGuideText(guides, intent) {
     if (!text.trim()) continue;
     const guideId = String(guide.id || '').trim();
     let inFoodSection = false;
+    let currentDay = 1;
     const lines = text.split(/\n/);
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
       const trimmed = stripInvisible(lines[lineIndex]);
       if (!trimmed) continue;
+      const header = matchDayHeader(trimmed);
+      if (header) {
+        currentDay = header.day;
+        if (header.rest && push(header.rest, guideId, trimmed, trimmed, currentDay)) return results;
+        continue;
+      }
       if (/^🍜|^美食推荐/.test(trimmed)) {
         inFoodSection = true;
         continue;
@@ -100,27 +217,30 @@ function candidatesFromGuideText(guides, intent) {
       const lineContext = [trimmed, nextLine].filter(Boolean).join('\n');
 
       const bullet = trimmed.match(/^[▪️•·]\s*(.+)$/);
-      if (bullet && push(bullet[1], guideId, trimmed, lineContext)) return results;
+      if (bullet && push(bullet[1], guideId, trimmed, lineContext, currentDay)) return results;
+
+      const numbered = trimmed.match(/^(?:\d+[.\u3001、]|[①②③④⑤⑥⑦⑧⑨⑩])\s*(.+)$/);
+      if (numbered && push(numbered[1], guideId, trimmed, lineContext, currentDay)) return results;
 
       if (/推荐路线|路线[:：]|→/.test(trimmed)) {
         const routePart = trimmed.replace(/^.*?(?:推荐路线|路线)[:：]?\s*/u, '');
         for (const segment of routePart.split(/\s*(?:→|->|➡|—>)\s*/)) {
-          if (push(segment, guideId, trimmed, lineContext)) return results;
+          if (push(segment, guideId, trimmed, lineContext, currentDay)) return results;
         }
         continue;
       }
 
       const quoted = trimmed.match(/[“"]([^”"]{2,24})[”"]/);
-      if (quoted && /(停车场|站|导航)/.test(trimmed) && push(quoted[1], guideId, trimmed, lineContext)) return results;
+      if (quoted && /(停车场|站|导航)/.test(trimmed) && push(quoted[1], guideId, trimmed, lineContext, currentDay)) return results;
 
       const nearby = trimmed.match(/去(?:旁边|附近)的?\s*(.{2,16})/);
-      if (nearby && push(nearby[1], guideId, trimmed, lineContext)) return results;
+      if (nearby && push(nearby[1], guideId, trimmed, lineContext, currentDay)) return results;
     }
 
     const title = stripInvisible(guide.title || '');
     const titleMatch = title.match(/[｜|]\s*([^｜|]+?)(?:\s*游玩攻略|\s*攻略)?\s*📝?\s*$/u)
       || title.match(/📍\s*[^｜|]+[｜|]\s*([^｜|]+?)(?:\s*游玩攻略|\s*攻略)?/u);
-    if (titleMatch && push(titleMatch[1], guideId, title, title)) return results;
+    if (titleMatch && push(titleMatch[1], guideId, title, title, 1)) return results;
   }
 
   return results;
@@ -128,17 +248,24 @@ function candidatesFromGuideText(guides, intent) {
 
 function resolveExtractCandidates(extracted, guides, intent) {
   const llmCandidateCount = Array.isArray(extracted?.candidates) ? extracted.candidates.length : 0;
-  let candidates = normalizeCandidates(extracted, intent);
-  if (candidates.length) {
-    return { candidates, source: 'llm', llmCandidateCount };
-  }
   const hasGuideText = (guides || []).some((guide) => String(guide.text || '').trim());
+  const llmRaw = normalizeCandidates(extracted, { ...intent, mustSee: hasGuideText ? [] : intent.mustSee });
+  const llm = hasGuideText ? filterInventedCandidates(llmRaw, guides) : llmRaw;
+  const fromGuide = hasGuideText ? candidatesFromGuideText(guides, intent) : [];
+  let merged = [];
+  let source = null;
   if (hasGuideText) {
-    const fromGuide = candidatesFromGuideText(guides, intent);
-    candidates = normalizeCandidates({ candidates: fromGuide }, intent);
-    if (candidates.length) {
-      return { candidates, source: 'guide_text', llmCandidateCount };
-    }
+    merged = mergeExtractedCandidates(fromGuide, llm);
+    if (fromGuide.length && llm.length) source = 'llm+guide_text';
+    else if (fromGuide.length) source = 'guide_text';
+    else if (llm.length) source = 'llm';
+  } else if (llm.length) {
+    merged = llm;
+    source = 'llm';
+  }
+  const candidates = normalizeCandidates({ candidates: merged }, intent);
+  if (candidates.length) {
+    return { candidates, source, llmCandidateCount };
   }
   return { candidates: [], source: null, llmCandidateCount };
 }
@@ -439,7 +566,7 @@ function extractionText(guides, intent) {
     `Propose about ${target} specific visitable places (attractions, museums, temples, parks, historic sites, neighborhoods, food streets).`,
     'Do not list the destination itself, a province, city, country, or administrative region as a place.',
     'For each place include nameZh (Simplified Chinese official name), nameEn (English official name when known), reason (real user tips or pitfalls from the notes), durationMinutes, reservationRequired, and reservationTips when notes mention 预约/抢票/提前预约.',
-    `Spread places across days with dayHint from 1 to ${intent.dayCount}.`,
+    `Spread places across days with dayHint from 1 to ${intent.dayCount}. If the notes have 第N天 / Day N headings, follow those headings.`,
     'If notes mention prices (人均/门票/住宿/交通), also fill budget with currency and economy/comfort/luxury objects, each with numeric transport, lodging, tickets, food for the whole trip. Do not invent live market quotes.',
   ].filter(Boolean).join('\n');
   const commentTips = (guides || [])
@@ -453,7 +580,7 @@ function extractionText(guides, intent) {
     .join('\n\n')
     .slice(0, 12000);
   if (guideText) {
-    return `${header}\n\nExtract named places from these notes first; preserve booking tips and user warnings from the notes. If they are thin, supplement with well-known places in the destination.${commentBlock}\n\n${guideText}`;
+    return `${header}\n\nExtract named visitable places that appear in these notes. One candidate per place. reason must be tips for that place only — do not list other places inside reason. Do not invent places, do not add well-known sights that are absent from the notes, and skip names that appear only as comparisons (并称/相比). Preserve booking tips and user warnings.${commentBlock}\n\n${guideText}`;
   }
   return `${header}\n\nNo travel notes were supplied. Propose well-known visitable places in the destination that match the interests.`;
 }
@@ -463,7 +590,7 @@ function extractionInstruction(intent, hasGuides) {
   const dest = intent.destination || 'the destination';
   const fields = 'Each candidate must include name, nameZh, nameEn, reason, durationMinutes, reservationRequired, reservationTips, dayHint, and guideId when sourced from a note. Use reservationRequired=true when notes mention 预约, 抢票, 提前预约, or 约满.';
   if (hasGuides) {
-    return `Extract specific visitable places from the notes. ${fields} Prefer first-person visit notes over sponsored or group-tour pitches. Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Keep real user tips in reason. When notes mention prices, also fill budget with currency and three tiers (economy, comfort, luxury), each with numeric transport, lodging, tickets, food for the whole trip. Do not invent live quotes. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}. Target about ${target} places. Do not invent coordinates.`;
+    return `Extract specific visitable places that appear verbatim in the notes. ${fields} Prefer first-person visit notes over sponsored or group-tour pitches. Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Keep real user tips in reason for that one place only. When notes mention prices, also fill budget with currency and three tiers (economy, comfort, luxury), each with numeric transport, lodging, tickets, food for the whole trip. Do not invent live quotes. Do not invent places that are not in the notes. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}, matching 第N天/Day N headings when present. Target about ${target} places, or every named place in the notes if fewer. Do not invent coordinates.`;
   }
   return `No notes were supplied. Propose well-known visitable places in ${dest}. ${fields} Each name must be a specific attraction or neighborhood, not the destination, province, city, or country. Spread across ${intent.dayCount} days with dayHint. Target ${target} places. Do not invent coordinates.`;
 }
@@ -771,6 +898,16 @@ function isAdministrativePlace(place) {
   ].includes(type));
 }
 
+function pickSearchPlace(candidate, ranked) {
+  if (!ranked.length) return null;
+  const wanted = [candidate?.nameZh, candidate?.name].map((item) => String(item || '').trim()).filter(Boolean);
+  const related = ranked.filter((place) => wanted.some((name) => namesOverlap(name, place.name)));
+  const pool = related.length ? related : ranked;
+  return pool.find((item) => !isGenericPlaceName(item.name, '') && !isAdministrativePlace(item))
+    || pool[0]
+    || null;
+}
+
 function evidenceFromSearch(candidate, result, index, destination, bias) {
   const places = (result?.places || []).filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
   const nearby = places.filter((item) => nearDestination(item, destination, bias));
@@ -778,14 +915,13 @@ function evidenceFromSearch(candidate, result, index, destination, bias) {
     .filter((item) => !isLowQualityPlace(item))
     .slice()
     .sort((left, right) => scoreSearchPlace(right, destination) - scoreSearchPlace(left, destination));
-  const place = ranked.find((item) => !isGenericPlaceName(item.name, destination) && !isAdministrativePlace(item))
-    || ranked.find((item) => !isGenericPlaceName(item.name, destination))
-    || ranked[0]
-    || null;
+  const place = pickSearchPlace(candidate, ranked);
   if (!place || isLowQualityPlace(place)) return null;
+  const displayName = String(candidate?.nameZh || candidate?.name || place.name);
   return {
     id: `ev_${index + 1}`,
-    name: String(place.name || candidate.name),
+    name: displayName,
+    mapName: String(place.name || ''),
     lat: place.lat,
     lng: place.lng,
     address: String(place.address || ''),
@@ -801,6 +937,32 @@ function evidenceFromSearch(candidate, result, index, destination, bias) {
     reason: candidate.reason,
     dayHint: candidate.dayHint,
     photoUrl: '',
+    unmapped: false,
+  };
+}
+
+function unmappedEvidenceFromCandidate(candidate, index) {
+  const name = String(candidate?.nameZh || candidate?.name || '').trim();
+  return {
+    id: `ev_${index + 1}`,
+    name,
+    mapName: '',
+    lat: null,
+    lng: null,
+    address: '',
+    placeId: null,
+    osmId: null,
+    provider: '',
+    categoryHint: 'sight',
+    source: 'unmapped',
+    fromGuideIds: candidate?.guideId ? [candidate.guideId] : [],
+    stayHintMinutes: candidate?.durationMinutes,
+    reservationRequired: candidate?.reservationRequired === true,
+    reservationHint: candidate?.reservationTips || '',
+    reason: candidate?.reason || '',
+    dayHint: candidate?.dayHint || 1,
+    photoUrl: '',
+    unmapped: true,
   };
 }
 
@@ -992,7 +1154,13 @@ function markDistance(days, limitKm = TOO_FAR_KM) {
   const limit = Number.isFinite(limitKm) && limitKm > 0 ? limitKm : TOO_FAR_KM;
   for (const day of days) {
     day.places.forEach((place, index) => {
-      const previous = day.places[index - 1];
+      if (place.unmapped || !finiteCoordinate(place.lat) || !finiteCoordinate(place.lng)) {
+        place.tooFar = false;
+        place.selected = true;
+        return;
+      }
+      const previous = [...day.places.slice(0, index)].reverse()
+        .find((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
       const tooFar = previous ? haversineKm(previous, place) > limit : false;
       place.tooFar = tooFar;
       place.selected = !tooFar;
@@ -1002,8 +1170,10 @@ function markDistance(days, limitKm = TOO_FAR_KM) {
 
 function sortDayPlacesByDistance(places) {
   const list = Array.isArray(places) ? places.slice() : [];
-  if (list.length <= 2) return list;
-  const remaining = list.slice();
+  const mapped = list.filter((item) => finiteCoordinate(item?.lat) && finiteCoordinate(item?.lng));
+  const unmapped = list.filter((item) => !finiteCoordinate(item?.lat) || !finiteCoordinate(item?.lng));
+  if (mapped.length <= 2) return mapped.concat(unmapped);
+  const remaining = mapped.slice();
   const ordered = [remaining.shift()];
   while (remaining.length) {
     const anchor = ordered[ordered.length - 1];
@@ -1018,7 +1188,7 @@ function sortDayPlacesByDistance(places) {
     }
     ordered.push(remaining.splice(bestIndex, 1)[0]);
   }
-  return ordered;
+  return ordered.concat(unmapped);
 }
 
 function rebalanceDays(days) {
@@ -1035,16 +1205,20 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
   const unique = [];
   const seen = new Set();
   for (const item of evidence) {
-    if (!finiteCoordinate(item.lat) || !finiteCoordinate(item.lng)) {
-      warnings.push(message(locale, `「${item.name}」没有坐标，已跳过`, `"${item.name}" had no coordinates and was skipped`));
-      continue;
-    }
-    const key = `${item.name.toLowerCase()}|${item.lat.toFixed(5)}|${item.lng.toFixed(5)}`;
+    const mapped = finiteCoordinate(item.lat) && finiteCoordinate(item.lng);
+    const key = mapped
+      ? `${item.name.toLowerCase()}|${item.lat.toFixed(5)}|${item.lng.toFixed(5)}`
+      : `${String(item.name || '').toLowerCase()}|unmapped|${item.id || unique.length}`;
     if (seen.has(key)) {
       warnings.push(message(locale, `「${item.name}」重复，已跳过`, `"${item.name}" was duplicated and skipped`));
       continue;
     }
     seen.add(key);
+    if (!mapped) {
+      warnings.push(message(locale, `「${item.name}」未能匹配地图，已保留在行程中`, `"${item.name}" could not be mapped and was kept in the itinerary`));
+      unique.push({ ...item, unmapped: true });
+      continue;
+    }
     unique.push(item);
   }
   const perDay = intent.pace === 'relaxed' ? Math.min(3, limits.maxPlacesPerDay) : limits.maxPlacesPerDay;
@@ -1083,6 +1257,7 @@ function gateAndSchedule(intent, evidence, limits, locale, copy) {
       photoUrl: item.photoUrl || '',
       commentTips: item.commentTips || [],
       tooFar: false,
+      unmapped: item.unmapped === true,
       selected: true,
     });
   }
@@ -1157,6 +1332,9 @@ module.exports = {
   extractionInstruction,
   normalizeCandidates,
   inferDestinationFromGuides,
+  inferDayCountFromGuides,
+  applyGuideDerivedIntent,
+  filterInventedCandidates,
   mergeGuideTexts,
   isLowQualityPlace,
   scoreSearchPlace,
@@ -1173,6 +1351,7 @@ module.exports = {
   placeSearchNames,
   guideSearchQueries,
   evidenceFromSearch,
+  unmappedEvidenceFromCandidate,
   nearDestination,
   pickDestinationBias,
   destinationRadiusKm,
