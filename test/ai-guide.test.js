@@ -110,13 +110,16 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.46');
+  assert.equal(manifest.version, '1.1.47');
 });
 
 function memoryDb() {
   const jobs = new Map();
   const userMeta = new Map();
   const cookieClock = new Map();
+  const noteCache = new Map();
+  const commentCache = new Map();
+  const cacheKey = (userId, noteId) => `${userId}::${noteId}`;
   const api = {
     async migrate() { return { applied: true }; },
     async exec(sql, ...args) {
@@ -168,6 +171,32 @@ function memoryDb() {
         }
         return { changes };
       }
+      if (/INSERT INTO xhs_note_cache/i.test(sql)) {
+        const [userId, noteId, payload, at] = args;
+        noteCache.set(cacheKey(userId, noteId), { user_id: userId, note_id: noteId, payload_json: payload, fetched_at: at });
+        return { changes: 1 };
+      }
+      if (/INSERT INTO xhs_comment_cache/i.test(sql)) {
+        const [userId, noteId, payload, at] = args;
+        commentCache.set(cacheKey(userId, noteId), { user_id: userId, note_id: noteId, payload_json: payload, fetched_at: at });
+        return { changes: 1 };
+      }
+      if (/DELETE FROM xhs_note_cache/i.test(sql)) {
+        if (sql.includes('note_id')) {
+          return { changes: noteCache.delete(cacheKey(args[0], args[1])) ? 1 : 0 };
+        }
+        let changes = 0;
+        for (const [key, row] of noteCache) if (row.user_id === args[0]) { noteCache.delete(key); changes += 1; }
+        return { changes };
+      }
+      if (/DELETE FROM xhs_comment_cache/i.test(sql)) {
+        if (sql.includes('note_id')) {
+          return { changes: commentCache.delete(cacheKey(args[0], args[1])) ? 1 : 0 };
+        }
+        let changes = 0;
+        for (const [key, row] of commentCache) if (row.user_id === args[0]) { commentCache.delete(key); changes += 1; }
+        return { changes };
+      }
       throw new Error(`Unexpected exec: ${sql}`);
     },
     async query(sql, ...args) {
@@ -184,6 +213,14 @@ function memoryDb() {
       if (sql.includes('WHERE user_id = ? ORDER BY created_at')) {
         return rows.filter((row) => row.user_id === args[0]).sort((a, b) => a.created_at - b.created_at);
       }
+      if (/FROM xhs_note_cache/i.test(sql)) {
+        const row = noteCache.get(cacheKey(args[0], args[1]));
+        return row ? [row] : [];
+      }
+      if (/FROM xhs_comment_cache/i.test(sql)) {
+        const row = commentCache.get(cacheKey(args[0], args[1]));
+        return row ? [row] : [];
+      }
       if (/FROM xhs_cookie_clock/i.test(sql)) {
         const row = cookieClock.get(args[0]);
         return row ? [row] : [];
@@ -198,6 +235,8 @@ function memoryDb() {
     jobs,
     userMeta,
     cookieClock,
+    noteCache,
+    commentCache,
   };
   return api;
 }
@@ -725,12 +764,22 @@ test('没有进行中的任务时，GET /plan 会恢复最近一份就绪预览'
 test('deleteUserData 幂等清除该用户任务，export 不含 Cookie 或正文', async () => {
   const fixture = buildHost();
   await makeReady(fixture);
+  await fixture.db.exec(
+    'INSERT INTO xhs_note_cache (user_id, note_id, payload_json, fetched_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, note_id) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at',
+    7,
+    'n1',
+    JSON.stringify({ text: '伏见稻荷第一天不要写进导出' }),
+    Date.now(),
+  );
   const before = await fixture.app.exportUserData(7);
   assert.equal(JSON.stringify(before).includes('第一天'), false);
+  assert.equal(JSON.stringify(before).includes('伏见稻荷'), false);
   assert.equal(JSON.stringify(before).toLowerCase().includes('cookie'), false);
   await fixture.app.deleteUserData(7);
   await fixture.app.deleteUserData(7);
   assert.equal(fixture.db.jobs.size, 0);
+  assert.equal(fixture.db.noteCache.size, 0);
+  assert.equal(fixture.db.commentCache.size, 0);
 });
 
 test('Nominatim 有目的地偏差时会 bounded 限制 viewbox', async () => {

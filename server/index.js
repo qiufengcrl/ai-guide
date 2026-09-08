@@ -35,14 +35,14 @@ const { loadTrekCategoryMap, buildTrekPlacePayload } = require('./trek-handoff')
 const { fetchPublicNote, fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const {
   normalizeXhsCookie,
-  searchNotesDetailed,
   SEARCH_PAGE_SIZE,
-  fetchSessionNote,
   formatXhsWarning,
   isXhsAuthError,
   isXhsVerificationError,
 } = require('./xhs/session');
-const { pong } = require('./xhs/client');
+const { COMMENT_GUIDE_LIMIT, DEFAULT_MAX_COMMENTS } = require('./xhs/comments');
+const { deleteUserCache } = require('./xhs/cache');
+const xhs = require('./crawler/registry').get('xhs');
 const { withXhsRetry, xhsThrottle, isXhsRateLimitError } = require('./xhs/throttle');
 const {
   XHS_COOKIE_STALE_MS,
@@ -51,7 +51,6 @@ const {
   writeXhsCookieUpdatedAt,
 } = require('./xhs/freshness');
 const { getXhsPhoto } = require('./xhs/photos');
-const { fetchNoteComments, COMMENT_GUIDE_LIMIT, DEFAULT_MAX_COMMENTS } = require('./xhs/comments');
 const { searchPlaces } = require('./geo/nominatim');
 
 const JOB_FIELDS = 'id, user_id, status, stage, payload_json, draft_json, work_json, error, committed_trip_id, created_at, updated_at';
@@ -86,7 +85,7 @@ async function ensureXhsSignedAccess(job, work, cookie, locale, ctx) {
   if (work.xhsHealthChecked) return true;
   work.xhsHealthChecked = true;
   try {
-    await withXhsRetry(() => pong(cookie), { cookie });
+    await withXhsRetry(() => xhs.pong(cookie), { cookie });
     await writeXhsCookieUpdatedAt(ctx, job.userId, cookie);
     return true;
   } catch (error) {
@@ -238,7 +237,7 @@ async function runKeywordSearch(job, work, cookie, limits, locale, ctx) {
     if (slotsLeft <= 0) break;
     try {
       const pool = Math.min(SEARCH_PAGE_SIZE, Math.max(slotsLeft * 3, slotsLeft));
-      const { notes: automatic } = await searchNotesDetailed(query, cookie, pool);
+      const { notes: automatic } = await xhs.search(query, cookie, pool);
       work.lastSearchQuery = query;
       work.lastSearchCount = automatic.length;
       if (!automatic.length) continue;
@@ -312,7 +311,7 @@ async function advance(job, ctx) {
           const remaining = remainingXhsNoteSlots(job.draft.guides, work.pendingNotes, limits.maxNotes);
           const seen = collectXhsNoteIds(job.draft.guides, work.pendingNotes);
           const pool = Math.min(SEARCH_PAGE_SIZE, Math.max(remaining || limits.maxNotes, 8));
-          const found = await searchNotesDetailed(keyword, cookie, pool);
+          const found = await xhs.search(keyword, cookie, pool);
           for (const item of selectSearchNotes(found.notes, remaining || limits.maxNotes)) {
             if (seen.has(item.noteId) || seen.size >= limits.maxNotes) continue;
             seen.add(item.noteId);
@@ -380,7 +379,7 @@ async function advance(job, ctx) {
         return;
       }
       try {
-        const note = await fetchSessionNote(item, cookie);
+        const note = await xhs.fetchNote(item, cookie, { ctx, userId: job.userId });
         appendGuide(job, {
           ...note,
           id: `g_${job.draft.guides.length + 1}`,
@@ -535,10 +534,12 @@ async function advance(job, ctx) {
     const guide = ranked[index];
     work.commentGuideIndex = index + 1;
     try {
-      const comments = await fetchNoteComments(guide.noteId, cookie, {
+      const comments = await xhs.fetchComments(guide.noteId, cookie, {
         maxComments: DEFAULT_MAX_COMMENTS,
         timeoutMs: 10000,
         xsecToken: guide.xsecToken,
+        ctx,
+        userId: job.userId,
       });
       const insights = extractCommentInsights(comments, 8);
       if (insights.length) guide.commentInsights = insights;
@@ -680,7 +681,7 @@ async function testXhs(ctx, locale = 'en', keyword = '旅行', userId = null) {
   try {
     const searchKeyword = String(keyword || '旅行').trim() || '旅行';
     // TREK settings actions time out at 15s; keep health checks single-shot and fast.
-    const { notes, debug } = await searchNotesDetailed(searchKeyword, cookie, 4, {
+    const { notes, debug } = await xhs.search(searchKeyword, cookie, 4, {
       timeoutMs: 8000,
       maxRetries: 0,
       wait: false,
@@ -735,6 +736,20 @@ module.exports = definePlugin({
       updated_at INTEGER NOT NULL
     )`);
     await ctx.db.migrate('005_xhs_cookie_clock_drop_orphans', 'DELETE FROM xhs_cookie_clock WHERE user_id IS NULL');
+    await ctx.db.migrate('006_xhs_note_cache', `CREATE TABLE IF NOT EXISTS xhs_note_cache (
+      user_id INTEGER NOT NULL,
+      note_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, note_id)
+    )`);
+    await ctx.db.migrate('007_xhs_comment_cache', `CREATE TABLE IF NOT EXISTS xhs_comment_cache (
+      user_id INTEGER NOT NULL,
+      note_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, note_id)
+    )`);
   },
   routes: [
     {
@@ -920,6 +935,7 @@ module.exports = definePlugin({
     await ctx.db.exec('DELETE FROM jobs WHERE user_id = ?', userId);
     await ctx.db.exec('DELETE FROM user_meta WHERE user_id = ?', userId);
     await ctx.db.exec('DELETE FROM xhs_cookie_clock WHERE user_id = ?', userId);
+    await deleteUserCache(ctx, userId);
   },
   async exportUserData({ userId }, ctx) {
     const rows = await ctx.db.query(`SELECT ${JOB_FIELDS} FROM jobs WHERE user_id = ? ORDER BY created_at`, userId);
