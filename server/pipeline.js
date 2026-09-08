@@ -684,7 +684,10 @@ function progressForJob(job, locale) {
         `Reading link ${work.urlIndex + 1}/${urlTotal}`);
     }
     if (!work.searchAttempted) {
-      return message(locale, '正在搜索小红书攻略…', 'Searching Xiaohongshu guides…');
+      if (resolveXhsKeywordSearch(job.payload?.xhsKeywordSearch)) {
+        return message(locale, '正在搜索小红书攻略…', 'Searching Xiaohongshu guides…');
+      }
+      return message(locale, '正在整理攻略来源…', 'Organizing guide sources…');
     }
     const pendingTotal = work.pendingNotes?.length || 0;
     if (work.noteIndex < pendingTotal) {

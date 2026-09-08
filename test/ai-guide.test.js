@@ -1091,6 +1091,9 @@ test('progressForJob 会返回分阶段进度文案', () => {
   };
   assert.match(progressForJob(job, 'zh'), /正在读取链接/);
   job.work.urlIndex = 1;
+  assert.match(progressForJob(job, 'zh'), /整理攻略来源/);
+  job.payload.xhsKeywordSearch = true;
+  assert.match(progressForJob(job, 'zh'), /搜索小红书/);
   job.stage = 'extract';
   assert.match(progressForJob(job, 'zh'), /提取景点/);
 });
