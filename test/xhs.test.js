@@ -461,6 +461,7 @@ test('pong 走 selfinfo 而不是搜索探测', async () => {
     assert.equal(pongOk({ success: true, data: { result: { success: true }, user_id: 'u1' } }), true);
     assert.equal(pongOk({ success: true, data: { items: [] } }), false);
     assert.equal(pongOk({ success: true }), false);
+    assert.equal(pongOk({ success: true, data: { result: { success: true } } }), false);
     assert.equal(pongOk({ success: true, data: { result: { success: false } } }), false);
   } finally {
     global.fetch = originalFetch;

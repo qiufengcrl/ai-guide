@@ -55,7 +55,6 @@ function pongOk(data) {
   if (!data || typeof data !== 'object') return false;
   const nested = data.data && typeof data.data === 'object' ? data.data : {};
   if (nested.result && nested.result.success === false) return false;
-  if (nested.result && nested.result.success === true) return true;
   return Boolean(nested.user_id || nested.userid || nested.userId || nested.basic_info || nested.basicInfo);
 }
 
