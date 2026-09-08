@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
-const { searchNotes, fetchSessionNote, formatXhsWarning, isXhsAuthError, isXhsVerificationError, XhsSessionError } = require('../server/xhs/session');
+const { searchNotes, fetchSessionNote, formatXhsWarning, isXhsAuthError, isXhsVerificationError, isXhsNotFoundError, assertSessionResponse, XhsSessionError } = require('../server/xhs/session');
 const { createSignedPost, parseCookieHeader } = require('../server/xhs/signature');
 const { extractXhsUrls, fetchPublicNote } = require('../server/xhs/url');
 const { setXhsThrottleForTests, isXhsRateLimitError, xhsThrottle } = require('../server/xhs/throttle');
@@ -48,6 +48,7 @@ test('会话搜索只保留 model_type=note，并把 xsec_token 带到详情接�
     assert.equal(calls[0].body.filters.length, 5);
     assert.equal(calls[1].body.xsec_token, 'fixture-token');
     assert.equal(calls[1].body.source_note_id, '64f000000000000000000001');
+    assert.equal(calls[1].body.extra.need_body_topic, 1);
   } finally {
     global.fetch = originalFetch;
   }
@@ -55,10 +56,12 @@ test('会话搜索只保留 model_type=note，并把 xsec_token 带到详情接�
 
 test('搜索结果可从 note_card.note_id 解析，并忽略非笔记条目', () => {
   const { parseSearchNotes } = require('../server/xhs/session');
-  const notes = parseSearchNotes({
+    const notes = parseSearchNotes({
     data: {
       items: [
         { model_type: 'user', id: 'u1' },
+        { model_type: 'rec_query', id: 'hot-kw' },
+        { model_type: 'hot_query', id: 'trend' },
         { model_type: 'note', note_card: { note_id: '64f000000000000000000099', display_title: '洛阳两日' }, xsec_token: 'tok' },
         { note_card: { id: 'bad' } },
       ],
@@ -118,12 +121,17 @@ test('评论区 API 解析实用提示', async () => {
   const originalFetch = global.fetch;
   global.fetch = async (url, init) => {
     assert.match(String(url), /comment\/page/);
+    assert.match(String(url), /xsec_token=fixture-token/);
+    assert.match(String(url), /image_formats=jpg,webp,avif/);
     assert.equal(init.method, 'GET');
     return response(fixture('comments.json'));
   };
   try {
     const { fetchNoteComments, parseCommentTexts } = require('../server/xhs/comments');
-    const texts = await fetchNoteComments('64f000000000000000000001', VALID_COOKIE, { maxComments: 10 });
+    const texts = await fetchNoteComments('64f000000000000000000001', VALID_COOKIE, {
+      maxComments: 10,
+      xsecToken: 'fixture-token',
+    });
     assert.ok(texts.some((line) => /门票/.test(line)));
     assert.ok(texts.some((line) => /闭馆/.test(line)));
     const insights = require('../server/guide-quality').extractCommentInsights(texts);
@@ -139,13 +147,20 @@ test('评论区 API 解析实用提示', async () => {
 
 test('GET 签名请求包含查询参数签名', () => {
   const timestamp = 1788490800456;
-  const { createSignedGet } = require('../server/xhs/signature');
-  const signed = createSignedGet('/api/sns/web/v2/comment/page', {
+  const { createSignedGet, buildQueryString } = require('../server/xhs/signature');
+  const params = {
     note_id: '64f000000000000000000001',
     cursor: '',
-  }, VALID_COOKIE, { timestamp });
+    image_formats: ['jpg', 'webp', 'avif'],
+    xsec_token: 'tok+1',
+  };
+  const signed = createSignedGet('/api/sns/web/v2/comment/page', params, VALID_COOKIE, { timestamp });
   assert.equal(signed.headers['x-t'], String(timestamp));
   assert.match(signed.headers['x-s'], /^XYS_/);
+  assert.equal(signed.query.image_formats, 'jpg,webp,avif');
+  assert.match(signed.url, /image_formats=jpg,webp,avif/);
+  assert.match(signed.url, /xsec_token=/);
+  assert.equal(buildQueryString({ image_formats: 'jpg,webp,avif' }), 'image_formats=jpg,webp,avif');
 });
 
 test('缺少 a1 或 web_session 时在发出网络请求前拒绝', async () => {
@@ -351,5 +366,83 @@ test('配图缓存按 Cookie 隔离，成功 URL 不串到其他用户', async (
   } finally {
     global.fetch = originalFetch;
     resetXhsPhotoCacheForTests();
+  }
+});
+
+test('feed 空结果时带 Cookie 读 HTML 兜底', async () => {
+  const originalFetch = global.fetch;
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures', 'note.html'), 'utf8');
+  const calls = [];
+  global.fetch = async (url, init) => {
+    const href = String(url);
+    calls.push({ href, cookie: init?.headers?.cookie });
+    if (href.includes('/feed')) {
+      return response({ success: true, data: { items: [] } });
+    }
+    return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
+  };
+  try {
+    const note = await fetchSessionNote({
+      noteId: '64f000000000000000000001',
+      xsecToken: 'tok',
+      url: 'https://www.xiaohongshu.com/explore/64f000000000000000000001',
+    }, VALID_COOKIE);
+    assert.match(note.text, /伏见稻荷/);
+    assert.equal(calls[0].href.includes('/feed'), true);
+    assert.ok(calls[1].cookie);
+    assert.match(String(calls[1].cookie), /web_session=fixture-session/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('461 验证错误不按限流重试', async () => {
+  const { withXhsRetry } = require('../server/xhs/throttle');
+  const error = new XhsSessionError('Xiaohongshu requested verification (461)', 'verification');
+  assert.equal(isXhsRateLimitError(error), false);
+  let calls = 0;
+  await assert.rejects(withXhsRetry(async () => {
+    calls += 1;
+    throw error;
+  }), (err) => isXhsVerificationError(err));
+  assert.equal(calls, 1);
+});
+
+test('300012 带异常文案按 IP 限流，不按认证失败', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => response({ success: false, code: 300012, msg: '网络连接异常，请检查网络设置' });
+  try {
+    await assert.rejects(searchNotes('旅行', VALID_COOKIE, 1), (error) => {
+      assert.equal(error.code, 'rate');
+      assert.equal(isXhsAuthError(error), false);
+      assert.equal(isXhsRateLimitError(error), true);
+      return true;
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('笔记状态异常按 not_found，不阻断会话', () => {
+  assert.throws(() => assertSessionResponse({ success: false, code: -510001, msg: '笔记状态异常' }), (error) => {
+    assert.equal(error.code, 'not_found');
+    assert.equal(isXhsNotFoundError(error), true);
+    assert.equal(isXhsAuthError(error), false);
+    return true;
+  });
+});
+
+test('评论 GET 401 识别为认证失败', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({ ok: false, status: 401, headers: { get() { return null; } }, async json() { return {}; } });
+  try {
+    const { fetchNoteComments } = require('../server/xhs/comments');
+    await assert.rejects(fetchNoteComments('64f000000000000000000001', VALID_COOKIE), (error) => {
+      assert.equal(error.code, 'auth');
+      assert.equal(isXhsAuthError(error), true);
+      return true;
+    });
+  } finally {
+    global.fetch = originalFetch;
   }
 });

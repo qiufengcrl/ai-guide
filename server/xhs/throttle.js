@@ -17,8 +17,13 @@ let backoffFn = (attempt) => Math.min(20000, 5000 * (2 ** Math.max(0, attempt)))
 const scopes = new Map();
 
 function isXhsRateLimitError(error) {
+  if (error && typeof error === 'object' && error.code === 'rate') return true;
+  if (error && typeof error === 'object' && (error.code === 'verification' || error.code === 'auth')) return false;
   const text = String(error?.message || error || '');
-  return /429|461|频繁|风控|cuqps|too many requests|rate limit/i.test(text);
+  if (/461|471|verification|风控/i.test(text) && !/429|频繁|cuqps|too many requests|rate limit/i.test(text)) {
+    return false;
+  }
+  return /429|频繁|cuqps|too many requests|rate limit|300012/i.test(text);
 }
 
 function xhsBackoffDelayMs(attempt) {

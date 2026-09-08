@@ -33,6 +33,39 @@ function randomHex(length) {
  * Build the same signed browser-shaped POST used by TripStar, backed by the
  * small MIT-licensed xhshow-js engine rather than TripStar's GPL bundle.
  */
+function queryValue(value) {
+  if (value == null) return '';
+  if (Array.isArray(value)) return value.map((item) => String(item)).join(',');
+  return String(value);
+}
+
+function normalizeQueryParams(params) {
+  const query = Object.create(null);
+  if (!params || typeof params !== 'object') return query;
+  for (const [key, value] of Object.entries(params)) {
+    query[key] = queryValue(value);
+  }
+  return query;
+}
+
+/**
+ * Build a query string whose encoding matches xhshow GET signing
+ * (comma kept literal, matching MediaCrawler `_build_query_string`).
+ */
+function buildQueryString(params) {
+  const query = normalizeQueryParams(params);
+  const parts = [];
+  for (const [key, value] of Object.entries(query)) {
+    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value).replace(/%2C/gi, ',')}`);
+  }
+  return parts.join('&');
+}
+
+function signedGetUrl(path, params) {
+  const qs = buildQueryString(params);
+  return qs ? `${path}?${qs}` : path;
+}
+
 function createSignedGet(path, params, cookie, options = {}) {
   const cookies = parseCookieHeader(cookie);
   if (!cookies.a1) throw new Error('Xiaohongshu Cookie is missing the a1 value');
@@ -41,16 +74,19 @@ function createSignedGet(path, params, cookie, options = {}) {
   const timestamp = Number.isFinite(options.timestamp) ? options.timestamp : Date.now();
   const client = options.signer || signer;
   const appId = cookies.xsecappid || XSEC_APP_ID;
-  const query = params && typeof params === 'object' ? params : {};
+  const query = normalizeQueryParams(params);
+  const referer = options.referer || `${XHS_ORIGIN}/`;
 
   return {
+    query,
+    url: `https://edith.xiaohongshu.com${signedGetUrl(path, query)}`,
     headers: {
       accept: 'application/json, text/plain, */*',
       'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
       'cache-control': 'no-cache',
       cookie: serializeCookies(cookies),
       pragma: 'no-cache',
-      referer: `${XHS_ORIGIN}/`,
+      referer,
       'sec-ch-ua': '"Chromium";v="142", "Not_A Brand";v="99"',
       'sec-ch-ua-mobile': '?0',
       'sec-ch-ua-platform': '"Windows"',
@@ -112,6 +148,8 @@ function createSearchId() {
 
 module.exports = {
   XHS_ORIGIN,
+  PUBLIC_USER_AGENT,
+  buildQueryString,
   createSearchId,
   createSignedGet,
   createSignedPost,

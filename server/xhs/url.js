@@ -1,5 +1,8 @@
+const { PUBLIC_USER_AGENT } = require('./signature');
+const { throwForHttpStatus } = require('./errors');
+
 const NOTE_ID = /^[a-f0-9]{24}$/i;
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const UA = PUBLIC_USER_AGENT;
 
 function canonicalHost(hostname) {
   return String(hostname || '').toLowerCase().replace(/^www\./, '');
@@ -55,14 +58,22 @@ function extractXhsUrls(...blobs) {
 }
 
 function parseInitialState(html, noteId) {
-  const match = String(html).match(/window\.__INITIAL_STATE__\s*=\s*({[\s\S]*?})\s*;?\s*<\/script/i);
+  const source = String(html || '');
+  if (!/noteDetailMap/i.test(source)) {
+    throw new Error('Xiaohongshu page did not contain initial note data');
+  }
+  const match = source.match(/window\.__INITIAL_STATE__\s*=\s*({[\s\S]*?})\s*;?\s*<\/script/i);
   if (!match) throw new Error('Xiaohongshu page did not contain initial note data');
-  const state = JSON.parse(match[1].replace(/\bundefined\b/g, 'null'));
-  const note = state?.note?.noteDetailMap?.[noteId]?.note;
-  if (!note || (!String(note.title || '').trim() && !String(note.desc || '').trim())) {
+  const state = JSON.parse(match[1].replace(/\bundefined\b/g, '""'));
+  const map = state?.note?.noteDetailMap || state?.note?.note_detail_map;
+  const wrapped = map?.[noteId] || map?.[String(noteId)];
+  const note = wrapped?.note;
+  const title = String(note?.title || note?.displayTitle || note?.display_title || '').trim();
+  const text = String(note?.desc || note?.description || '').trim();
+  if (!note || (!title && !text)) {
     throw new Error('Xiaohongshu note text was unavailable');
   }
-  return { noteId, title: String(note.title || '').trim(), text: String(note.desc || '').trim() };
+  return { noteId, title, text };
 }
 
 async function fetchWithTimeout(url, init = {}, timeoutMs = 15000) {
@@ -89,12 +100,9 @@ function queryValue(url, name) {
 }
 
 function exploreNoteUrl(noteId, xsecToken = '', xsecSource = 'pc_search') {
-  const url = new URL(`https://www.xiaohongshu.com/explore/${noteId}`);
-  if (xsecToken) {
-    url.searchParams.set('xsec_token', xsecToken);
-    url.searchParams.set('xsec_source', xsecSource || 'pc_search');
-  }
-  return url.href;
+  const href = `https://www.xiaohongshu.com/explore/${noteId}`;
+  if (!xsecToken) return href;
+  return `${href}?xsec_token=${xsecToken}&xsec_source=${xsecSource || 'pc_search'}`;
 }
 
 function publicPageHeaders() {
@@ -139,11 +147,24 @@ async function resolveNoteUrl(value) {
   throw new Error('Xiaohongshu short link redirected too many times');
 }
 
+async function fetchHtmlNote(resolved, options = {}) {
+  const headers = publicPageHeaders();
+  const cookie = String(options.cookie || '').trim();
+  if (cookie) headers.cookie = cookie;
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 8000;
+  const response = await fetchWithTimeout(resolved.url, { headers }, timeoutMs);
+  throwForHttpStatus(response);
+  return {
+    ...parseInitialState(await response.text(), resolved.noteId),
+    url: resolved.url,
+    via: options.via || 'url',
+    xsecToken: resolved.xsecToken || '',
+  };
+}
+
 async function fetchPublicNoteFromResolved(resolved) {
   try {
-    const response = await fetchWithTimeout(resolved.url, { headers: publicPageHeaders() }, 5000);
-    if (!response.ok) throw new Error(`Xiaohongshu page returned ${response.status}`);
-    return { ...parseInitialState(await response.text(), resolved.noteId), url: resolved.url, via: 'url' };
+    return await fetchHtmlNote(resolved, { timeoutMs: 5000, via: 'url' });
   } catch (error) {
     error.noteId = resolved.noteId;
     error.xsecToken = resolved.xsecToken || '';
@@ -165,6 +186,7 @@ module.exports = {
   searchKeywordFromUrl,
   parseInitialState,
   resolveNoteUrl,
+  fetchHtmlNote,
   fetchPublicNoteFromResolved,
   fetchPublicNote,
   fetchWithTimeout,

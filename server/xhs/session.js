@@ -1,16 +1,17 @@
-const { fetchWithTimeout, fetchPublicNote, exploreNoteUrl } = require('./url');
+const { fetchWithTimeout, fetchHtmlNote, exploreNoteUrl } = require('./url');
 const { createSearchId, createSignedPost } = require('./signature');
 const { isXhsRateLimitError, withXhsRetry } = require('./throttle');
+const {
+  XhsSessionError,
+  isXhsAuthError,
+  isXhsVerificationError,
+  isXhsNotFoundError,
+  throwForHttpStatus,
+  assertSessionResponse,
+} = require('./errors');
 
 const SEARCH_PAGE_SIZE = 20;
-
-class XhsSessionError extends Error {
-  constructor(message, code = 'fetch') {
-    super(message);
-    this.name = 'XhsSessionError';
-    this.code = code;
-  }
-}
+const SKIP_SEARCH_MODELS = new Set(['rec_query', 'hot_query', 'user']);
 
 function normalizeXhsCookie(value) {
   let normalized = String(value || '').trim();
@@ -31,18 +32,6 @@ function normalizeXhsCookie(value) {
     }
   }
   return normalized;
-}
-
-function isXhsAuthError(error) {
-  if (!(error instanceof XhsSessionError)) {
-    return /300011|signed session|missing the a1|missing the web_session|cookie is empty/i.test(String(error?.message || error || ''));
-  }
-  return error.code === 'auth';
-}
-
-function isXhsVerificationError(error) {
-  if (error instanceof XhsSessionError && error.code === 'verification') return true;
-  return /461|471|verification/i.test(String(error?.message || error || ''));
 }
 
 function degradedSuffix(scene, locale, messageFn) {
@@ -85,16 +74,6 @@ function formatXhsDegradedWarning(error, locale, messageFn) {
   return formatXhsWarning(error, locale, messageFn);
 }
 
-function assertSessionResponse(data) {
-  const code = Number(data?.code);
-  const msg = String(data?.msg || '');
-  if (code === 300011 || msg.includes('异常')) {
-    throw new XhsSessionError(`Xiaohongshu rejected the signed session (code=${code || 'unknown'}): ${msg || 'account risk control'}`, 'auth');
-  }
-  if (data?.success === false) throw new XhsSessionError(msg || `Xiaohongshu returned code ${code || 'unknown'}`, 'fetch');
-  return data;
-}
-
 async function post(path, body, cookie, options = {}) {
   let signed;
   try {
@@ -115,10 +94,7 @@ async function post(path, body, cookie, options = {}) {
   } catch (error) {
     throw new XhsSessionError(error instanceof Error ? error.message : 'Xiaohongshu network error', 'fetch');
   }
-  if (response.status === 461 || response.status === 471) {
-    throw new XhsSessionError(`Xiaohongshu requested verification (${response.status})`, 'verification');
-  }
-  if (!response.ok) throw new XhsSessionError(`Xiaohongshu returned ${response.status}`, 'fetch');
+  throwForHttpStatus(response);
   return assertSessionResponse(await response.json());
 }
 
@@ -130,7 +106,7 @@ function parseSearchNotes(data, maxNotes = 4) {
   for (const item of items) {
     const card = item?.note_card || item?.note || {};
     const model = String(item?.model_type || item?.modelType || '').toLowerCase();
-    if (model && model !== 'note') continue;
+    if (SKIP_SEARCH_MODELS.has(model) || (model && model !== 'note')) continue;
     const noteId = String(item?.id || card.note_id || card.id || '').trim();
     if (!noteId || seen.has(noteId)) continue;
     if (noteId.length < 16 && !/^[0-9a-f]{24}$/i.test(noteId)) continue;
@@ -139,6 +115,7 @@ function parseSearchNotes(data, maxNotes = 4) {
     notes.push({
       noteId,
       xsecToken,
+      xsecSource: String(item?.xsec_source || item?.xsecSource || 'pc_search'),
       title: String(card.display_title || card.title || item?.display_title || ''),
       url: exploreNoteUrl(noteId, xsecToken, 'pc_search'),
       via: 'search',
@@ -155,17 +132,21 @@ async function searchNotes(keyword, cookie, maxNotes = 4) {
 
 async function searchNotesDetailed(keyword, cookie, maxNotes = 4, options = {}) {
   if (!cookie) throw new XhsSessionError('Xiaohongshu Cookie is empty', 'auth');
-  const sort = options.sort === 'time_descending' ? 'time_descending' : 'general';
+  const sort = options.sort === 'time_descending' || options.sort === 'popularity_descending'
+    ? options.sort
+    : 'general';
+  const page = Number(options.page) > 0 ? Number(options.page) : 1;
+  const searchId = String(options.searchId || options.search_id || createSearchId());
   const data = await post('/api/sns/web/v1/search/notes', {
     keyword: String(keyword || '').trim(),
-    page: 1,
+    page,
     page_size: SEARCH_PAGE_SIZE,
-    search_id: createSearchId(),
+    search_id: searchId,
     sort,
-    note_type: 0,
+    note_type: Number.isFinite(Number(options.noteType)) ? Number(options.noteType) : 0,
     ext_flags: [],
     filters: [
-      { tags: ['general'], type: 'sort_type' },
+      { tags: [sort === 'time_descending' ? 'time_descending' : sort === 'popularity_descending' ? 'popularity_descending' : 'general'], type: 'sort_type' },
       { tags: ['不限'], type: 'filter_note_type' },
       { tags: ['不限'], type: 'filter_note_time' },
       { tags: ['不限'], type: 'filter_note_range' },
@@ -174,7 +155,14 @@ async function searchNotesDetailed(keyword, cookie, maxNotes = 4, options = {}) 
     geo: '',
     image_formats: ['jpg', 'webp', 'avif'],
   }, cookie, options);
-  return { notes: parseSearchNotes(data, maxNotes), debug: inspectSearchData(data) };
+  const payload = data?.data && typeof data.data === 'object' ? data.data : {};
+  return {
+    notes: parseSearchNotes(data, maxNotes),
+    hasMore: Boolean(payload.has_more),
+    searchId,
+    page,
+    debug: inspectSearchData(data),
+  };
 }
 
 function inspectSearchData(data) {
@@ -188,6 +176,25 @@ function inspectSearchData(data) {
     itemCount: Array.isArray(items) ? items.length : null,
     firstModel: items?.[0]?.model_type || items?.[0]?.modelType || null,
     firstKeys: items?.[0] && typeof items[0] === 'object' ? Object.keys(items[0]).slice(0, 16) : [],
+    hasMore: Boolean(payload.has_more),
+  };
+}
+
+function xsecSourceFor(item) {
+  if (item?.xsecSource) return String(item.xsecSource);
+  return item?.via === 'url' ? 'pc_share' : 'pc_search';
+}
+
+function noteFromFeed(data, item) {
+  const note = data?.data?.items?.[0]?.note_card;
+  if (!note || !(note.desc || note.display_title)) return null;
+  return {
+    noteId: item.noteId,
+    xsecToken: item.xsecToken || '',
+    title: String(note.display_title || item.title || '').trim(),
+    text: String(note.desc || ''),
+    url: item.url,
+    via: item.via || 'search',
   };
 }
 
@@ -195,36 +202,58 @@ async function fetchSignedFeed(item, cookie) {
   return post('/api/sns/web/v1/feed', {
     source_note_id: item.noteId,
     image_formats: ['jpg', 'webp', 'avif'],
-    extra: { need_body_topic: '1' },
-    xsec_source: 'pc_search',
+    extra: { need_body_topic: 1 },
+    xsec_source: xsecSourceFor(item),
     xsec_token: item.xsecToken || '',
   }, cookie);
 }
 
+function htmlResolved(item) {
+  const source = xsecSourceFor(item);
+  return {
+    noteId: item.noteId,
+    xsecToken: item.xsecToken || '',
+    xsecSource: source,
+    url: item.url || exploreNoteUrl(item.noteId, item.xsecToken, source),
+  };
+}
+
+async function fetchHtmlFallback(item, cookie) {
+  const resolved = htmlResolved(item);
+  if (cookie) {
+    try {
+      const note = await fetchHtmlNote(resolved, { cookie, via: item.via || 'search' });
+      if (note) return note;
+    } catch {
+      // Public SSR is the next layer, matching MediaCrawler enable_cookie then cookie-less HTML.
+    }
+  }
+  return fetchHtmlNote(resolved, { via: item.via || 'search', timeoutMs: 5000 });
+}
+
 async function fetchSessionNote(item, cookie) {
+  let signedError = null;
   try {
     const data = await withXhsRetry(() => fetchSignedFeed(item, cookie), { cookie });
-    const note = data?.data?.items?.[0]?.note_card;
-    if (note && (note.desc || note.display_title)) {
-      return {
-        noteId: item.noteId,
-        title: String(note.display_title || item.title || '').trim(),
-        text: String(note.desc || ''),
-        url: item.url,
-        via: item.via || 'search',
-      };
-    }
+    const note = noteFromFeed(data, item);
+    if (note) return note;
   } catch (error) {
+    signedError = error;
     if (isXhsAuthError(error) || isXhsVerificationError(error) || isXhsRateLimitError(error)) {
-      if (isXhsRateLimitError(error) && item.url) {
-        try { error.fallbackNote = await fetchPublicNote(item.url); } catch { /* keep signed error */ }
-      }
+      const htmlCookie = isXhsRateLimitError(error) ? cookie : null;
+      try { error.fallbackNote = await fetchHtmlFallback(item, htmlCookie); } catch { /* keep signed error */ }
       throw error;
     }
-    // Public SSR is the intentional detail fallback for fetch/network failures.
+    if (isXhsNotFoundError(error)) {
+      try { return await fetchHtmlFallback(item, cookie); } catch { throw error; }
+    }
   }
-  const note = await fetchPublicNote(item.url);
-  return { ...note, via: item.via || 'search' };
+  try {
+    return await fetchHtmlFallback(item, cookie);
+  } catch (htmlError) {
+    if (signedError) throw signedError;
+    throw htmlError;
+  }
 }
 
 function pickCoverImageUrl(noteCard) {
@@ -241,8 +270,8 @@ async function fetchNoteCoverImage(item, cookie) {
   const data = await post('/api/sns/web/v1/feed', {
     source_note_id: item.noteId,
     image_formats: ['jpg', 'webp', 'avif'],
-    extra: { need_body_topic: '0' },
-    xsec_source: item.via === 'search' ? 'pc_search' : 'pc_share',
+    extra: { need_body_topic: 0 },
+    xsec_source: xsecSourceFor(item),
     xsec_token: item.xsecToken || '',
   }, cookie);
   const noteCard = data?.data?.items?.[0]?.note_card;
@@ -256,6 +285,7 @@ module.exports = {
   assertSessionResponse,
   isXhsAuthError,
   isXhsVerificationError,
+  isXhsNotFoundError,
   formatXhsWarning,
   formatXhsDegradedWarning,
   searchNotes,

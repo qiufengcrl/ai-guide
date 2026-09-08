@@ -11,6 +11,14 @@
       {
         "model_type": "user",
         "id": "ignored"
+      },
+      {
+        "model_type": "rec_query",
+        "id": "hot-keyword"
+      },
+      {
+        "model_type": "hot_query",
+        "id": "trending"
       }
     ]
   }

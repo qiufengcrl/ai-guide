@@ -184,6 +184,7 @@ async function ingestPendingNoteFromPublic(job, item, locale, userId) {
       ...note,
       id: `g_${job.draft.guides.length + 1}`,
       via: item.via || note.via || 'url',
+      xsecToken: item.xsecToken || note.xsecToken || '',
       title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
       text: String(note.text || '').slice(0, 4000),
     }, locale);
@@ -346,6 +347,7 @@ async function advance(job, ctx) {
           appendGuide(job, {
             ...note,
             id: `g_${job.draft.guides.length + 1}`,
+            xsecToken: resolved.xsecToken || note.xsecToken || '',
             title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
             text: note.text.slice(0, 4000),
           }, locale);
@@ -382,6 +384,7 @@ async function advance(job, ctx) {
           ...note,
           id: `g_${job.draft.guides.length + 1}`,
           via: item.via || note.via || 'search',
+          xsecToken: item.xsecToken || note.xsecToken || '',
           title: noteDisplayTitle(note, message(locale, '小红书笔记', 'Xiaohongshu note')),
           text: note.text.slice(0, 4000),
         }, locale);
@@ -391,6 +394,7 @@ async function advance(job, ctx) {
             ...error.fallbackNote,
             id: `g_${job.draft.guides.length + 1}`,
             via: item.via || error.fallbackNote.via || 'search',
+            xsecToken: item.xsecToken || error.fallbackNote.xsecToken || '',
             title: noteDisplayTitle(error.fallbackNote, message(locale, '小红书笔记', 'Xiaohongshu note')),
             text: String(error.fallbackNote.text || '').slice(0, 4000),
           }, locale);
@@ -532,7 +536,11 @@ async function advance(job, ctx) {
     try {
       await xhsThrottle.wait(cookie, job.userId);
       const comments = await withXhsRetry(
-        () => fetchNoteComments(guide.noteId, cookie, { maxComments: DEFAULT_MAX_COMMENTS, timeoutMs: 10000 }),
+        () => fetchNoteComments(guide.noteId, cookie, {
+          maxComments: DEFAULT_MAX_COMMENTS,
+          timeoutMs: 10000,
+          xsecToken: guide.xsecToken,
+        }),
         { cookie, maxRetries: 1 },
       );
       const insights = extractCommentInsights(comments, 8);

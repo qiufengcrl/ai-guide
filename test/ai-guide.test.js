@@ -110,7 +110,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.44');
+  assert.equal(manifest.version, '1.1.45');
 });
 
 function memoryDb() {
@@ -487,15 +487,16 @@ test('公开草稿始终带上来源说明', () => {
     stage: 'ready',
     draft: {
       intent: { destination: '河南', guideQuery: '河南 历史 旅游 景点攻略', dayCount: 2 },
-      guides: [],
+      guides: [{ id: 'g_1', title: '攻略', text: 'secret', xsecToken: 'tok', via: 'url' }],
       warnings: [],
       days: [],
     },
     work: {},
   });
-  assert.equal(draft.sourceSummary.basis, 'destination');
+  assert.equal(draft.sourceSummary.basis, 'guides');
   assert.match(draft.sourceSummary.query, /河南/);
-  assert.deepEqual(draft.guides, []);
+  assert.equal(draft.guides[0].text, undefined);
+  assert.equal(draft.guides[0].xsecToken, undefined);
   assert.deepEqual(draft.prepTips, []);
 });
 
@@ -1173,7 +1174,8 @@ function restoreXhsThrottle() {
 test('isXhsRateLimitError 与 withXhsRetry：限流至少重试一次，认证错误不重试', async () => {
   assert.equal(isXhsRateLimitError(new Error('Xiaohongshu returned 429')), true);
   assert.equal(isXhsRateLimitError(new Error('请求过于频繁')), true);
-  assert.equal(isXhsRateLimitError(new Error('Xiaohongshu requested verification (461)')), true);
+  assert.equal(isXhsRateLimitError(new Error('Xiaohongshu requested verification (461)')), false);
+  assert.equal(isXhsRateLimitError(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification')), false);
   assert.equal(isXhsRateLimitError(new Error('CUQPS has exceeded the limit')), true);
   assert.equal(isXhsRateLimitError(new XhsSessionError('signed session code=300011', 'auth')), false);
   assert.equal(xhsBackoffDelayMs(0), 0);
