@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
-const { searchNotes, fetchSessionNote, formatXhsWarning, isXhsAuthError, isXhsVerificationError, XhsSessionError } = require('../server/xhs/session');
+const { searchNotes, fetchSessionNote, formatXhsWarning, isXhsAuthError, isXhsVerificationError, isXhsNotFoundError, assertSessionResponse, XhsSessionError } = require('../server/xhs/session');
 const { createSignedPost, parseCookieHeader } = require('../server/xhs/signature');
 const { extractXhsUrls, fetchPublicNote } = require('../server/xhs/url');
 const { setXhsThrottleForTests, isXhsRateLimitError, xhsThrottle } = require('../server/xhs/throttle');
@@ -48,6 +48,7 @@ test('会话搜索只保留 model_type=note，并把 xsec_token 带到详情接�
     assert.equal(calls[0].body.filters.length, 5);
     assert.equal(calls[1].body.xsec_token, 'fixture-token');
     assert.equal(calls[1].body.source_note_id, '64f000000000000000000001');
+    assert.equal(calls[1].body.extra.need_body_topic, 1);
   } finally {
     global.fetch = originalFetch;
   }
@@ -55,10 +56,12 @@ test('会话搜索只保留 model_type=note，并把 xsec_token 带到详情接�
 
 test('搜索结果可从 note_card.note_id 解析，并忽略非笔记条目', () => {
   const { parseSearchNotes } = require('../server/xhs/session');
-  const notes = parseSearchNotes({
+    const notes = parseSearchNotes({
     data: {
       items: [
         { model_type: 'user', id: 'u1' },
+        { model_type: 'rec_query', id: 'hot-kw' },
+        { model_type: 'hot_query', id: 'trend' },
         { model_type: 'note', note_card: { note_id: '64f000000000000000000099', display_title: '洛阳两日' }, xsec_token: 'tok' },
         { note_card: { id: 'bad' } },
       ],
@@ -118,12 +121,17 @@ test('评论区 API 解析实用提示', async () => {
   const originalFetch = global.fetch;
   global.fetch = async (url, init) => {
     assert.match(String(url), /comment\/page/);
+    assert.match(String(url), /xsec_token=fixture-token/);
+    assert.match(String(url), /image_formats=jpg,webp,avif/);
     assert.equal(init.method, 'GET');
     return response(fixture('comments.json'));
   };
   try {
     const { fetchNoteComments, parseCommentTexts } = require('../server/xhs/comments');
-    const texts = await fetchNoteComments('64f000000000000000000001', VALID_COOKIE, { maxComments: 10 });
+    const texts = await fetchNoteComments('64f000000000000000000001', VALID_COOKIE, {
+      maxComments: 10,
+      xsecToken: 'fixture-token',
+    });
     assert.ok(texts.some((line) => /门票/.test(line)));
     assert.ok(texts.some((line) => /闭馆/.test(line)));
     const insights = require('../server/guide-quality').extractCommentInsights(texts);
@@ -139,13 +147,20 @@ test('评论区 API 解析实用提示', async () => {
 
 test('GET 签名请求包含查询参数签名', () => {
   const timestamp = 1788490800456;
-  const { createSignedGet } = require('../server/xhs/signature');
-  const signed = createSignedGet('/api/sns/web/v2/comment/page', {
+  const { createSignedGet, buildQueryString } = require('../server/xhs/signature');
+  const params = {
     note_id: '64f000000000000000000001',
     cursor: '',
-  }, VALID_COOKIE, { timestamp });
+    image_formats: ['jpg', 'webp', 'avif'],
+    xsec_token: 'tok+1',
+  };
+  const signed = createSignedGet('/api/sns/web/v2/comment/page', params, VALID_COOKIE, { timestamp });
   assert.equal(signed.headers['x-t'], String(timestamp));
   assert.match(signed.headers['x-s'], /^XYS_/);
+  assert.equal(signed.query.image_formats, 'jpg,webp,avif');
+  assert.match(signed.url, /image_formats=jpg,webp,avif/);
+  assert.match(signed.url, /xsec_token=/);
+  assert.equal(buildQueryString({ image_formats: 'jpg,webp,avif' }), 'image_formats=jpg,webp,avif');
 });
 
 test('缺少 a1 或 web_session 时在发出网络请求前拒绝', async () => {
@@ -351,5 +366,308 @@ test('配图缓存按 Cookie 隔离，成功 URL 不串到其他用户', async (
   } finally {
     global.fetch = originalFetch;
     resetXhsPhotoCacheForTests();
+  }
+});
+
+test('feed 空结果时带 Cookie 读 HTML 兜底', async () => {
+  const originalFetch = global.fetch;
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures', 'note.html'), 'utf8');
+  const calls = [];
+  global.fetch = async (url, init) => {
+    const href = String(url);
+    calls.push({ href, cookie: init?.headers?.cookie });
+    if (href.includes('/feed')) {
+      return response({ success: true, data: { items: [] } });
+    }
+    return { ok: true, status: 200, headers: { get() { return null; } }, async text() { return html; } };
+  };
+  try {
+    const note = await fetchSessionNote({
+      noteId: '64f000000000000000000001',
+      xsecToken: 'tok',
+      url: 'https://www.xiaohongshu.com/explore/64f000000000000000000001',
+    }, VALID_COOKIE);
+    assert.match(note.text, /伏见稻荷/);
+    assert.equal(calls[0].href.includes('/feed'), true);
+    assert.ok(calls[1].cookie);
+    assert.match(String(calls[1].cookie), /web_session=fixture-session/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('461 验证错误不按限流重试', async () => {
+  const { withXhsRetry } = require('../server/xhs/throttle');
+  const error = new XhsSessionError('Xiaohongshu requested verification (461)', 'verification');
+  assert.equal(isXhsRateLimitError(error), false);
+  let calls = 0;
+  await assert.rejects(withXhsRetry(async () => {
+    calls += 1;
+    throw error;
+  }), (err) => isXhsVerificationError(err));
+  assert.equal(calls, 1);
+});
+
+test('300012 带异常文案按 IP 限流，不按认证失败', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => response({ success: false, code: 300012, msg: '网络连接异常，请检查网络设置' });
+  try {
+    await assert.rejects(searchNotes('旅行', VALID_COOKIE, 1), (error) => {
+      assert.equal(error.code, 'rate');
+      assert.equal(isXhsAuthError(error), false);
+      assert.equal(isXhsRateLimitError(error), true);
+      return true;
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('笔记状态异常按 not_found，不阻断会话', () => {
+  assert.throws(() => assertSessionResponse({ success: false, code: -510001, msg: '笔记状态异常' }), (error) => {
+    assert.equal(error.code, 'not_found');
+    assert.equal(isXhsNotFoundError(error), true);
+    assert.equal(isXhsAuthError(error), false);
+    return true;
+  });
+});
+
+test('评论 GET 401 识别为认证失败', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({ ok: false, status: 401, headers: { get() { return null; } }, async json() { return {}; } });
+  try {
+    const { fetchNoteComments } = require('../server/xhs/comments');
+    await assert.rejects(fetchNoteComments('64f000000000000000000001', VALID_COOKIE), (error) => {
+      assert.equal(error.code, 'auth');
+      assert.equal(isXhsAuthError(error), true);
+      return true;
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('pong 走 selfinfo 而不是搜索探测', async () => {
+  const { pong, pongOk } = require('../server/xhs/client');
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    assert.match(String(url), /user\/selfinfo/);
+    assert.equal(init.method, 'GET');
+    return response({ success: true, data: { result: { success: true }, user_id: 'u1' } });
+  };
+  try {
+    const data = await pong(VALID_COOKIE);
+    assert.equal(data.data.user_id, 'u1');
+    assert.equal(pongOk({ success: true, data: { result: { success: true }, user_id: 'u1' } }), true);
+    assert.equal(pongOk({ success: true, data: { items: [] } }), false);
+    assert.equal(pongOk({ success: true }), false);
+    assert.equal(pongOk({ success: true, data: { result: { success: true } } }), false);
+    assert.equal(pongOk({ success: true, data: { result: { success: false } } }), false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('搜索 has_more 时复用 search_id 翻页', async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push(body);
+    if (calls.length === 1) {
+      return response({
+        success: true,
+        data: {
+          has_more: true,
+          items: [{
+            model_type: 'note',
+            id: '64f000000000000000000001',
+            xsec_token: 't1',
+            note_card: { display_title: '第一页' },
+          }],
+        },
+      });
+    }
+    return response({
+      success: true,
+      data: {
+        has_more: false,
+        items: [{
+          model_type: 'note',
+          id: '64f000000000000000000002',
+          xsec_token: 't2',
+          note_card: { display_title: '第二页' },
+        }],
+      },
+    });
+  };
+  try {
+    const { searchNotesDetailed } = require('../server/xhs/session');
+    const { notes, searchId } = await searchNotesDetailed('京都', VALID_COOKIE, 4);
+    assert.equal(notes.length, 2);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].page, 1);
+    assert.equal(calls[1].page, 2);
+    assert.equal(calls[0].search_id, searchId);
+    assert.equal(calls[1].search_id, searchId);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('评论分页会带 cursor 并请求二级评论', async () => {
+  const originalFetch = global.fetch;
+  const urls = [];
+  global.fetch = async (url) => {
+    const href = String(url);
+    urls.push(href);
+    if (href.includes('comment/sub/page')) {
+      return response({
+        success: true,
+        data: { comments: [{ id: 's1', content: '二级：提前预约' }], has_more: false, cursor: '' },
+      });
+    }
+    if (href.includes('cursor=next')) {
+      return response({
+        success: true,
+        data: { comments: [{ id: 'c2', content: '第二天去金阁寺' }], has_more: false, cursor: '' },
+      });
+    }
+    return response({
+      success: true,
+      data: {
+        comments: [{
+          id: 'c1',
+          content: '门票要预约',
+          note_id: '64f000000000000000000001',
+          sub_comment_has_more: true,
+          sub_comment_cursor: 'sub1',
+        }],
+        has_more: true,
+        cursor: 'next',
+      },
+    });
+  };
+  try {
+    const { fetchNoteComments } = require('../server/xhs/comments');
+    const texts = await fetchNoteComments('64f000000000000000000001', VALID_COOKIE, {
+      maxComments: 10,
+      xsecToken: 'tok',
+    });
+    assert.ok(texts.some((line) => /门票/.test(line)));
+    assert.ok(texts.some((line) => /提前预约/.test(line)));
+    assert.ok(texts.some((line) => /金阁寺/.test(line)));
+    assert.ok(urls.some((href) => /comment\/page/.test(href) && /cursor=next/.test(href)));
+    assert.ok(urls.some((href) => /comment\/sub\/page/.test(href)));
+    assert.equal(urls.length, 3);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('评论相邻 GET 之间等待节流间隔，含子评', async () => {
+  const originalFetch = global.fetch;
+  let now = 1_000_000;
+  const sleeps = [];
+  setXhsThrottleForTests({
+    baseIntervalMs: 1000,
+    jitterMs: 0,
+    backoffDelayMs: 0,
+    now: () => now,
+    sleep: async (ms) => { sleeps.push(ms); now += ms; },
+  });
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes('comment/sub/page')) {
+      return response({
+        success: true,
+        data: { comments: [{ id: 's1', content: '二级：提前预约' }], has_more: false, cursor: '' },
+      });
+    }
+    if (href.includes('cursor=next')) {
+      return response({
+        success: true,
+        data: { comments: [{ id: 'c2', content: '第二天去金阁寺' }], has_more: false, cursor: '' },
+      });
+    }
+    return response({
+      success: true,
+      data: {
+        comments: [{
+          id: 'c1',
+          content: '门票要预约',
+          sub_comment_has_more: true,
+          sub_comment_cursor: 'sub1',
+        }],
+        has_more: true,
+        cursor: 'next',
+      },
+    });
+  };
+  try {
+    const { fetchNoteComments } = require('../server/xhs/comments');
+    await fetchNoteComments('64f000000000000000000001', VALID_COOKIE, {
+      maxComments: 10,
+      xsecToken: 'tok',
+    });
+    assert.deepEqual(sleeps, [1000, 1000]);
+  } finally {
+    global.fetch = originalFetch;
+    setXhsThrottleForTests({ baseIntervalMs: 0, jitterMs: 0, backoffDelayMs: 0 });
+  }
+});
+
+test('评论 429 只重试当前 GET，不重放整棵评论树', async () => {
+  const originalFetch = global.fetch;
+  const urls = [];
+  let firstPageHits = 0;
+  global.fetch = async (url) => {
+    const href = String(url);
+    urls.push(href);
+    if (href.includes('comment/sub/page')) {
+      return response({
+        success: true,
+        data: { comments: [{ id: 's1', content: '二级：提前预约' }], has_more: false, cursor: '' },
+      });
+    }
+    if (href.includes('cursor=next')) {
+      return response({
+        success: true,
+        data: { comments: [{ id: 'c2', content: '第二天去金阁寺' }], has_more: false, cursor: '' },
+      });
+    }
+    firstPageHits += 1;
+    if (firstPageHits === 1) {
+      return { ok: false, status: 429, headers: { get() { return null; } }, async json() { return {}; } };
+    }
+    return response({
+      success: true,
+      data: {
+        comments: [{
+          id: 'c1',
+          content: '门票要预约',
+          sub_comment_has_more: true,
+          sub_comment_cursor: 'sub1',
+        }],
+        has_more: true,
+        cursor: 'next',
+      },
+    });
+  };
+  try {
+    const { fetchNoteComments } = require('../server/xhs/comments');
+    const texts = await fetchNoteComments('64f000000000000000000001', VALID_COOKIE, {
+      maxComments: 10,
+      xsecToken: 'tok',
+      maxRetries: 1,
+    });
+    assert.ok(texts.some((line) => /门票/.test(line)));
+    assert.ok(texts.some((line) => /提前预约/.test(line)));
+    assert.ok(texts.some((line) => /金阁寺/.test(line)));
+    assert.equal(firstPageHits, 2);
+    assert.equal(urls.filter((href) => /comment\/sub\/page/.test(href)).length, 1);
+    assert.equal(urls.filter((href) => /cursor=next/.test(href)).length, 1);
+  } finally {
+    global.fetch = originalFetch;
   }
 });

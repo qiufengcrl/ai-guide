@@ -45,10 +45,7 @@ async function getXhsPhoto(name, cookie, destination = '') {
   if (cached !== undefined) return cached;
 
   const query = `${label} 风景`;
-  const { notes } = await withXhsRetry(
-    () => searchNotesDetailed(query, cookie, 1, { sort: 'time_descending' }),
-    { cookie },
-  );
+  const { notes } = await searchNotesDetailed(query, cookie, 1, { sort: 'time_descending' });
   const item = notes[0];
   if (!item) return '';
   const url = await withXhsRetry(() => fetchNoteCoverImage(item, cookie), { cookie });

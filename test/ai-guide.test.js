@@ -110,13 +110,16 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.44');
+  assert.equal(manifest.version, '1.1.47');
 });
 
 function memoryDb() {
   const jobs = new Map();
   const userMeta = new Map();
   const cookieClock = new Map();
+  const noteCache = new Map();
+  const commentCache = new Map();
+  const cacheKey = (userId, noteId) => `${userId}::${noteId}`;
   const api = {
     async migrate() { return { applied: true }; },
     async exec(sql, ...args) {
@@ -168,6 +171,46 @@ function memoryDb() {
         }
         return { changes };
       }
+      if (/INSERT INTO xhs_note_cache/i.test(sql)) {
+        const [userId, noteId, payload, at] = args;
+        noteCache.set(cacheKey(userId, noteId), { user_id: userId, note_id: noteId, payload_json: payload, fetched_at: at });
+        return { changes: 1 };
+      }
+      if (/INSERT INTO xhs_comment_cache/i.test(sql)) {
+        const [userId, noteId, payload, at] = args;
+        commentCache.set(cacheKey(userId, noteId), { user_id: userId, note_id: noteId, payload_json: payload, fetched_at: at });
+        return { changes: 1 };
+      }
+      if (/DELETE FROM xhs_note_cache/i.test(sql)) {
+        if (sql.includes('fetched_at')) {
+          let changes = 0;
+          for (const [key, row] of noteCache) {
+            if (row.user_id === args[0] && Number(row.fetched_at) < args[1]) { noteCache.delete(key); changes += 1; }
+          }
+          return { changes };
+        }
+        if (sql.includes('note_id')) {
+          return { changes: noteCache.delete(cacheKey(args[0], args[1])) ? 1 : 0 };
+        }
+        let changes = 0;
+        for (const [key, row] of noteCache) if (row.user_id === args[0]) { noteCache.delete(key); changes += 1; }
+        return { changes };
+      }
+      if (/DELETE FROM xhs_comment_cache/i.test(sql)) {
+        if (sql.includes('fetched_at')) {
+          let changes = 0;
+          for (const [key, row] of commentCache) {
+            if (row.user_id === args[0] && Number(row.fetched_at) < args[1]) { commentCache.delete(key); changes += 1; }
+          }
+          return { changes };
+        }
+        if (sql.includes('note_id')) {
+          return { changes: commentCache.delete(cacheKey(args[0], args[1])) ? 1 : 0 };
+        }
+        let changes = 0;
+        for (const [key, row] of commentCache) if (row.user_id === args[0]) { commentCache.delete(key); changes += 1; }
+        return { changes };
+      }
       throw new Error(`Unexpected exec: ${sql}`);
     },
     async query(sql, ...args) {
@@ -184,6 +227,14 @@ function memoryDb() {
       if (sql.includes('WHERE user_id = ? ORDER BY created_at')) {
         return rows.filter((row) => row.user_id === args[0]).sort((a, b) => a.created_at - b.created_at);
       }
+      if (/FROM xhs_note_cache/i.test(sql)) {
+        const row = noteCache.get(cacheKey(args[0], args[1]));
+        return row ? [row] : [];
+      }
+      if (/FROM xhs_comment_cache/i.test(sql)) {
+        const row = commentCache.get(cacheKey(args[0], args[1]));
+        return row ? [row] : [];
+      }
       if (/FROM xhs_cookie_clock/i.test(sql)) {
         const row = cookieClock.get(args[0]);
         return row ? [row] : [];
@@ -198,8 +249,37 @@ function memoryDb() {
     jobs,
     userMeta,
     cookieClock,
+    noteCache,
+    commentCache,
   };
   return api;
+}
+
+function xhsJson(body, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get() { return null; } },
+    async json() { return body; },
+  };
+}
+
+function xhsSelfinfoOk() {
+  return xhsJson({ success: true, data: { result: { success: true }, user_id: 'u1' } });
+}
+
+function xhsEmptySearch() {
+  return xhsJson({ success: true, data: { items: [] } });
+}
+
+function xhsSessionThen(handler) {
+  return (url) => {
+    const href = String(url);
+    if (href.includes('/user/selfinfo')) return xhsSelfinfoOk();
+    if (typeof handler === 'function') return handler(href);
+    if (href.includes('edith.xiaohongshu.com')) return xhsEmptySearch();
+    throw new Error(`Unexpected fetch: ${href}`);
+  };
 }
 
 function buildHost(options = {}) {
@@ -487,15 +567,16 @@ test('公开草稿始终带上来源说明', () => {
     stage: 'ready',
     draft: {
       intent: { destination: '河南', guideQuery: '河南 历史 旅游 景点攻略', dayCount: 2 },
-      guides: [],
+      guides: [{ id: 'g_1', title: '攻略', text: 'secret', xsecToken: 'tok', via: 'url' }],
       warnings: [],
       days: [],
     },
     work: {},
   });
-  assert.equal(draft.sourceSummary.basis, 'destination');
+  assert.equal(draft.sourceSummary.basis, 'guides');
   assert.match(draft.sourceSummary.query, /河南/);
-  assert.deepEqual(draft.guides, []);
+  assert.equal(draft.guides[0].text, undefined);
+  assert.equal(draft.guides[0].xsecToken, undefined);
   assert.deepEqual(draft.prepTips, []);
 });
 
@@ -552,18 +633,7 @@ test('Cookie 搜索为空时给出说明，兴趣词不会变成景点', async (
       { name: '白马寺', dayHint: 2 },
     ] }],
   });
-  const xhsFallback = async (url) => {
-    const href = String(url);
-    if (href.includes('edith.xiaohongshu.com')) {
-      return {
-        ok: true,
-        status: 200,
-        headers: { get() { return null; } },
-        async json() { return { success: true, data: { items: [] } }; },
-      };
-    }
-    throw new Error(`Unexpected fetch: ${href}`);
-  };
+  const xhsFallback = xhsSessionThen();
   const { state } = await makeReady(fixture, {
     destination: '河南',
     dayCount: 2,
@@ -708,12 +778,37 @@ test('没有进行中的任务时，GET /plan 会恢复最近一份就绪预览'
 test('deleteUserData 幂等清除该用户任务，export 不含 Cookie 或正文', async () => {
   const fixture = buildHost();
   await makeReady(fixture);
+  await fixture.db.exec(
+    'INSERT INTO xhs_note_cache (user_id, note_id, payload_json, fetched_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, note_id) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at',
+    7,
+    'n1',
+    JSON.stringify({ text: '伏见稻荷第一天不要写进导出' }),
+    Date.now(),
+  );
+  await fixture.db.exec(
+    'INSERT INTO xhs_note_cache (user_id, note_id, payload_json, fetched_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, note_id) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at',
+    8,
+    'n2',
+    JSON.stringify({ text: 'other-user-note' }),
+    Date.now(),
+  );
+  await fixture.db.exec(
+    'INSERT INTO xhs_comment_cache (user_id, note_id, payload_json, fetched_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, note_id) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at',
+    8,
+    'n2',
+    JSON.stringify({ texts: ['other-user-comment'] }),
+    Date.now(),
+  );
   const before = await fixture.app.exportUserData(7);
   assert.equal(JSON.stringify(before).includes('第一天'), false);
+  assert.equal(JSON.stringify(before).includes('伏见稻荷'), false);
   assert.equal(JSON.stringify(before).toLowerCase().includes('cookie'), false);
   await fixture.app.deleteUserData(7);
   await fixture.app.deleteUserData(7);
   assert.equal(fixture.db.jobs.size, 0);
+  assert.equal(fixture.db.noteCache.size, 1);
+  assert.equal(fixture.db.commentCache.size, 1);
+  assert.equal([...fixture.db.noteCache.values()][0].user_id, 8);
 });
 
 test('Nominatim 有目的地偏差时会 bounded 限制 viewbox', async () => {
@@ -1173,7 +1268,8 @@ function restoreXhsThrottle() {
 test('isXhsRateLimitError 与 withXhsRetry：限流至少重试一次，认证错误不重试', async () => {
   assert.equal(isXhsRateLimitError(new Error('Xiaohongshu returned 429')), true);
   assert.equal(isXhsRateLimitError(new Error('请求过于频繁')), true);
-  assert.equal(isXhsRateLimitError(new Error('Xiaohongshu requested verification (461)')), true);
+  assert.equal(isXhsRateLimitError(new Error('Xiaohongshu requested verification (461)')), false);
+  assert.equal(isXhsRateLimitError(new XhsSessionError('Xiaohongshu requested verification (461)', 'verification')), false);
   assert.equal(isXhsRateLimitError(new Error('CUQPS has exceeded the limit')), true);
   assert.equal(isXhsRateLimitError(new XhsSessionError('signed session code=300011', 'auth')), false);
   assert.equal(xhsBackoffDelayMs(0), 0);
@@ -1480,6 +1576,48 @@ test('设置页 testXhs 在无 userId 时不写无主 clock', async () => {
   }
 });
 
+test('设置页 testXhs 即使 has_more 也只请求一页搜索', async () => {
+  const fixture = buildHost({
+    userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
+  });
+  await fixture.app.load();
+  const original = global.fetch;
+  let fetchCount = 0;
+  global.fetch = async (url) => {
+    if (String(url).includes('edith.xiaohongshu.com')) {
+      fetchCount += 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() {
+          return {
+            success: true,
+            data: {
+              has_more: true,
+              items: [{
+                model_type: 'note',
+                id: '64f000000000000000000001',
+                xsec_token: 'tok',
+                note_card: { display_title: '京都一日' },
+              }],
+            },
+          };
+        },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  try {
+    const result = await fixture.app.action('testXhs');
+    assert.equal(fetchCount, 1);
+    assert.equal(result.ok, true);
+    assert.match(result.message, /搜到 1 篇/);
+  } finally {
+    global.fetch = original;
+  }
+});
+
 test('设置页 testXhs 遇限流不重试，避免超过 TREK 15s action 超时', async () => {
   const fixture = buildHost({
     userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
@@ -1518,17 +1656,7 @@ test('settings 旧时间戳不会盖住健康检查写入的新值', async () =>
       xhs_cookie_updated_at: String(eightDaysAgo),
     },
   });
-  const xhsFallback = (url) => {
-    if (String(url).includes('edith.xiaohongshu.com')) {
-      return {
-        ok: true,
-        status: 200,
-        headers: { get() { return null; } },
-        async json() { return { success: true, data: { items: [] } }; },
-      };
-    }
-    throw new Error(`Unexpected fetch: ${url}`);
-  };
+  const xhsFallback = xhsSessionThen();
   const first = await makeReady(fixture, {
     destination: '京都',
     locale: 'zh',
@@ -1550,6 +1678,14 @@ test('session 429 后剩余笔记改走公开页，且文案不再提关键词�
   let publicCalls = 0;
   const xhsFallback = (url) => {
     const href = String(url);
+    if (href.includes('/user/selfinfo')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() { return { success: true, data: { result: { success: true }, user_id: 'u1' } }; },
+      };
+    }
     if (href.includes('/search/notes')) {
       return {
         ok: true,
@@ -1597,17 +1733,7 @@ test('deleteUserData 清除该用户 cookie clock', async () => {
     config: { xhs_enabled: true },
     userSettings: { xhs_cookie: `a1=${'a'.repeat(52)}; web_session=fixture-session` },
   });
-  const xhsFallback = (url) => {
-    if (String(url).includes('edith.xiaohongshu.com')) {
-      return {
-        ok: true,
-        status: 200,
-        headers: { get() { return null; } },
-        async json() { return { success: true, data: { items: [] } }; },
-      };
-    }
-    throw new Error(`Unexpected fetch: ${url}`);
-  };
+  const xhsFallback = xhsSessionThen();
   await makeReady(fixture, { destination: '京都', xhsKeywordSearch: true, locale: 'zh' }, xhsFallback);
   assert.ok(fixture.db.cookieClock.size > 0);
   assert.ok([...fixture.db.cookieClock.values()].every((row) => row.user_id === 7));

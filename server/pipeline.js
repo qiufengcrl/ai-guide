@@ -1109,7 +1109,7 @@ function publicDraft(job) {
     status: job.status,
     stage: job.stage,
     intent: intent || null,
-    guides: guides.map(({ text, commentInsights, ...guide }) => guide),
+    guides: guides.map(({ text, commentInsights, xsecToken, ...guide }) => guide),
     sourceSummary: {
       basis: guides.length ? 'guides' : 'destination',
       query: intent.guideQuery || '',
