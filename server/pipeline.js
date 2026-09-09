@@ -32,8 +32,9 @@ function stripInvisible(text) {
 
 function cleanGuidePlaceName(raw) {
   let name = stripInvisible(raw)
+    .replace(/^(?:\d+[.\u3001、．)]\s*)+/, '')
     .replace(/^[▪️•·\-–—\d①②③④⑤⑥⑦⑧⑨⑩1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟📍🗺️]+\s*/u, '')
-    .replace(/^(?:\d+[.\u3001、\)]\s*)+/, '')
+    .replace(/^[.．]\s*/, '')
     .replace(/[:：].*$/, '')
     .replace(/[（(].*[）)]/g, '')
     .replace(GUIDE_NAME_SUFFIX, '')
@@ -408,6 +409,10 @@ function looksLikeShareCard(text) {
 
 function stripShareBoilerplate(text) {
   return String(text || '')
+    .replace(/打开【小红书】(?:App)?/g, ' ')
+    .replace(/进入【小红书】/g, ' ')
+    .replace(/复制本条(?:口令)?/g, ' ')
+    .replace(/发现更多(?:精彩)?内容[~～!]*/g, ' ')
     .replace(SHARE_TOKEN_RE, ' ')
     .replace(/#小红书\S*/g, ' ')
     .replace(/[ \t]+\n/g, '\n')
