@@ -10,6 +10,7 @@ const {
   extractionInstruction,
   resolveExtractCandidates,
   inferDestinationFromGuides,
+  applyGuideDerivedIntent,
   mergeGuideTexts,
   guideTextForExtractRetry,
   extractRetryInstruction,
@@ -25,8 +26,8 @@ const {
   collectXhsNoteIds,
   mapConcurrent,
   resolveCandidateEvidence,
+  unmappedEvidenceFromCandidate,
   pickDestinationBias,
-  MAX_FROM_DESTINATION_KM,
   filterMarketingGuides,
 } = require('./pipeline');
 const { isMarketingGuide, commentTipsForPlace, extractCommentInsights, attachPreviewTips, selectSearchNotes, scoreGuide, QUALITY_MIN_SCORE } = require('./guide-quality');
@@ -429,6 +430,7 @@ async function advance(job, ctx) {
           `Destination was empty; inferred "${inferred}" from note titles.`));
       }
     }
+    applyGuideDerivedIntent(job.draft.intent, job.draft.guides, limits);
     const hasGuides = (job.draft.guides || []).some((guide) => String(guide.text || '').trim());
     let extracted = {};
     let llmError = null;
@@ -476,11 +478,7 @@ async function advance(job, ctx) {
       llmCandidateCount: resolved.llmCandidateCount,
       llmError,
     };
-    if (resolved.source === 'guide_text') {
-      addWarning(job, message(locale,
-        '模型未能识别景点，已从攻略正文按规则提取。',
-        'The model did not extract places; names were parsed from guide text.'));
-    } else if (!resolved.candidates.length) {
+    if (!resolved.candidates.length) {
       const hints = [];
       if (resolved.llmCandidateCount === 0 && !llmError) {
         hints.push(message(locale,
@@ -588,23 +586,13 @@ async function advance(job, ctx) {
           job.work.evidence.push(item.evidence);
           continue;
         }
-        if (item?.boundaryRejected) {
-          const limitKm = Number(job.work.bias?.radiusKm) || MAX_FROM_DESTINATION_KM;
-          addWarning(job, message(locale,
-            `「${item.query}」距目的地超过 ${limitKm} 公里，已跳过`,
-            `"${item.query}" is more than ${limitKm} km from the destination and was skipped`));
-          continue;
-        }
-        if (item?.query) {
-          addWarning(job, message(locale,
-            `「${item.query}」无法匹配坐标，已跳过`,
-            `"${item.query}" could not be matched to coordinates and was skipped`));
-        }
-        if (item?.error) {
-          addWarning(job, message(locale,
-            `「${item.query || item.error.message}」地图检索失败：${item.error.message}`,
-            `Place search for "${item.query || item.error.message}" failed: ${item.error.message}`));
-        }
+        const fallback = unmappedEvidenceFromCandidate(candidate, index);
+        fallback.commentTips = commentTipsForPlace(
+          fallback.name,
+          job.draft.guides,
+          fallback.fromGuideIds,
+        );
+        job.work.evidence.push(fallback);
       }
       job.work.geocodeDone = true;
       return;
@@ -858,6 +846,36 @@ module.exports = definePlugin({
       },
     },
     {
+      method: 'POST', path: '/geocode', auth: true,
+      async handler(req, ctx) {
+        const body = req.body && typeof req.body === 'object' ? req.body : {};
+        const query = String(body.query || '').trim().slice(0, 80);
+        if (query.length < 2) return response(200, { places: [] });
+        const destination = String(body.destination || '').trim().slice(0, 40);
+        const locale = body.locale || 'zh';
+        const text = destination && !query.includes(destination) ? `${destination} ${query}` : query;
+        try {
+          const result = await searchPlaces(text, geoSearchOptions(ctx.config, {
+            lang: locale,
+            limit: 6,
+          }));
+          return response(200, {
+            places: (result.places || []).slice(0, 6).map((place) => ({
+              name: place.name,
+              address: place.address || '',
+              lat: place.lat,
+              lng: place.lng,
+            })),
+          });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error || '');
+          return response(502, {
+            error: message(locale, `地址搜索失败：${detail}`, `Address search failed: ${detail}`),
+          });
+        }
+      },
+    },
+    {
       method: 'POST', path: '/commit', auth: true,
       async handler(req, ctx) {
         const body = req.body && typeof req.body === 'object' ? req.body : {};
@@ -870,8 +888,25 @@ module.exports = definePlugin({
         });
         if (job.committedTripId) return response(200, { tripId: job.committedTripId });
         const requested = new Set(Array.isArray(body.evidenceIds) ? body.evidenceIds.map(String) : []);
+        const patches = new Map();
+        for (const patch of Array.isArray(body.placePatches) ? body.placePatches : []) {
+          const id = String(patch?.evidenceId || '').trim();
+          if (!id) continue;
+          const lat = Number(patch.lat);
+          const lng = Number(patch.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+          patches.set(id, {
+            lat,
+            lng,
+            address: String(patch.address || '').trim(),
+            unmapped: false,
+          });
+        }
         const selected = job.draft.days.flatMap((day) =>
-          day.places.filter((place) => requested.has(place.evidenceId)).map((place) => ({ ...place, day })),
+          day.places.filter((place) => requested.has(place.evidenceId)).map((place) => {
+            const patch = patches.get(place.evidenceId);
+            return { ...place, ...(patch || {}), day };
+          }),
         );
         if (!selected.length) return response(400, {
           error: message(job.payload.locale, '草稿中没有仍被选中的证据点', 'No selected evidence remains in this draft'),
@@ -887,26 +922,36 @@ module.exports = definePlugin({
         const days = await ctx.trips.getDays(tripId);
         const categoryMap = await loadTrekCategoryMap(ctx);
         const createdPlaceIds = [];
+        const skippedUnmapped = [];
         try {
           for (const item of selected) {
             const dayIndex = job.draft.days.indexOf(item.day);
             const day = days[dayIndex];
             if (!day) continue;
             const placeInput = buildTrekPlacePayload(item, job.draft.guides, categoryMap, job.payload.locale || 'en');
-            const place = await ctx.places.create(tripId, placeInput);
-            createdPlaceIds.push(Number(place.id));
-            await ctx.itinerary.assign(tripId, Number(day.id), Number(place.id), placeInput.notes || null);
+            try {
+              const place = await ctx.places.create(tripId, placeInput);
+              createdPlaceIds.push(Number(place.id));
+              await ctx.itinerary.assign(tripId, Number(day.id), Number(place.id), placeInput.notes || null);
+            } catch (error) {
+              if (item.unmapped || !Number.isFinite(Number(item.lat)) || !Number.isFinite(Number(item.lng))) {
+                skippedUnmapped.push(item.name);
+                continue;
+              }
+              throw error;
+            }
           }
-          if (!createdPlaceIds.length) return response(500, {
-            error: message(job.payload.locale, '没有地点成功写入', 'No places could be written'),
+          if (!createdPlaceIds.length) return response(400, {
+            error: message(job.payload.locale, '勾选的地点还没有地图坐标，无法写入 TREK', 'Selected places have no map coordinates and cannot be written to TREK'),
             tripId,
             createdPlaceIds,
+            skippedUnmapped,
           });
           await ctx.meta.set('trip', tripId, 'ai-guide.jobId', job.id);
           job.committedTripId = tripId;
           job.draft.guides = job.draft.guides.map(({ text, ...guide }) => guide);
           await saveJob(ctx, job);
-          return response(200, { tripId });
+          return response(200, { tripId, skippedUnmapped });
         } catch (error) {
           await rollbackCreatedPlaces(ctx, tripId, createdPlaceIds);
           return response(500, {

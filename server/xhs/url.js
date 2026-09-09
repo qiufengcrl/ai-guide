@@ -57,6 +57,20 @@ function extractXhsUrls(...blobs) {
   return found;
 }
 
+function splitGuidePaste(...blobs) {
+  const combined = blobs.map((blob) => String(blob || '').trim()).filter(Boolean).join('\n');
+  const urls = extractXhsUrls(combined);
+  let rest = combined;
+  for (const url of urls) rest = rest.split(url).join(' ');
+  rest = rest.replace(/https?:\/\/[^\s<>"']+/gi, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return { urls, sourceText: rest.slice(0, 12000) };
+}
+
 function parseInitialState(html, noteId) {
   const source = String(html || '');
   if (!/noteDetailMap/i.test(source)) {
@@ -182,6 +196,7 @@ module.exports = {
   isAllowedHost,
   isShortLinkHost,
   extractXhsUrls,
+  splitGuidePaste,
   noteIdFromUrl,
   searchKeywordFromUrl,
   parseInitialState,

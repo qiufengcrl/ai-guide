@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>AI 攻略</title>
   <!-- trek:ui -->
   <style>
@@ -23,15 +23,22 @@
 
     .app-shell {
       height: 100%;
-      min-height: 100%;
+      min-height: 0;
       display: flex;
       flex-direction: column;
       overflow: hidden;
       padding-bottom: var(--trek-inset-bottom, 0px);
     }
+    /* Phone: do not shrink the iframe with a guess. The host dock overlays the
+       frame; clearance lives inside the scrollers so the last control can move
+       fully above the dock. */
     html[data-form-factor="phone"] .app-shell,
     html.layout-phone .app-shell {
-      padding-bottom: var(--trek-inset-bottom, 0px);
+      padding-bottom: 0;
+    }
+    html.layout-phone,
+    html[data-form-factor="phone"] {
+      --app-dock-clearance: 220px;
     }
     .toolbar { padding: 12px 16px; border-bottom: 1px solid var(--border-faint); }
     .toolbar-grow { flex: 1; min-width: 0; }
@@ -42,7 +49,15 @@
       display: flex;
       flex-direction: column;
     }
-    .page { flex: 1; min-height: 0; padding: 16px; }
+    .page {
+      flex: 1;
+      min-height: 0;
+      padding: 16px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+    }
     .field-grid { display: grid; gap: 12px; }
     @media (min-width: 720px) {
       .field-grid { grid-template-columns: 1fr 1fr; }
@@ -57,6 +72,10 @@
       flex: 1; min-height: 0;
       display: flex; flex-direction: column; gap: 12px;
       padding: 12px 16px 16px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
     }
     .board-split {
       flex: 1; min-height: 0;
@@ -71,13 +90,125 @@
       }
     }
     .days-wrap { min-height: 0; display: flex; flex-direction: column; gap: 8px; }
-    .day-rail { display: flex; gap: 8px; overflow-x: auto; }
+    .day-rail {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 8px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
     .days-list { flex: 1; min-height: 0; }
     .day-card { display: none; }
     .day-card.is-active { display: block; }
     .day-header { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
     .inspector { min-height: 0; display: flex; flex-direction: column; }
     .inspector-body { flex: 1; min-height: 0; padding: 12px; }
+
+    /* Phone: one scrollport per stage (flex 1 1 0 + height 0). iOS WebKit
+       omits the scroller's own padding-bottom from scrollHeight, so dock
+       clearance is a real last-child spacer, not padding on .page. */
+    html.layout-phone .page.trek-scroll,
+    html.layout-phone .preview-board.trek-scroll,
+    html[data-fill].layout-phone .page.trek-scroll,
+    html[data-fill].layout-phone .preview-board.trek-scroll,
+    html[data-form-factor="phone"] .page.trek-scroll,
+    html[data-form-factor="phone"] .preview-board.trek-scroll {
+      height: 0;
+      flex: 1 1 0%;
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+    }
+    .dock-spacer { display: none; height: 0; }
+    html.layout-phone .dock-spacer,
+    html[data-form-factor="phone"] .dock-spacer {
+      display: block;
+      flex: none;
+      width: 100%;
+      height: var(--app-dock-clearance, 220px);
+      min-height: max(220px, calc(168px + env(safe-area-inset-bottom, 0px)));
+      pointer-events: none;
+    }
+    html.layout-phone .toolbar { flex-wrap: nowrap; gap: 8px; padding: 10px 12px; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+    .more-options summary {
+      cursor: pointer;
+      color: var(--text-muted);
+    }
+    .more-options[open] { display: flex; flex-direction: column; gap: 12px; }
+    .progress-steps {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .progress-step {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      color: var(--text-muted);
+    }
+    .progress-step.is-done { color: var(--text-secondary); }
+    .progress-step.is-current { color: var(--text-primary); }
+    .progress-index {
+      width: 22px;
+      height: 22px;
+      flex: none;
+      border-radius: 999px;
+      border: 1px solid var(--border-primary);
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+    }
+    .progress-step.is-current .progress-index {
+      background: var(--accent);
+      color: var(--accent-text);
+      border-color: var(--accent);
+    }
+    .progress-step.is-done .progress-index {
+      background: var(--success-soft);
+      color: var(--success);
+      border-color: transparent;
+    }
+    .pin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    html.layout-phone .board-split {
+      display: flex;
+      flex-direction: column;
+      flex: none;
+      height: auto;
+      min-height: 0;
+    }
+    html.layout-phone .days-wrap,
+    html.layout-phone .days-list,
+    html.layout-phone .inspector {
+      flex: none;
+      height: auto;
+      min-height: 0;
+    }
+    html.layout-phone .days-list.trek-scroll,
+    html.layout-phone .inspector-body.trek-scroll,
+    html[data-fill].layout-phone .days-list.trek-scroll,
+    html[data-fill].layout-phone .inspector-body.trek-scroll {
+      height: auto;
+      overflow: visible;
+    }
+    html.layout-phone .inspector-body { padding: 12px 0 8px; }
+    html.layout-phone #needs-confirm { flex: none; }
+    html.layout-phone #plan-form { padding-bottom: 12px; }
+    html.layout-phone #generate,
+    html.layout-phone #commit {
+      scroll-margin-bottom: var(--app-dock-clearance, 220px);
+    }
     .place-photo {
       width: 40px; height: 40px; flex: none;
       border-radius: var(--radius-md);
@@ -133,108 +264,95 @@
     <header class="toolbar trek-cluster">
       <div class="toolbar-grow">
         <div class="trek-title" data-i18n="title">AI Guide</div>
-        <div class="trek-faint" data-i18n="eyebrow">Notes to mapped itinerary</div>
       </div>
       <nav class="trek-segmented" role="tablist" data-i18n-aria-label="workspaceTabs">
         <button type="button" id="stage-plan" role="tab" aria-selected="true" aria-pressed="true" data-i18n="stagePlan">Plan</button>
         <button type="button" id="stage-preview" role="tab" aria-selected="false" aria-pressed="false" disabled data-i18n="stagePreview">Itinerary</button>
       </nav>
-      <div class="trek-cluster">
-        <div class="trek-cluster" id="status-line" data-state="idle" role="status" aria-live="polite">
-          <i class="trek-statusdot" data-status="info"></i>
-          <span class="trek-muted" id="status" data-i18n="idleStatus">Ready when you are</span>
-        </div>
-        <button class="trek-btn trek-btn--ghost" id="open-cookie-help" type="button" data-i18n="cookieHelp">Cookie help</button>
-        <button class="trek-btn trek-btn--secondary" id="open-settings" type="button" data-i18n="settings">Plugin settings</button>
+      <button class="trek-btn trek-btn--ghost" id="open-settings" type="button" data-i18n="settings">Plugin settings</button>
+      <div class="sr-only" id="status-line" data-state="idle" role="status" aria-live="polite">
+        <i class="trek-statusdot" data-status="info"></i>
+        <span class="trek-muted" id="status" data-i18n="idleStatus">Ready when you are</span>
       </div>
     </header>
     <div class="progress hidden" id="progress" role="progressbar" data-i18n-aria-label="working"><i></i></div>
 
     <section class="stage-view plan-view" id="plan-stage" role="tabpanel">
       <main class="page trek-scroll trek-page-enter">
-        <form id="plan-form" class="trek-glass trek-stack" aria-labelledby="planner-title">
-          <div class="trek-cluster">
-            <div class="trek-title" data-i18n="plannerKicker">Build your route</div>
-            <span class="trek-chip trek-chip--accent" data-i18n="aiAssisted">AI assisted</span>
-          </div>
-          <h2 id="planner-title" data-i18n="plannerTitle">Start with the shape of your trip</h2>
-          <p class="trek-muted" data-i18n="plannerSubtitle">Add only what you know. AI Guide will resolve real places and leave every choice editable.</p>
-
-          <div class="trek-title" data-i18n="inspirationTitle">Destination & interests</div>
-          <p class="trek-faint" data-i18n="inspirationHint">A city is enough; interests help refine the route.</p>
+        <form id="plan-form" class="trek-glass trek-stack" aria-labelledby="paste-label">
+          <label>
+            <span class="trek-label" id="paste-label" data-i18n="paste">Guide paste</span>
+            <textarea class="trek-textarea" id="guide-paste" rows="7" spellcheck="false" data-i18n-placeholder="pastePlaceholder" placeholder="Paste a Xiaohongshu link, share card, or note text"></textarea>
+            <span class="trek-cluster" id="paste-chips"></span>
+          </label>
           <div class="field-grid">
             <label>
-              <span class="trek-label" data-i18n="destination">Destination</span>
+              <span class="trek-label"><span data-i18n="destination">Destination</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
               <input class="trek-input" id="destination" autocomplete="off" data-i18n-placeholder="destinationPlaceholder" placeholder="Kyoto" />
-            </label>
-            <label>
-              <span class="trek-label"><span data-i18n="interests">Interests</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
-              <input class="trek-input" id="interests" autocomplete="off" data-i18n-placeholder="interestsPlaceholder" placeholder="Temples, coffee, quiet streets" />
-            </label>
-            <label>
-              <span class="trek-label"><span data-i18n="mustSee">Must-see places</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
-              <input class="trek-input" id="must-see" autocomplete="off" data-i18n-placeholder="mustSeePlaceholder" placeholder="One per line or comma-separated" />
-            </label>
-          </div>
-
-          <div class="trek-title" data-i18n="timingTitle">Timing & pace</div>
-          <p class="trek-faint" data-i18n="timingHint">Dates are optional; choose a pace that feels like you.</p>
-          <div class="field-grid field-grid--travel">
-            <label>
-              <span class="trek-label"><span data-i18n="startDate">Start date</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
-              <input class="trek-input" id="start-date" type="date" />
-            </label>
-            <label>
-              <span class="trek-label"><span data-i18n="endDate">End date</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
-              <input class="trek-input" id="end-date" type="date" />
             </label>
             <label>
               <span class="trek-label" data-i18n="days">Days</span>
               <input class="trek-input" id="day-count" type="number" min="1" max="14" value="5" inputmode="numeric" />
             </label>
-            <label>
-              <span class="trek-label" data-i18n="pace">Pace</span>
-              <select id="pace"><option value="relaxed" data-i18n="relaxed">Relaxed</option><option value="balanced" data-i18n="balanced">Balanced</option><option value="packed" data-i18n="packed">Packed</option></select>
-            </label>
           </div>
-
-          <div class="trek-title" data-i18n="sourcesTitle">Bring your inspiration</div>
-          <p class="trek-faint" data-i18n="sourcesHint">Use links, pasted notes, or both. Every source stays traceable.</p>
-          <div class="trek-stack">
-            <label>
-              <span class="trek-label"><span data-i18n="urls">Xiaohongshu links</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
-              <textarea class="trek-textarea" id="urls" rows="3" spellcheck="false" data-i18n-placeholder="urlsPlaceholder" placeholder="Paste one or more links, separated by a space"></textarea>
-            </label>
-            <label>
-              <span class="trek-label"><span data-i18n="paste">Pasted note text</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
-              <textarea class="trek-textarea" id="source-text" rows="6" data-i18n-placeholder="pastePlaceholder" placeholder="Paste the useful parts of a travel note here…"></textarea>
-            </label>
-            <label class="trek-row hidden" id="xhs-search-field" for="xhs-keyword-search">
+          <div class="trek-stack hidden" id="xhs-search-field">
+            <label class="trek-row" for="xhs-keyword-search">
               <input type="checkbox" id="xhs-keyword-search" />
               <span class="trek-stack">
                 <strong data-i18n="xhsKeywordSearch">Search guides via Xiaohongshu</strong>
-                <span class="trek-faint" data-i18n="xhsKeywordSearchHint">When checked, search by destination keyword and merge with links or pasted text. Requires your Cookie in plugin settings.</span>
+                <span class="trek-faint" data-i18n="xhsKeywordSearchHint">Optional extra notes by destination. Needs Cookie in plugin settings.</span>
               </span>
             </label>
-            <div class="trek-card trek-cluster">
-              <p class="trek-muted"><strong data-i18n="cookieHintTitle">Linux / TREK server?</strong> <span data-i18n="cookieHint">Your private Cookie stays on the plugin server. Do not log in on the server itself.</span></p>
-              <button class="trek-btn trek-btn--secondary" id="open-cookie-help-form" type="button" data-i18n="cookieHelpOpen">How to copy</button>
-            </div>
+            <button class="trek-btn trek-btn--ghost" id="open-cookie-help" type="button" data-i18n="cookieHelp">Cookie help</button>
           </div>
-
+          <details class="more-options trek-stack" id="more-options">
+            <summary data-i18n="moreOptions">More options</summary>
+            <div class="field-grid">
+              <label>
+                <span class="trek-label"><span data-i18n="interests">Interests</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
+                <input class="trek-input" id="interests" autocomplete="off" data-i18n-placeholder="interestsPlaceholder" placeholder="Temples, coffee, quiet streets" />
+              </label>
+              <label>
+                <span class="trek-label"><span data-i18n="mustSee">Must-see places</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
+                <input class="trek-input" id="must-see" autocomplete="off" data-i18n-placeholder="mustSeePlaceholder" placeholder="One per line or comma-separated" />
+              </label>
+            </div>
+            <div class="field-grid field-grid--travel">
+              <label>
+                <span class="trek-label"><span data-i18n="startDate">Start date</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
+                <input class="trek-input" id="start-date" type="date" />
+              </label>
+              <label>
+                <span class="trek-label"><span data-i18n="endDate">End date</span> <span class="trek-faint" data-i18n="optional">Optional</span></span>
+                <input class="trek-input" id="end-date" type="date" />
+              </label>
+              <label>
+                <span class="trek-label" data-i18n="pace">Pace</span>
+                <select id="pace"><option value="relaxed" data-i18n="relaxed">Relaxed</option><option value="balanced" data-i18n="balanced">Balanced</option><option value="packed" data-i18n="packed">Packed</option></select>
+              </label>
+            </div>
+          </details>
           <button class="trek-btn trek-btn--primary" type="submit" id="generate">
             <span data-i18n="generate">Generate preview</span>
           </button>
         </form>
+        <div class="trek-glass trek-stack hidden" id="generate-progress">
+          <div class="trek-title" data-i18n="workingTitle">Generating itinerary</div>
+          <ol class="progress-steps" id="progress-steps"></ol>
+          <p class="trek-muted" id="generate-progress-detail"></p>
+        </div>
+        <div class="dock-spacer" aria-hidden="true"></div>
       </main>
     </section>
 
     <section class="stage-view preview-view hidden" id="preview" role="tabpanel" aria-labelledby="preview-title">
-      <div class="preview-board">
-        <section id="warnings" class="trek-card hidden" role="alert">
-          <strong data-i18n="warnings">A few things to review</strong>
-          <span class="trek-chip trek-chip--warning" id="warning-count">0</span>
-          <ul id="warning-list" class="trek-stack"></ul>
+      <div class="preview-board trek-scroll">
+        <section id="needs-confirm" class="trek-card hidden" role="status">
+          <button class="trek-btn trek-btn--ghost" id="needs-confirm-toggle" type="button">
+            <span data-i18n="needsConfirm">Need a location</span>
+            <span class="trek-chip trek-chip--warning" id="needs-confirm-count">0</span>
+          </button>
+          <p class="trek-faint" data-i18n="needsConfirmHint">These places stay in the plan. Tap one to add coordinates.</p>
         </section>
 
         <section id="budget-card" class="trek-card hidden">
@@ -248,7 +366,7 @@
 
         <div class="board-split">
           <div class="days-wrap">
-            <nav class="day-rail trek-cluster" id="day-rail" role="tablist" aria-label="Days" data-i18n-aria-label="dayRail"></nav>
+            <nav class="day-rail" id="day-rail" role="tablist" aria-label="Days" data-i18n-aria-label="dayRail"></nav>
             <div id="days" class="days-list trek-scroll trek-stagger"></div>
           </div>
           <aside class="inspector trek-card" id="inspector">
@@ -291,6 +409,7 @@
             </div>
           </aside>
         </div>
+        <div class="dock-spacer" aria-hidden="true"></div>
       </div>
       <h2 id="preview-title" class="hidden" data-i18n="preview">Preview the journey</h2>
     </section>
@@ -363,6 +482,7 @@
     var activeDayIndex = 0;
     var activePlaceId = '';
     var activeInspector = 'place';
+    var filterNeedsConfirm = false;
 
     function applyXhsSearchPrefs(prefs) {
       xhsSearchAllowed = Boolean(prefs && prefs.xhsSearchAllowed);
@@ -395,8 +515,7 @@
         endDate: document.getElementById('end-date').value,
         dayCount: document.getElementById('day-count').value,
         pace: document.getElementById('pace').value,
-        urls: document.getElementById('urls').value,
-        sourceText: document.getElementById('source-text').value,
+        guidePaste: document.getElementById('guide-paste').value,
         xhsKeywordSearch: document.getElementById('xhs-keyword-search').checked
       };
     }
@@ -415,8 +534,12 @@
       setValue('end-date', state.endDate);
       setValue('day-count', state.dayCount);
       setValue('pace', state.pace);
-      setValue('urls', state.urls);
-      setValue('source-text', state.sourceText);
+      var paste = state.guidePaste;
+      if (paste == null) {
+        paste = [state.urls, state.sourceText].filter(Boolean).join('\n');
+      }
+      setValue('guide-paste', paste);
+      updatePasteChips();
       var checkbox = document.getElementById('xhs-keyword-search');
       if (checkbox && typeof state.xhsKeywordSearch === 'boolean') {
         checkbox.checked = Boolean(state.xhsKeywordSearch && xhsSearchAllowed);
@@ -426,11 +549,9 @@
     function fitSessionValue(state) {
       var packed = Object.assign({}, state);
       if (JSON.stringify(packed).length <= 900) return packed;
-      packed.urls = String(packed.urls || '').slice(0, 180);
-      packed.sourceText = String(packed.sourceText || '').slice(0, 400);
+      packed.guidePaste = String(packed.guidePaste || '').slice(0, 500);
       if (JSON.stringify(packed).length <= 1000) return packed;
-      packed.urls = '';
-      packed.sourceText = '';
+      packed.guidePaste = '';
       return packed;
     }
 
@@ -506,12 +627,32 @@
         sourcesHint: 'Use links, pasted notes, or both. Every source stays traceable.',
         urls: 'Xiaohongshu links',
         urlsPlaceholder: 'Paste a Xiaohongshu link or share text, including xhslink.cn short links',
-        paste: 'Pasted note text',
-        pastePlaceholder: 'Paste a note, or the whole Xiaohongshu share card…',
+        paste: 'Guide',
+        pastePlaceholder: 'Paste a Xiaohongshu link, share card, or the note itself',
         xhsKeywordSearch: 'Search guides via Xiaohongshu',
-        xhsKeywordSearchHint: 'When checked, search by destination keyword and merge with links or pasted text. Requires your Cookie in plugin settings.',
+        xhsKeywordSearchHint: 'Optional extra notes by destination. Needs Cookie in plugin settings.',
         generate: 'Generate preview',
         idleStatus: 'Ready when you are',
+        moreOptions: 'More options',
+        workingTitle: 'Building your itinerary',
+        stepRead: 'Read the guide',
+        stepExtract: 'Extract places',
+        stepMap: 'Match the map',
+        stepSchedule: 'Build the days',
+        needsConfirm: 'Need a location',
+        needsConfirmHint: 'These places stay in the plan. Open one to pick the right address.',
+        pinLat: 'Latitude',
+        pinLng: 'Longitude',
+        pinSave: 'Use this address',
+        pinHint: 'Search and tap the correct address. Coordinates are optional.',
+        pinQuery: 'Search address',
+        pinSearch: 'Search',
+        pinEmpty: 'No matching address',
+        pinCoords: 'Paste coordinates',
+        commitPartial: 'Trip created. {count} places still need coordinates and were skipped.',
+        pasteLinksChip: '{count} links',
+        pasteTextChip: 'Note text included',
+        unmapped: 'No coordinates',
         planningGuide: 'Planning guide',
         workflowTitle: 'From note to map',
         workflowOne: 'Read the signals',
@@ -538,7 +679,7 @@
         creating: 'Creating your TREK trip…',
         ready: 'Preview ready',
         guides: 'notes read',
-        tooFar: 'Over 40 km · off by default',
+        tooFar: 'Looks far from the rest',
         reservationRequired: 'Reservation may be required',
         failed: 'Planning failed',
         conflict: 'A plan is already running. Reconnecting…',
@@ -642,12 +783,32 @@
         sourcesHint: '链接、粘贴正文可以任选或同时使用，每条来源都可追溯。',
         urls: '小红书链接',
         urlsPlaceholder: '粘贴小红书链接或分享口令，支持 xhslink.cn 短链',
-        paste: '粘贴攻略正文',
-        pastePlaceholder: '粘贴攻略正文，或整段小红书分享口令…',
+        paste: '攻略',
+        pastePlaceholder: '粘贴小红书链接、分享口令或攻略正文',
         xhsKeywordSearch: '通过小红书搜索攻略',
-        xhsKeywordSearchHint: '勾选后按目的地关键词搜索，并与链接、粘贴正文合并；需先在插件设置里配置 Cookie。不勾选时仅使用链接和粘贴内容。',
+        xhsKeywordSearchHint: '按目的地再搜几篇作补充，需在设置里配置 Cookie。',
         generate: '生成行程预览',
         idleStatus: '准备好了，随时出发',
+        moreOptions: '更多选项',
+        workingTitle: '正在生成行程',
+        stepRead: '读取攻略',
+        stepExtract: '提取地点',
+        stepMap: '匹配地图',
+        stepSchedule: '排好日程',
+        needsConfirm: '需要补位置',
+        needsConfirmHint: '这些点仍在行程里。点开后搜索并选一条正确地址。',
+        pinLat: '纬度',
+        pinLng: '经度',
+        pinSave: '使用这个地址',
+        pinHint: '搜一下正确地址，点选一条即可。经纬度可选用。',
+        pinQuery: '搜索地址',
+        pinSearch: '搜索',
+        pinEmpty: '没有匹配的地址',
+        pinCoords: '粘贴经纬度',
+        commitPartial: '行程已创建。还有 {count} 个地点没有坐标，未写入。',
+        pasteLinksChip: '{count} 条链接',
+        pasteTextChip: '含攻略正文',
+        unmapped: '未找到坐标',
         planningGuide: '规划说明',
         workflowTitle: '从攻略到地图',
         workflowOne: '读懂攻略线索',
@@ -674,7 +835,7 @@
         creating: '正在创建 TREK 行程…',
         ready: '行程预览已就绪',
         guides: '篇攻略已读',
-        tooFar: '相邻超过 40 公里 · 默认不选',
+        tooFar: '疑似太远',
         reservationRequired: '可能需要预约',
         failed: '行程规划失败',
         conflict: '已有规划正在进行，正在接上…',
@@ -814,6 +975,7 @@
         try { select.dispatchEvent(new Event('change')); } catch (_) {}
       });
       updateSelection();
+      updatePasteChips();
     }
 
     function setStatus(message, state) {
@@ -839,7 +1001,54 @@
       document.getElementById('plan-form').setAttribute('aria-busy', value ? 'true' : 'false');
       document.getElementById('generate').disabled = value;
       document.getElementById('progress').classList.toggle('hidden', !value);
+      var onPlan = document.getElementById('app-shell').dataset.stage !== 'preview';
+      document.getElementById('plan-form').classList.toggle('hidden', Boolean(value && onPlan));
+      document.getElementById('generate-progress').classList.toggle('hidden', !(value && onPlan));
       refreshCommitAvailability();
+    }
+
+    function renderProgressSteps(step) {
+      var root = document.getElementById('progress-steps');
+      if (!root) return;
+      var labels = [t('stepRead'), t('stepExtract'), t('stepMap'), t('stepSchedule')];
+      var current = Math.max(1, Math.min(4, Number(step) || 1));
+      root.innerHTML = '';
+      labels.forEach(function (label, index) {
+        var item = document.createElement('li');
+        var n = index + 1;
+        item.className = 'progress-step' + (n === current ? ' is-current' : '') + (n < current ? ' is-done' : '');
+        item.dataset.step = String(n);
+        var mark = document.createElement('span');
+        mark.className = 'progress-index';
+        mark.textContent = n < current ? '✓' : String(n);
+        var text = document.createElement('span');
+        text.textContent = label;
+        item.appendChild(mark);
+        item.appendChild(text);
+        root.appendChild(item);
+      });
+    }
+
+    function updatePasteChips() {
+      var root = document.getElementById('paste-chips');
+      if (!root) return;
+      var text = String(document.getElementById('guide-paste').value || '');
+      var links = text.match(/https?:\/\/[^\s<>"']+/gi) || [];
+      root.innerHTML = '';
+      if (links.length) {
+        var chip = document.createElement('span');
+        chip.className = 'trek-chip trek-chip--info';
+        chip.textContent = interpolate('pasteLinksChip', { count: links.length });
+        root.appendChild(chip);
+      }
+      var rest = text;
+      links.forEach(function (url) { rest = rest.split(url).join(' '); });
+      if (rest.replace(/\s+/g, ' ').trim().length > 8) {
+        var textChip = document.createElement('span');
+        textChip.className = 'trek-chip';
+        textChip.textContent = t('pasteTextChip');
+        root.appendChild(textChip);
+      }
     }
 
     function invokeErrorMessage(error) {
@@ -893,7 +1102,14 @@
     }
 
     function syncDockInset(ctx) {
-      /* Host kit already publishes --trek-inset-bottom. */
+      var ins = ctx && ctx.viewport && ctx.viewport.insets;
+      var bottom = ins && Number(ins.bottom);
+      var clearance = 220;
+      if (Number.isFinite(bottom) && bottom > 0) {
+        document.documentElement.style.setProperty('--trek-inset-bottom', bottom + 'px');
+        clearance = Math.max(clearance, bottom + 48);
+      }
+      document.documentElement.style.setProperty('--app-dock-clearance', clearance + 'px');
     }
 
     function applyLayoutMode(ctx) {
@@ -928,7 +1144,6 @@
 
     document.getElementById('open-settings').addEventListener('click', openPluginSettings);
     document.getElementById('open-cookie-help').addEventListener('click', function () { setCookieHelpOpen(true, this); });
-    document.getElementById('open-cookie-help-form').addEventListener('click', function () { setCookieHelpOpen(true, this); });
     document.getElementById('close-cookie-help').addEventListener('click', function () { setCookieHelpOpen(false); });
     document.getElementById('cookie-help').addEventListener('click', function (event) {
       if (event.target === this) setCookieHelpOpen(false);
@@ -945,6 +1160,11 @@
     });
     document.querySelectorAll('.inspector-tab').forEach(function (tab) {
       tab.addEventListener('click', function () { showInspector(tab.dataset.pane); });
+    });
+    document.getElementById('needs-confirm-toggle').addEventListener('click', function () {
+      filterNeedsConfirm = !filterNeedsConfirm;
+      this.setAttribute('aria-pressed', filterNeedsConfirm ? 'true' : 'false');
+      applyNeedsFilter();
     });
 
     async function resume() {
@@ -986,6 +1206,9 @@
       if (progress.guidesTotal && String(data.stage || '') === 'fetch_guides') {
         detail += ' · ' + progress.guidesRead + '/' + progress.guidesTotal + ' ' + t('guides');
       }
+      renderProgressSteps(progress.step || 1);
+      var detailEl = document.getElementById('generate-progress-detail');
+      if (detailEl) detailEl.textContent = detail;
 
       if (data.status === 'ready') {
         currentDraft = data;
@@ -1004,7 +1227,10 @@
       window.setTimeout(poll, 500);
     }
 
-    document.getElementById('plan-form').addEventListener('input', schedulePersistPlanForm);
+    document.getElementById('plan-form').addEventListener('input', function () {
+      updatePasteChips();
+      schedulePersistPlanForm();
+    });
     document.getElementById('plan-form').addEventListener('change', schedulePersistPlanForm);
     document.getElementById('plan-form').addEventListener('submit', async function (event) {
       event.preventDefault();
@@ -1012,11 +1238,13 @@
       currentDraft = null;
       showStage('plan');
       document.getElementById('preview').classList.add('hidden');
-      document.getElementById('warnings').classList.add('hidden');
       document.getElementById('stage-preview').disabled = true;
       setBusy(true);
       setStatus(t('working'), 'working');
+      renderProgressSteps(1);
+      document.getElementById('generate-progress-detail').textContent = t('working');
       try {
+        var paste = document.getElementById('guide-paste').value;
         var data = await trek.invoke('/plan', {
           method: 'POST',
           body: {
@@ -1027,8 +1255,8 @@
             endDate: document.getElementById('end-date').value,
             dayCount: Number(document.getElementById('day-count').value),
             pace: document.getElementById('pace').value,
-            urls: document.getElementById('urls').value,
-            sourceText: document.getElementById('source-text').value,
+            urls: paste,
+            sourceText: paste,
             xhsKeywordSearch: xhsSearchAllowed && document.getElementById('xhs-keyword-search').checked,
             locale: locale
           }
@@ -1098,17 +1326,32 @@
       }).filter(function (item) { return item.text; });
     }
 
-    function renderWarnings(warnings) {
-      var panel = document.getElementById('warnings');
-      var list = document.getElementById('warning-list');
-      list.innerHTML = '';
-      (warnings || []).forEach(function (message) {
-        var item = document.createElement('li');
-        item.textContent = message;
-        list.appendChild(item);
+    function placesNeedingConfirm(days) {
+      var list = [];
+      (days || []).forEach(function (day) {
+        (day.places || []).forEach(function (place) {
+          if (needsLocation(place) || place.tooFar) list.push(place);
+        });
       });
-      document.getElementById('warning-count').textContent = String((warnings || []).length);
-      panel.classList.toggle('hidden', !(warnings || []).length);
+      return list;
+    }
+
+    function renderNeedsConfirm(days) {
+      var panel = document.getElementById('needs-confirm');
+      var count = document.getElementById('needs-confirm-count');
+      var items = placesNeedingConfirm(days);
+      if (count) count.textContent = String(items.length);
+      if (panel) panel.classList.toggle('hidden', items.length === 0);
+      if (!items.length) filterNeedsConfirm = false;
+    }
+
+    function applyNeedsFilter() {
+      document.querySelectorAll('.place-row').forEach(function (row) {
+        var id = row.dataset.evidence;
+        var place = findPlace(id);
+        var hide = filterNeedsConfirm && place && !needsLocation(place) && !place.tooFar;
+        row.classList.toggle('hidden', Boolean(hide));
+      });
     }
 
     function renderSources(guides, summary) {
@@ -1327,6 +1570,175 @@
       root.appendChild(block);
     }
 
+    function needsLocation(place) {
+      if (!place) return false;
+      if (place.unmapped) return true;
+      return !Number.isFinite(Number(place.lat)) || !Number.isFinite(Number(place.lng));
+    }
+
+    function applyPickedAddress(place, hit) {
+      applyPlacePatch(place.evidenceId, Number(hit.lat), Number(hit.lng), hit.address || '');
+      renderNeedsConfirm(currentDraft.days || []);
+      renderDays(currentDraft.days || []);
+      renderDayRail();
+      setActiveDay(activeDayIndex);
+      selectPlace(place.evidenceId, { open: true });
+      trek.notify('success', t('pinSave'));
+    }
+
+    function renderAddressPicker(root, place) {
+      var box = document.createElement('div');
+      box.className = 'trek-stack pin-form';
+      var heading = document.createElement('div');
+      heading.className = 'trek-title';
+      heading.textContent = t('placeAddress');
+      box.appendChild(heading);
+      var hint = document.createElement('p');
+      hint.className = 'trek-faint';
+      hint.textContent = t('pinHint');
+      box.appendChild(hint);
+      var queryLabel = document.createElement('label');
+      var querySpan = document.createElement('span');
+      querySpan.className = 'trek-label';
+      querySpan.textContent = t('pinQuery');
+      var queryInput = document.createElement('input');
+      queryInput.className = 'trek-input';
+      queryInput.id = 'pin-query';
+      queryInput.value = place.name || '';
+      queryLabel.appendChild(querySpan);
+      queryLabel.appendChild(queryInput);
+      box.appendChild(queryLabel);
+      var searchBtn = document.createElement('button');
+      searchBtn.type = 'button';
+      searchBtn.className = 'trek-btn trek-btn--primary';
+      searchBtn.id = 'pin-search';
+      searchBtn.textContent = t('pinSearch');
+      box.appendChild(searchBtn);
+      var results = document.createElement('div');
+      results.className = 'trek-stack';
+      results.id = 'pin-results';
+      box.appendChild(results);
+
+      async function runSearch() {
+        var q = String(queryInput.value || place.name || '').trim();
+        if (q.length < 2) {
+          trek.notify('error', t('pinHint'));
+          return;
+        }
+        searchBtn.disabled = true;
+        results.innerHTML = '';
+        var loading = document.createElement('p');
+        loading.className = 'trek-faint';
+        loading.textContent = t('working');
+        results.appendChild(loading);
+        try {
+          var dest = (currentDraft && currentDraft.intent && currentDraft.intent.destination)
+            || (document.getElementById('destination') && document.getElementById('destination').value)
+            || '';
+          var data = await trek.invoke('/geocode', {
+            method: 'POST',
+            body: { query: q, destination: dest, locale: locale }
+          });
+          results.innerHTML = '';
+          var places = (data && data.places) || [];
+          if (!places.length) {
+            var empty = document.createElement('p');
+            empty.className = 'trek-faint';
+            empty.textContent = t('pinEmpty');
+            results.appendChild(empty);
+            return;
+          }
+          places.forEach(function (hit) {
+            var row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'trek-row';
+            var title = document.createElement('strong');
+            title.textContent = hit.name || q;
+            var addr = document.createElement('span');
+            addr.className = 'trek-muted';
+            addr.textContent = hit.address || [hit.lat, hit.lng].filter(Boolean).join(', ');
+            row.appendChild(title);
+            row.appendChild(addr);
+            row.addEventListener('click', function () { applyPickedAddress(place, hit); });
+            results.appendChild(row);
+          });
+        } catch (error) {
+          results.innerHTML = '';
+          var failed = document.createElement('p');
+          failed.className = 'trek-faint';
+          failed.textContent = invokeErrorMessage(error);
+          results.appendChild(failed);
+        } finally {
+          searchBtn.disabled = false;
+        }
+      }
+
+      searchBtn.addEventListener('click', runSearch);
+      queryInput.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          runSearch();
+        }
+      });
+
+      var extra = document.createElement('details');
+      extra.className = 'more-options';
+      var summary = document.createElement('summary');
+      summary.textContent = t('pinCoords');
+      extra.appendChild(summary);
+      var grid = document.createElement('div');
+      grid.className = 'pin-grid';
+      var latLabel = document.createElement('label');
+      var latSpan = document.createElement('span');
+      latSpan.className = 'trek-label';
+      latSpan.textContent = t('pinLat');
+      var latInput = document.createElement('input');
+      latInput.className = 'trek-input';
+      latInput.id = 'pin-lat';
+      latInput.inputMode = 'decimal';
+      latInput.value = place.lat != null && Number.isFinite(Number(place.lat)) ? String(place.lat) : '';
+      latLabel.appendChild(latSpan);
+      latLabel.appendChild(latInput);
+      var lngLabel = document.createElement('label');
+      var lngSpan = document.createElement('span');
+      lngSpan.className = 'trek-label';
+      lngSpan.textContent = t('pinLng');
+      var lngInput = document.createElement('input');
+      lngInput.className = 'trek-input';
+      lngInput.id = 'pin-lng';
+      lngInput.inputMode = 'decimal';
+      lngInput.value = place.lng != null && Number.isFinite(Number(place.lng)) ? String(place.lng) : '';
+      lngLabel.appendChild(lngSpan);
+      lngLabel.appendChild(lngInput);
+      grid.appendChild(latLabel);
+      grid.appendChild(lngLabel);
+      extra.appendChild(grid);
+      var save = document.createElement('button');
+      save.type = 'button';
+      save.className = 'trek-btn trek-btn--secondary';
+      save.textContent = t('pinSave');
+      save.addEventListener('click', function () {
+        var lat = Number(latInput.value);
+        var lng = Number(lngInput.value);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          var pair = String(latInput.value + ' ' + lngInput.value).match(/(-?\d+(?:\.\d+)?)\s*[,，\s]\s*(-?\d+(?:\.\d+)?)/);
+          if (pair) {
+            lat = Number(pair[1]);
+            lng = Number(pair[2]);
+          }
+        }
+        if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          trek.notify('error', t('pinHint'));
+          return;
+        }
+        applyPickedAddress(place, { lat: lat, lng: lng, address: place.address || '' });
+      });
+      extra.appendChild(save);
+      box.appendChild(extra);
+      root.appendChild(box);
+      window.setTimeout(runSearch, 0);
+    }
+
     function renderPlaceDetail(place) {
       var root = document.getElementById('place-detail');
       root.innerHTML = '';
@@ -1361,13 +1773,34 @@
         far.textContent = t('tooFar');
         meta.appendChild(far);
       }
+      if (needsLocation(place)) {
+        var unmapped = document.createElement('span');
+        unmapped.className = 'trek-chip trek-chip--warning';
+        unmapped.textContent = t('unmapped');
+        meta.appendChild(unmapped);
+      }
       root.appendChild(meta);
+      if (needsLocation(place)) renderAddressPicker(root, place);
       addDetailBlock(root, 'placeNotes', place.notes || place.reason || '');
-      addDetailBlock(root, 'placeAddress', place.address || '');
+      if (!needsLocation(place)) addDetailBlock(root, 'placeAddress', place.address || '');
       var comments = Array.isArray(place.commentTips) ? place.commentTips.join('；') : '';
       addDetailBlock(root, 'placeComments', comments);
       var prep = normalizePrepTips(place.prepTips).map(function (item) { return item.text; }).join('；');
       addDetailBlock(root, 'placePrep', prep);
+    }
+
+    function applyPlacePatch(evidenceId, lat, lng, address) {
+      if (!currentDraft || !currentDraft.days) return;
+      currentDraft.days.forEach(function (day) {
+        (day.places || []).forEach(function (item) {
+          if (item.evidenceId !== evidenceId) return;
+          item.lat = lat;
+          item.lng = lng;
+          if (address) item.address = address;
+          item.unmapped = false;
+          item.selected = true;
+        });
+      });
     }
 
     function selectPlace(evidenceId, opts) {
@@ -1561,6 +1994,12 @@
             badge.textContent = t('tooFar');
             meta.appendChild(badge);
           }
+          if (needsLocation(place)) {
+            var unmappedBadge = document.createElement('span');
+            unmappedBadge.className = 'trek-chip trek-chip--warning';
+            unmappedBadge.textContent = t('unmapped');
+            meta.appendChild(unmappedBadge);
+          }
           if (place.reservationRequired) {
             var reserve = document.createElement('span');
             reserve.className = 'trek-chip trek-chip--info';
@@ -1615,7 +2054,7 @@
     }
 
     function render(data) {
-      renderWarnings(data.warnings || []);
+      renderNeedsConfirm(data.days || []);
       renderSources(data.guides || [], data.sourceSummary || {});
       renderBudget(data.budget || null);
       renderPrepTips(data.prepTips || [], data.reservations || []);
@@ -1623,6 +2062,7 @@
       renderDays(data.days || []);
       renderDayRail();
       setActiveDay(0);
+      applyNeedsFilter();
       if (normalizePrepTips(data.prepTips).length) showInspector('prep');
       else showInspector('place');
 
@@ -1650,9 +2090,17 @@
           body: {
             jobId: currentJobId,
             title: document.getElementById('trip-title').value,
-            evidenceIds: evidenceIds
+            evidenceIds: evidenceIds,
+            placePatches: evidenceIds.map(function (id) {
+              var place = findPlace(id);
+              if (!place || !Number.isFinite(Number(place.lat)) || !Number.isFinite(Number(place.lng))) return null;
+              return { evidenceId: id, lat: Number(place.lat), lng: Number(place.lng), address: place.address || '' };
+            }).filter(Boolean)
           }
         });
+        if (data.skippedUnmapped && data.skippedUnmapped.length) {
+          trek.notify('warning', interpolate('commitPartial', { count: data.skippedUnmapped.length }));
+        }
         trek.navigate('/trips/' + data.tripId);
       } catch (error) {
         showError(error);

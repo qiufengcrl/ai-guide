@@ -12,9 +12,9 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, nearDestination, pickDestinationBias, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, inferDestinationFromGuides, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES, guideSearchQueries } = require('../server/pipeline');
+const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, splitRoutePlaceNames, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, nearDestination, pickDestinationBias, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, progressStepForJob, inferDestinationFromGuides, inferDayCountFromGuides, filterInventedCandidates, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES, guideSearchQueries } = require('../server/pipeline');
 const { normalizeXhsCookie, formatXhsWarning, formatXhsDegradedWarning, isXhsAuthError, XhsSessionError } = require('../server/xhs/session');
-const { parseInitialState } = require('../server/xhs/url');
+const { parseInitialState, splitGuidePaste } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces, isRateLimitError } = require('../server/geo/nominatim');
 const {
   isXhsRateLimitError,
@@ -110,7 +110,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.47');
+  assert.equal(manifest.version, '1.1.53');
 });
 
 function memoryDb() {
@@ -348,7 +348,7 @@ test('公开页夹具解析 undefined，并规范化 Cookie', () => {
   assert.equal(normalizeXhsCookie('{"name":"sid","value":"abc"}'), 'sid=abc');
 });
 
-test('Gate 丢弃无坐标/重复，并保留过远点且默认不选', () => {
+test('Gate 去重后保留无坐标点，过远点默认不选', () => {
   const evidence = [
     { id: 'ev_1', name: 'A', lat: 35, lng: 135, dayHint: 1 },
     { id: 'ev_dup', name: 'A', lat: 35, lng: 135, dayHint: 1 },
@@ -362,10 +362,12 @@ test('Gate 丢弃无坐标/重复，并保留过远点且默认不选', () => {
     'zh',
     '',
   );
-  assert.deepEqual(result.days[0].places.map((place) => place.evidenceId), ['ev_1', 'ev_2']);
+  assert.deepEqual(result.days[0].places.map((place) => place.evidenceId), ['ev_1', 'ev_2', 'ev_bad']);
   assert.equal(result.days[0].places[1].tooFar, true);
   assert.equal(result.days[0].places[1].selected, false);
-  assert.equal(result.warnings.length, 2);
+  assert.equal(result.days[0].places[2].unmapped, true);
+  assert.equal(result.days[0].places[2].selected, true);
+  assert.equal(result.warnings.length, 0);
 });
 
 test('无攻略时过滤省/市名与兴趣词，mustSee 仍可补点', () => {
@@ -439,6 +441,37 @@ test('小范围景点不会被拆成多个区域', () => {
   assert.equal(evidence[0].regionName, undefined);
 });
 
+test('箭头路线会拆成多个地点，而不是一整条候选', () => {
+  const intent = { destination: '景德镇', dayCount: 2, pace: 'balanced', interests: [], mustSee: [] };
+  const names = splitRoutePlaceNames('Day1: 陶溪川 -> 西街 -> 留槎洲 -> 宝剑博物馆', intent);
+  assert.deepEqual(names, ['陶溪川', '西街', '留槎洲', '宝剑博物馆']);
+
+  const parsed = candidatesFromGuideText([{
+    id: 'g_1',
+    title: '景德镇两日',
+    text: 'Day1: 陶溪川 -> 西街 -> 留槎洲 -> 宝剑博物馆\nDay2: 古窑 -> 雕塑瓷厂',
+  }], intent);
+  assert.ok(parsed.some((item) => item.name === '陶溪川' && item.dayHint === 1));
+  assert.ok(parsed.some((item) => item.name === '宝剑博物馆' && item.dayHint === 1));
+  assert.ok(parsed.some((item) => item.name === '古窑' && item.dayHint === 2));
+  assert.ok(!parsed.some((item) => /->/.test(item.name)));
+
+  const fromLlm = normalizeCandidates({
+    candidates: [{ name: '陶溪川 -> 西街 -> 留槎洲 -> 宝剑博物馆', dayHint: 1 }],
+  }, intent);
+  assert.equal(fromLlm.length, 4);
+  assert.ok(fromLlm.every((item) => !/->/.test(item.name)));
+
+  const resolved = resolveExtractCandidates(
+    { candidates: [{ name: 'Day1: 陶溪川 -> 西街', dayHint: 1 }] },
+    [{ id: 'g_1', title: '景德镇', text: 'Day1: 陶溪川 -> 西街 -> 留槎洲' }],
+    intent,
+  );
+  assert.ok(resolved.candidates.some((item) => item.name === '陶溪川'));
+  assert.ok(resolved.candidates.some((item) => item.name === '西街'));
+  assert.ok(!resolved.candidates.some((item) => /->/.test(item.name)));
+});
+
 test('LLM 返回空时从衡阳东洲岛攻略正文规则提取景点', () => {
   const intent = { destination: '衡阳', dayCount: 2, pace: 'balanced', interests: [], mustSee: [] };
   const guideText = `东洲岛是衡阳湘江上的一江心岛，与长沙橘子洲 、 岳阳君山并称湘江三大洲。
@@ -460,6 +493,36 @@ test('LLM 返回空时从衡阳东洲岛攻略正文规则提取景点', () => {
   assert.ok(names.includes('夫之楼'));
   assert.ok(!names.includes('廊桥登岛'));
   assert.ok(!names.includes('欣赏夜景'));
+
+  const twoDayGuides = [{
+    id: 'g_2',
+    title: '📍衡阳｜东洲岛 游玩攻略📝',
+    text: `两天一夜
+第一天
+▪️船山书院
+第二天
+▪️罗汉寺
+▪️夫之楼
+东洲岛是衡阳湘江上的一江心岛，与长沙橘子洲 、 岳阳君山并称湘江三大洲。`,
+  }];
+  const twoDay = candidatesFromGuideText(twoDayGuides, intent);
+  assert.equal(inferDayCountFromGuides(twoDayGuides), 2);
+  assert.equal(twoDay.find((item) => item.name === '船山书院').dayHint, 1);
+  assert.equal(twoDay.find((item) => item.name === '罗汉寺').dayHint, 2);
+  assert.ok(!twoDay.some((item) => item.name === '橘子洲'));
+
+  const invented = filterInventedCandidates(
+    [{ name: '橘子洲' }, { name: '船山书院' }],
+    twoDayGuides,
+  );
+  assert.deepEqual(invented.map((item) => item.name), ['船山书院']);
+
+  const merged = resolveExtractCandidates({
+    candidates: [{ name: '东洲岛停车场', reason: '船山书院、罗汉寺、夫之楼都值得去', dayHint: 1 }],
+  }, twoDayGuides, intent);
+  assert.ok(merged.candidates.some((item) => item.name === '船山书院'));
+  assert.ok(merged.candidates.some((item) => item.name === '罗汉寺'));
+  assert.ok(!merged.candidates.some((item) => /停车场/.test(item.name)));
 
   const resolved = resolveExtractCandidates({ candidates: [] }, guides, intent);
   assert.equal(resolved.source, 'guide_text');
@@ -500,12 +563,13 @@ test('地图证据会丢掉远离目的地的误匹配', () => {
     source: 'nominatim',
     places: [{ name: '北极镇', lat: 53.48, lng: 122.35, types: ['town'], address: '北极镇, 漠河市, 大兴安岭地区, 黑龙江省, 中国' }],
   }, 0, '大兴安岭', bias);
-  assert.equal(labeled.name, '北极镇');
+  assert.equal(labeled.name, '洛古河');
   const near = evidenceFromSearch(candidate, {
     source: 'nominatim',
     places: [{ name: '洛古河村', lat: 53.3, lng: 122.35, types: ['village'], address: '洛古河村, 漠河市, 大兴安岭地区' }],
   }, 0, '大兴安岭', bias);
-  assert.equal(near.name, '洛古河村');
+  assert.equal(near.name, '洛古河');
+  assert.equal(near.mapName, '洛古河村');
 });
 
 test('地理边界会拒绝跨城同名，且京都不会误匹配东京都', () => {
@@ -590,11 +654,13 @@ test('无 Cookie 的纯表单仍形成地图预览，并只使用 extract.result
   assert.ok(fixture.host.calls.some((call) => call.method === 'ai.extract'));
   assert.ok(!geoCalls.includes('MUST NOT USE'));
   assert.ok(geoCalls.includes('京都'));
-  assert.match(state.days[0].notes || '', /Near A/);
-  const far = state.days.flatMap((day) => day.places).find((place) => place.name === 'Far');
+  assert.match(state.days[0].notes || '', /近点A|Near A/);
+  const far = state.days.flatMap((day) => day.places).find((place) => place.name === '远点' || place.name === 'Far');
   assert.equal(far.tooFar, true);
   assert.equal(far.selected, false);
-  assert.ok(state.warnings.some((warning) => warning.includes('无坐标店')));
+  const missing = state.days.flatMap((day) => day.places).find((place) => place.unmapped || /无坐标/.test(place.name || ''));
+  assert.ok(missing);
+  assert.equal(missing.unmapped, true);
 });
 
 test('模型只返回省名时会被过滤，需靠 LLM/攻略给出具体景点', async () => {
@@ -922,6 +988,7 @@ test('extract prompt 强调预约、避坑与中英名称', () => {
   assert.match(instruction, /reservationRequired/);
   assert.match(instruction, /first-person/);
   assert.match(instruction, /economy/);
+  assert.match(instruction, /Do not invent places/);
   const text = extractionText([{ id: 'g_1', title: '测试', text: '需要提前预约故宫' }], {
     destination: '北京',
     dayCount: 2,
@@ -931,6 +998,7 @@ test('extract prompt 强调预约、避坑与中英名称', () => {
   });
   assert.match(text, /reservationTips/);
   assert.match(text, /pitfalls/);
+  assert.doesNotMatch(text, /supplement with well-known places/);
 });
 
 test('勾选搜索时会与链接和粘贴正文合并', async () => {
@@ -1054,6 +1122,9 @@ test('progressForJob 会返回分阶段进度文案', () => {
   };
   assert.match(progressForJob(job, 'zh'), /正在读取链接/);
   job.work.urlIndex = 1;
+  assert.match(progressForJob(job, 'zh'), /整理攻略来源/);
+  job.payload.xhsKeywordSearch = true;
+  assert.match(progressForJob(job, 'zh'), /搜索小红书/);
   job.stage = 'extract';
   assert.match(progressForJob(job, 'zh'), /提取景点/);
 });
@@ -1938,5 +2009,107 @@ test('commit 写入 TREK 分类与配图字段', async () => {
   assert.equal(created.category_id, 2);
   assert.match(String(created.notes || ''), /清晨人少/);
   assert.equal(created.description, '清晨人少，适合拍照');
+});
+
+test('粘贴盒拆出链接和正文，过远点可保留，进度为 4 步', () => {
+  const split = splitGuidePaste('去清水寺\nhttps://www.xiaohongshu.com/explore/64f000000000000000000001 值得去');
+  assert.equal(split.urls.length, 1);
+  assert.match(split.sourceText, /去清水寺/);
+  assert.doesNotMatch(split.sourceText, /xiaohongshu/);
+
+  const mixed = normalizeInput({
+    destination: '京都',
+    sourceText: '正文 https://www.xiaohongshu.com/explore/64f000000000000000000001 继续',
+  }, { maxDays: 8, maxNotes: 4 });
+  assert.equal(mixed.urls.length, 1);
+  assert.match(mixed.sourceText, /正文/);
+  assert.doesNotMatch(mixed.sourceText, /xiaohongshu/);
+
+  const far = evidenceFromSearch(
+    { name: '西街', nameZh: '西街', dayHint: 1 },
+    { source: 'places', places: [{ name: '西街', lat: 25.0, lng: 110.0, types: ['attraction'], address: '阳朔西街' }] },
+    0,
+    '衡阳',
+    { lat: 26.9, lng: 112.6, radiusKm: 80 },
+    { allowFar: true },
+  );
+  assert.equal(far.name, '西街');
+  assert.equal(far.tooFarFromDestination, true);
+
+  const gated = gateAndSchedule(
+    { destination: '衡阳', dayCount: 1, pace: 'balanced', startDate: null },
+    [far],
+    { maxPlacesPerDay: 6 },
+    'zh',
+    '',
+  );
+  assert.equal(gated.days[0].places[0].tooFar, true);
+  assert.equal(gated.days[0].places[0].selected, false);
+
+  assert.equal(progressStepForJob({ stage: 'fetch_guides' }), 1);
+  assert.equal(progressStepForJob({ stage: 'extract' }), 2);
+  assert.equal(progressStepForJob({ stage: 'enrich_comments' }), 2);
+  assert.equal(progressStepForJob({ stage: 'gather_evidence' }), 3);
+  assert.equal(progressStepForJob({ stage: 'gate' }), 4);
+  assert.equal(publicDraft({ stage: 'extract', payload: { locale: 'zh' }, draft: { guides: [], intent: {} }, work: {} }).progress.totalSteps, 4);
+});
+
+test('commit 接受手工补坐标，无坐标不阻断其余地点写入', async () => {
+  const fixture = buildHost();
+  const { jobId, state } = await makeReady(fixture);
+  const missing = state.days.flatMap((day) => day.places).find((place) => place.unmapped);
+  const mapped = state.days.flatMap((day) => day.places).find((place) => !place.unmapped && !place.tooFar);
+  assert.ok(missing);
+  assert.ok(mapped);
+  const committed = await fixture.app.route({ method: 'POST', path: '/commit' }, {
+    body: {
+      jobId,
+      title: '补点测试',
+      evidenceIds: [mapped.evidenceId, missing.evidenceId],
+      placePatches: [{ evidenceId: missing.evidenceId, lat: 35.02, lng: 135.03, address: '手工坐标' }],
+    },
+  });
+  assert.equal(committed.status, 200);
+  assert.deepEqual(committed.body.skippedUnmapped, []);
+  assert.equal(fixture.trips[committed.body.tripId].places.length, 2);
+});
+
+test('POST /geocode 返回可点选的地址列表', async () => {
+  const fixture = buildHost();
+  await fixture.app.load();
+  const original = global.fetch;
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes('nominatim.openstreetmap.org')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() {
+          return [{
+            name: '陶溪川文创街区',
+            lat: '29.301',
+            lon: '117.178',
+            display_name: '陶溪川文创街区, 景德镇市, 江西省',
+            category: 'tourism',
+            type: 'attraction',
+            importance: 0.6,
+          }];
+        },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${href}`);
+  };
+  try {
+    const result = await fixture.app.route({ method: 'POST', path: '/geocode' }, {
+      body: { query: '陶溪川', destination: '景德镇', locale: 'zh' },
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.places[0].name, '陶溪川文创街区');
+    assert.ok(Number.isFinite(result.body.places[0].lat));
+    assert.match(result.body.places[0].address, /景德镇/);
+  } finally {
+    global.fetch = original;
+  }
 });
 

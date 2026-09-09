@@ -33,11 +33,14 @@ function buildTrekPlacePayload(item, guides, categoryMap, locale = 'zh') {
   const categoryId = item?.categoryHint === 'food' ? categoryMap.food : categoryMap.sight;
   const payload = {
     name: item.name,
-    lat: item.lat,
-    lng: item.lng,
     address: item.address || '',
     notes,
   };
+  if (typeof item.lat === 'number' && Number.isFinite(item.lat)
+    && typeof item.lng === 'number' && Number.isFinite(item.lng)) {
+    payload.lat = item.lat;
+    payload.lng = item.lng;
+  }
   if (reason) payload.description = reason.slice(0, 2000);
   if (Number.isInteger(item?.stayMinutes) && item.stayMinutes > 0) {
     payload.duration_minutes = item.stayMinutes;

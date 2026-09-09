@@ -19,19 +19,20 @@ test('page keeps the TREK kit contract and has valid application JavaScript', ()
 test('redesign covers the complete planning and preview workflow', () => {
   const requiredIds = [
     'plan-form', 'destination', 'interests', 'must-see', 'start-date', 'end-date', 'day-count',
-    'pace', 'urls', 'source-text', 'xhs-keyword-search', 'xhs-search-field', 'generate', 'status', 'progress', 'warnings',
-    'warning-list', 'preview', 'sources', 'days', 'trip-title', 'commit',
+    'pace', 'guide-paste', 'xhs-keyword-search', 'xhs-search-field', 'generate', 'status', 'progress',
+    'needs-confirm', 'preview', 'sources', 'days', 'trip-title', 'commit',
     'prep-tips', 'prep-reservations', 'budget-card', 'budget-tiers', 'stage-plan', 'stage-preview', 'cookie-help', 'day-rail', 'inspector',
+    'generate-progress', 'progress-steps', 'more-options',
   ];
   for (const id of requiredIds) assert.match(html, new RegExp(`id=["']${id}["']`), id);
 
   for (const hook of [
-    "trek.onContext", "trek.invoke('/prefs'", "trek.invoke('/plan'", "trek.invoke('/commit'",
+    "trek.onContext", "trek.invoke('/prefs'", "trek.invoke('/plan'", "trek.invoke('/commit'", "trek.invoke('/geocode'",
     "progress.message", "place-photo", "photoUrl",
     "trek.navigate('/settings?tab=plugins')", "trek.openExternal",
-    'renderWarnings', 'renderSources', 'renderDays', 'syncDayState',
+    'renderNeedsConfirm', 'renderSources', 'renderDays', 'syncDayState',
     'showStage', 'renderPrepTips', 'renderPlaceDetail', 'setActiveDay',
-    'renderBudget', 'renderReservations',
+    'renderBudget', 'renderReservations', 'renderAddressPicker', 'needsLocation',
     'invokeErrorMessage', 'conflict', 'isTransientInvokeError', 'stillWorking',
     'sourceSummary', 'sourcesEmpty', 'trek.session.set', 'restorePlanForm',
   ]) assert.ok(appScript.includes(hook), hook);
@@ -79,7 +80,7 @@ test('theme, accessibility, and responsive host states are explicitly supported'
 
   assert.match(html, /role=["']status["'][^>]+aria-live=["']polite["']/);
   assert.match(html, /role=["']progressbar["']/);
-  assert.match(html, /role=["']alert["']/);
+  assert.match(html, /id=["']needs-confirm["']/);
   assert.match(html, /<body class="trek-ui">/);
   assert.match(html, /font-family:\s*var\(--font-system\)/);
   assert.match(html, /html\.layout-phone \.app-shell/);
@@ -115,5 +116,13 @@ test('AGENTS.md: kit classes first, tokens only, trek.session, native select', (
   assert.doesNotMatch(html, /\.app-shell \.trek-select \{/);
   assert.doesNotMatch(html, /class="app-shell trek-scroll"/);
   assert.match(html, /class="page trek-scroll/);
+  assert.match(html, /class="preview-board trek-scroll/);
+  assert.match(html, /html\.layout-phone \.page\.trek-scroll/);
+  assert.match(html, /class="dock-spacer"/);
+  assert.match(html, /html\.layout-phone \.dock-spacer/);
+  assert.match(html, /--app-dock-clearance/);
+  assert.match(html, /flex:\s*1 1 0%/);
+  assert.equal([...html.matchAll(/class="dock-spacer"/g)].length, 2);
+  assert.doesNotMatch(html, /class="day-rail trek-cluster"/);
   assert.doesNotMatch(html, /\.trek-btn\s*\{[^}]*background:\s*var\(--accent\)/);
 });
