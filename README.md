@@ -63,9 +63,9 @@ The signing engine is a bundled build of the MIT-licensed `xhshow-js` package.
 Its license and the bundled `crypto-js` notice are preserved in
 `server/xhs/vendor/THIRD_PARTY_NOTICES.md`.
 
-## Roadmap
+## Tasks
 
-Planned features and competitor research: [docs/ROADMAP.md](./docs/ROADMAP.md)
+[docs/TASKS.md](./docs/TASKS.md)
 
 ## License
 
