@@ -42,7 +42,7 @@
 
 账号级另建一个 **幕僚长（Chief of Staff）** 做每日摘要，不要塞进每个项目群。
 
-岗位全文见 [`roster/`](roster/)。全员禁令见 [`SHARED.md`](SHARED.md)。群聊开工词见 [`GROUP.md`](GROUP.md)。例程见 [`ROUTINES.md`](ROUTINES.md)。
+岗位全文见 [`roster/`](roster/)。全员禁令原文见 [`SHARED.md`](SHARED.md)——**必须贴进每个 Bot 的描述**，Grok Bot 读不到这个文件。群聊见 [`GROUP.md`](GROUP.md)。例程见 [`ROUTINES.md`](ROUTINES.md)。
 
 ---
 
