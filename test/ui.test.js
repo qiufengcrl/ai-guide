@@ -22,13 +22,14 @@ test('redesign covers the complete planning and preview workflow', () => {
     'pace', 'guide-paste', 'xhs-keyword-search', 'xhs-search-field', 'generate', 'status', 'progress',
     'needs-confirm', 'preview', 'sources', 'days', 'trip-title', 'commit',
     'prep-tips', 'prep-reservations', 'budget-card', 'budget-tiers', 'stage-plan', 'stage-preview', 'cookie-help', 'day-rail', 'inspector',
-    'generate-progress', 'progress-steps', 'more-options',
+    'generate-progress', 'progress-steps', 'more-options', 'plan-warnings', 'plan-warning-list',
   ];
   for (const id of requiredIds) assert.match(html, new RegExp(`id=["']${id}["']`), id);
 
   for (const hook of [
     "trek.onContext", "trek.invoke('/prefs'", "trek.invoke('/plan'", "trek.invoke('/commit'", "trek.invoke('/geocode'",
     "progress.message", "place-photo", "photoUrl",
+    "plan-warnings", "renderWarnings",
     "trek.navigate('/settings?tab=plugins')", "trek.openExternal",
     'renderNeedsConfirm', 'renderSources', 'renderDays', 'syncDayState',
     'showStage', 'renderPrepTips', 'renderPlaceDetail', 'setActiveDay',

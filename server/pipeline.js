@@ -13,7 +13,11 @@ const GUIDE_RESERVATION_HINT = /预约|抢票|提前预约|约满|需预约|需�
 const GUIDE_SECTION_SKIP = /^(🍜|💡|#|美食推荐|避坑|小贴士)/;
 const GUIDE_ROUTE_SKIP = /^(廊桥|登岛|欣赏|观看|拍照|散步|环岛(?!步道)|灯光|喷泉|夜景灯光)/;
 const GUIDE_NAME_SUFFIX = /(登顶|数字展馆.*|与夜景.*|灯光.*|\/喷泉)$/u;
-const DAY_HEADER_RE = /^(?:📅\s*|【)?(?:第\s*([0-9一二三四五六七八九十两]+)\s*天|Day\s*([0-9]{1,2})|D([0-9]{1,2}))(?:\s*[】:：\-—·]|$)/i;
+const DAY_HEADER_TOKEN_RE = /^(?:第\s*([0-9一二三四五六七八九十两]+)\s*天|Day\s*([0-9]{1,2})|D([0-9]{1,2}))(?:\s*[】\]:：\-—·]|$)/i;
+const DAY_HEADER_DECOR_RE = /^(?:[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}📅🗓️📍🗺️✨🌟⭐📌]\s*)+/u;
+const DAY_HEADER_TAG_RE = /^(?:\[[^\]]{0,24}\]|【[^】]{0,24}】)\s*/u;
+const ROUTE_ARROW_RE = /(?:→|->|➡|—>|➜)/;
+const SHARE_TOKEN_RE = /打开【小红书】|进入【小红书】|复制本条|小红书[^。\n]{0,12}口令|【小红书】[^。\n]{0,24}发现更多/;
 const GUIDE_COMPARE_RE = /并称|相比|不同于|不是去|不要去|不如|不像|对比/;
 const CN_DAY_TOKEN = {
   一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
@@ -28,7 +32,9 @@ function stripInvisible(text) {
 
 function cleanGuidePlaceName(raw) {
   let name = stripInvisible(raw)
+    .replace(/^(?:\d+[.\u3001、．)]\s*)+/, '')
     .replace(/^[▪️•·\-–—\d①②③④⑤⑥⑦⑧⑨⑩1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟📍🗺️]+\s*/u, '')
+    .replace(/^[.．]\s*/, '')
     .replace(/[:：].*$/, '')
     .replace(/[（(].*[）)]/g, '')
     .replace(GUIDE_NAME_SUFFIX, '')
@@ -37,17 +43,56 @@ function cleanGuidePlaceName(raw) {
   return name;
 }
 
+function stripDayDecor(line) {
+  let trimmed = stripInvisible(line);
+  for (let i = 0; i < 3; i += 1) {
+    const next = trimmed.replace(DAY_HEADER_DECOR_RE, '').replace(DAY_HEADER_TAG_RE, '');
+    if (next === trimmed) break;
+    trimmed = stripInvisible(next);
+  }
+  return trimmed;
+}
+
+function matchDayHeader(line) {
+  const stripped = stripDayDecor(line);
+  const match = stripped.match(DAY_HEADER_TOKEN_RE);
+  if (!match) return null;
+  const day = parseDayToken(match[1] || match[2] || match[3]);
+  if (!day) return null;
+  const rest = stripInvisible(stripped.slice(match[0].length).replace(/^[】\]:：\-—·\s]+/, ''));
+  return { day, rest };
+}
+
 function stripDayPrefix(raw) {
+  const header = matchDayHeader(raw);
+  if (header) return header.rest;
   return stripInvisible(raw)
     .replace(/^(?:📅\s*)?(?:第\s*[0-9一二三四五六七八九十两]+\s*天|Day\s*[0-9]{1,2}|D[0-9]{1,2})\s*[:：]?\s*/i, '')
     .trim();
 }
 
+function looksLikeHyphenRoute(text) {
+  if (ROUTE_ARROW_RE.test(text) || /https?:\/\//i.test(text)) return false;
+  const chunks = String(text || '').split(/\s*[-–—－]\s*/).map((item) => item.trim()).filter(Boolean);
+  if (chunks.length < 2) return false;
+  return chunks.every((chunk) => (
+    chunk.length >= 2
+    && chunk.length <= 16
+    && !/^\d+$/.test(chunk)
+    && !/\d{2,}/.test(chunk)
+    && !/(月|晚|小时|分钟)$/.test(chunk)
+  ));
+}
+
 function splitRoutePlaceNames(raw, intent) {
   const text = stripDayPrefix(raw);
   if (!text) return [];
-  const hasRoute = /(?:→|->|➡|—>)/.test(text);
-  const chunks = hasRoute ? text.split(/\s*(?:→|->|➡|—>)\s*/) : [text];
+  const hasArrow = ROUTE_ARROW_RE.test(text);
+  const chunks = hasArrow
+    ? text.split(/\s*(?:→|->|➡|—>|➜)\s*/)
+    : looksLikeHyphenRoute(text)
+      ? text.split(/\s*[-–—－]\s*/)
+      : [text];
   const names = [];
   const seen = new Set();
   for (const chunk of chunks) {
@@ -86,16 +131,6 @@ function parseDayToken(raw) {
   if (CN_DAY_TOKEN[text] != null) return CN_DAY_TOKEN[text];
   const n = Number(text);
   return Number.isInteger(n) && n >= 1 && n <= 14 ? n : 0;
-}
-
-function matchDayHeader(line) {
-  const trimmed = stripInvisible(line);
-  const match = trimmed.match(DAY_HEADER_RE);
-  if (!match) return null;
-  const day = parseDayToken(match[1] || match[2] || match[3]);
-  if (!day) return null;
-  const rest = stripInvisible(trimmed.slice(match[0].length).replace(/^[】:：\-—·\s]+/, ''));
-  return { day, rest };
 }
 
 function inferDayCountFromGuides(guides) {
@@ -243,14 +278,12 @@ function candidatesFromGuideText(guides, intent) {
       const bullet = trimmed.match(/^[▪️•·]\s*(.+)$/);
       if (bullet && push(bullet[1], guideId, trimmed, lineContext, currentDay)) return results;
 
-      const numbered = trimmed.match(/^(?:\d+[.\u3001、]|[①②③④⑤⑥⑦⑧⑨⑩])\s*(.+)$/);
+      const numbered = trimmed.match(/^(?:\d+[.\u3001、\)]|[①②③④⑤⑥⑦⑧⑨⑩]|[（(]\d+[）)])\s*(.+)$/);
       if (numbered && push(numbered[1], guideId, trimmed, lineContext, currentDay)) return results;
 
-      if (/推荐路线|路线[:：]|→|->|➡/.test(trimmed)) {
+      if (/推荐路线|路线[:：]|→|->|➡|➜/.test(trimmed) || looksLikeHyphenRoute(stripDayPrefix(trimmed))) {
         const routePart = trimmed.replace(/^.*?(?:推荐路线|路线)[:：]?\s*/u, '');
-        for (const segment of routePart.split(/\s*(?:→|->|➡|—>)\s*/)) {
-          if (push(segment, guideId, trimmed, lineContext, currentDay)) return results;
-        }
+        if (push(routePart, guideId, trimmed, lineContext, currentDay)) return results;
         continue;
       }
 
@@ -270,28 +303,33 @@ function candidatesFromGuideText(guides, intent) {
   return results;
 }
 
-function resolveExtractCandidates(extracted, guides, intent) {
+function resolveExtractCandidates(extracted, guides, intent, options = {}) {
   const llmCandidateCount = Array.isArray(extracted?.candidates) ? extracted.candidates.length : 0;
   const hasGuideText = (guides || []).some((guide) => String(guide.text || '').trim());
   const llmRaw = normalizeCandidates(extracted, { ...intent, mustSee: hasGuideText ? [] : intent.mustSee });
   const llm = hasGuideText ? filterInventedCandidates(llmRaw, guides) : llmRaw;
   const fromGuide = hasGuideText ? candidatesFromGuideText(guides, intent) : [];
+  const visionRaw = normalizeCandidates({ candidates: options.visionCandidates || [] }, intent);
   let merged = [];
   let source = null;
   if (hasGuideText) {
-    merged = mergeExtractedCandidates(fromGuide, llm);
-    if (fromGuide.length && llm.length) source = 'llm+guide_text';
+    merged = mergeExtractedCandidates(fromGuide, mergeExtractedCandidates(llm, visionRaw));
+    if (fromGuide.length && (llm.length || visionRaw.length)) source = visionRaw.length ? 'llm+guide_text+vision' : 'llm+guide_text';
     else if (fromGuide.length) source = 'guide_text';
-    else if (llm.length) source = 'llm';
-  } else if (llm.length) {
-    merged = llm;
-    source = 'llm';
+    else if (llm.length || visionRaw.length) source = visionRaw.length && !llm.length ? 'vision' : 'llm';
+  } else if (llm.length || visionRaw.length) {
+    merged = mergeExtractedCandidates(llm, visionRaw);
+    source = visionRaw.length && !llm.length ? 'vision' : 'llm';
   }
   const candidates = normalizeCandidates({ candidates: merged }, intent);
+  const failKinds = [];
+  if (hasGuideText && !fromGuide.length) failKinds.push('body_parsed_0');
+  if (!llmCandidateCount && !options.llmErrorKind) failKinds.push('llm_empty');
+  if (options.llmErrorKind) failKinds.push(options.llmErrorKind);
   if (candidates.length) {
-    return { candidates, source, llmCandidateCount };
+    return { candidates, source, llmCandidateCount, guideCandidateCount: fromGuide.length, visionCandidateCount: visionRaw.length, failKinds };
   }
-  return { candidates: [], source: null, llmCandidateCount };
+  return { candidates: [], source: null, llmCandidateCount, guideCandidateCount: fromGuide.length, visionCandidateCount: visionRaw.length, failKinds };
 }
 
 function guideTextForExtractRetry(guides) {
@@ -360,8 +398,27 @@ function mergeGuideTexts(guides) {
 }
 function looksLikeShareCard(text) {
   const raw = String(text || '').trim();
-  if (!raw || raw.length > 500) return false;
-  return /xhslink\.(cn|com)|xiaohongshu\.com\/|进入【小红书】/.test(raw);
+  if (!raw) return false;
+  const hasShareToken = SHARE_TOKEN_RE.test(raw);
+  const hasXhsUrl = /xhslink\.(cn|com)|xiaohongshu\.com\//i.test(raw);
+  if (!hasShareToken && !hasXhsUrl) return false;
+  if (hasShareToken && raw.length <= 800) return true;
+  const rest = stripShareBoilerplate(raw.replace(/https?:\/\/\S+/gi, ' '));
+  return rest.length === 0;
+}
+
+function stripShareBoilerplate(text) {
+  return String(text || '')
+    .replace(/打开【小红书】(?:App)?/g, ' ')
+    .replace(/进入【小红书】/g, ' ')
+    .replace(/复制本条(?:口令)?/g, ' ')
+    .replace(/发现更多(?:精彩)?内容[~～!]*/g, ' ')
+    .replace(SHARE_TOKEN_RE, ' ')
+    .replace(/#小红书\S*/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }
 
 function noteDisplayTitle(note, fallback) {
@@ -398,6 +455,11 @@ function settings(config) {
     xhsEnabled: truthySetting(config.xhs_enabled),
     placesApiBase: String(config.places_api_base || '').trim(),
     placesApiKey: String(config.places_api_key || '').trim(),
+    llmApiBase: String(config.llm_api_base || '').trim(),
+    llmApiKey: String(config.llm_api_key || '').trim(),
+    llmModel: String(config.llm_model || '').trim(),
+    llmMaxTokens: clampInt(config.llm_max_tokens, 4096, 256, 16384),
+    multimodalNotes: config.multimodal_notes === undefined ? true : truthySetting(config.multimodal_notes),
   };
 }
 
@@ -443,8 +505,14 @@ function normalizeInput(body, limits) {
   const dayCount = Math.min(limits.maxDays, Math.max(1, datedDays));
   const pace = ['relaxed', 'balanced', 'packed'].includes(input.pace) ? input.pace : 'balanced';
   const split = splitGuidePaste(input.urls, input.sourceText);
-  const urls = split.urls.slice(0, limits.maxNotes);
-  const sourceText = split.sourceText || '';
+  const urls = [...new Set(split.urls)].slice(0, limits.maxNotes);
+  let sourceText = stripShareBoilerplate(split.sourceText || '');
+  if (looksLikeShareCard(sourceText) || looksLikeShareCard(String(input.sourceText || ''))) {
+    sourceText = '';
+  }
+  if (urls.length && !sourceText) {
+    sourceText = '';
+  }
   return {
     destination,
     startDate,
@@ -556,7 +624,7 @@ function expandCandidate(item, intent) {
   const names = splitRoutePlaceNames(item?.nameZh || item?.name, intent);
   if (!names.length) {
     const fallback = cleanGuidePlaceName(stripDayPrefix(item?.nameZh || item?.name));
-    if (!fallback || /(?:→|->|➡)/.test(fallback) || isWeakPlaceName(fallback, intent)) return [];
+    if (!fallback || ROUTE_ARROW_RE.test(fallback) || looksLikeHyphenRoute(fallback) || isWeakPlaceName(fallback, intent)) return [];
     return [toCandidate({ ...item, name: fallback, nameZh: fallback }, intent)];
   }
   return names.map((name) => toCandidate({
@@ -573,7 +641,7 @@ function normalizeCandidates(raw, intent) {
   const pushUnique = (item) => {
     if (!item?.name || isWeakPlaceName(item.name, intent)) return;
     if (isMarketingCandidate(item)) return;
-    if (/(?:→|->|➡)/.test(item.name)) return;
+    if (ROUTE_ARROW_RE.test(item.name) || looksLikeHyphenRoute(item.name)) return;
     const key = foldName(item.name);
     if (!key || seen.has(key)) return;
     seen.add(key);
@@ -609,7 +677,7 @@ function extractionText(guides, intent) {
     'Do not list the destination itself, a province, city, country, or administrative region as a place.',
     'For each place include nameZh (Simplified Chinese official name), nameEn (English official name when known), reason (real user tips or pitfalls from the notes), durationMinutes, reservationRequired, and reservationTips when notes mention 预约/抢票/提前预约.',
     `Spread places across days with dayHint from 1 to ${intent.dayCount}. If the notes have 第N天 / Day N headings, follow those headings.`,
-    'Never return a day route joined by arrows (A -> B -> C or A → B) as one candidate. One visitable place per candidate.',
+    'Never return a day route joined by arrows or hyphens (A -> B -> C, A → B, or A-B-C) as one candidate. One visitable place per candidate.',
     'If notes mention prices (人均/门票/住宿/交通), also fill budget with currency and economy/comfort/luxury objects, each with numeric transport, lodging, tickets, food for the whole trip. Do not invent live market quotes.',
   ].filter(Boolean).join('\n');
   const commentTips = (guides || [])
@@ -633,7 +701,7 @@ function extractionInstruction(intent, hasGuides) {
   const dest = intent.destination || 'the destination';
   const fields = 'Each candidate must include name, nameZh, nameEn, reason, durationMinutes, reservationRequired, reservationTips, dayHint, and guideId when sourced from a note. Use reservationRequired=true when notes mention 预约, 抢票, 提前预约, or 约满.';
   if (hasGuides) {
-    return `Extract specific visitable places that appear verbatim in the notes. ${fields} Prefer first-person visit notes over sponsored or group-tour pitches. Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Keep real user tips in reason for that one place only. Never return a route joined by arrows as one candidate. When notes mention prices, also fill budget with currency and three tiers (economy, comfort, luxury), each with numeric transport, lodging, tickets, food for the whole trip. Do not invent live quotes. Do not invent places that are not in the notes. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}, matching 第N天/Day N headings when present. Target about ${target} places, or every named place in the notes if fewer. Do not invent coordinates.`;
+    return `Extract specific visitable places that appear verbatim in the notes. ${fields} Prefer first-person visit notes over sponsored or group-tour pitches. Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Keep real user tips in reason for that one place only. Never return a route joined by arrows or hyphens as one candidate. When notes mention prices, also fill budget with currency and three tiers (economy, comfort, luxury), each with numeric transport, lodging, tickets, food for the whole trip. Do not invent live quotes. Do not invent places that are not in the notes. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}, matching 第N天/Day N / [x]第一天 headings when present. Target about ${target} places, or every named place in the notes if fewer. Do not invent coordinates. This is a travel-guide candidates extract, not a reservation/booking parse.`;
   }
   return `No notes were supplied. Propose well-known visitable places in ${dest}. ${fields} Each name must be a specific attraction or neighborhood, not the destination, province, city, or country. Spread across ${intent.dayCount} days with dayHint. Target ${target} places. Do not invent coordinates.`;
 }
@@ -1383,6 +1451,8 @@ module.exports = {
   EXTRACTION_SCHEMA,
   PLACE_SEARCH_ALIASES,
   looksLikeShareCard,
+  stripShareBoilerplate,
+  matchDayHeader,
   noteDisplayTitle,
   settings,
   geoSearchOptions,
@@ -1413,6 +1483,7 @@ module.exports = {
   candidatesFromGuideText,
   splitRoutePlaceNames,
   resolveExtractCandidates,
+  looksLikeHyphenRoute,
   guideTextForExtractRetry,
   extractRetryInstruction,
   isGenericPlaceName,

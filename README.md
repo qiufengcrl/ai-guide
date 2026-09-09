@@ -41,12 +41,40 @@ looks best (the card crops the edges).
 | `http:outbound:xhslink.cn` | Resolve `xhslink.cn` share-card short links. |
 | `http:outbound:nominatim.openstreetmap.org` | Resolve every candidate to WGS-84 coordinates via the plugin's own Nominatim client. |
 | `http:outbound:trek-amap-bridge` | Call the configured Places API bridge (the same host as TREK's `PLACES_API_BASE` when using `trek-amap-bridge`). |
+| `http:outbound:api.deepseek.com` | Optional plugin-direct OpenAI-compatible LLM (only if `llm_api_base` points here). |
+| `http:outbound:api.openai.com` | Optional plugin-direct OpenAI-compatible LLM (only if `llm_api_base` points here). |
 
 ## Setup
 
-Enable the `llm_parsing` addon and configure TREK's AI provider. The plugin
-resolves places with its own Nominatim client — no map API key and no changes
-to TREK's core are required.
+Enable the `llm_parsing` addon and configure TREK's AI provider. Place extraction
+uses **`ctx.ai.complete`** with a plugin-owned `candidates` JSON schema. It does
+**not** call TREK `ai.extract` / the reservation parser (`toReservationList`).
+Map/geo remains the referee: the model proposes names, rules + geocode gate them.
+
+Optional plugin-direct LLM (when you do not want the host completion path):
+
+| Setting | Who | What |
+|---|---|---|
+| `llm_api_base` | Admin | OpenAI-compatible base, e.g. `https://api.deepseek.com/v1`. Packed egress is only `api.deepseek.com` and `api.openai.com`. Leave empty to use TREK `llm_parsing`. |
+| `llm_api_key` | Admin | Secret. Never commit it. Required only with `llm_api_base`. |
+| `llm_model` | Admin | Prefer a **non-reasoning** chat model (e.g. `deepseek-chat`, `gpt-4o-mini`). |
+| `llm_max_tokens` | Admin | Outbound only; raise to 8192+ if a reasoning model keeps returning empty `content`. |
+| `multimodal_notes` | Admin | Default on. Read **public** note route-card image URLs; failure degrades to text. |
+
+**Do not put API keys, Cookies, or Authorization headers in the repo.** Job
+`work_json.aiTrace` stores truncated prompt/response for debugging with those
+secrets stripped.
+
+The plugin resolves places with its own Nominatim client — no map API key and no
+changes to TREK's core are required.
+
+### M1 compliance (public route cards)
+
+Multimodal extraction only uses image URLs already present on **public**
+Xiaohongshu note pages (the same HTML `fetchPublicNote` path). It does not scrape
+login-walled or private images beyond existing public-read paths, does not store
+image bytes in `aiTrace` (HTTPS URLs only), and on failure continues with the
+text pipeline.
 
 Optional keyword search uses each user's own secret `xhs_cookie`, entered under
 Settings → Plugins. **Do not log into Xiaohongshu on the Linux TREK server.**

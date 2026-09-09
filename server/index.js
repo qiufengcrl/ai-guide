@@ -2,7 +2,6 @@
 const crypto = require('node:crypto');
 const { definePlugin } = require('trek-plugin-sdk');
 const {
-  EXTRACTION_SCHEMA,
   settings,
   message,
   normalizeInput,
@@ -30,6 +29,15 @@ const {
   pickDestinationBias,
   filterMarketingGuides,
 } = require('./pipeline');
+const {
+  invokeGuideLlm,
+  classifyLlmError,
+  extractFailureCopy,
+  joinFailureCopy,
+  collectGuideImageUrls,
+  shouldTryMultimodal,
+  multimodalPrompt,
+} = require('./llm');
 const { isMarketingGuide, commentTipsForPlace, extractCommentInsights, attachPreviewTips, selectSearchNotes, scoreGuide, QUALITY_MIN_SCORE } = require('./guide-quality');
 const { estimateBudget } = require('./budget');
 const { loadTrekCategoryMap, buildTrekPlacePayload, buildTripHandoff, HANDOFF_KEY } = require('./trek-handoff');
@@ -162,6 +170,125 @@ async function rollbackCreatedPlaces(ctx, tripId, placeIds) {
 function addWarning(job, text) {
   job.draft.warnings ||= [];
   if (!job.draft.warnings.includes(text)) job.draft.warnings.push(text);
+}
+
+function rememberAiTraces(job, traces) {
+  const previous = Array.isArray(job.work.aiTrace) ? job.work.aiTrace : [];
+  job.work.aiTrace = [...previous, ...(traces || [])].slice(-6);
+}
+
+async function extractWithPluginLlm(job, ctx, limits, locale, hasGuides) {
+  const prompt = extractionText(job.draft.guides, job.draft.intent);
+  const system = extractionInstruction(job.draft.intent, hasGuides);
+  const imageUrls = shouldTryMultimodal(job.draft.guides, limits.multimodalNotes)
+    ? collectGuideImageUrls(job.draft.guides)
+    : [];
+  const useOutbound = Boolean(String(limits.llmApiBase || '').trim() && String(limits.llmApiKey || '').trim());
+  let extracted = { candidates: [] };
+  let llmError = null;
+  let llmErrorKind = null;
+  let channel = null;
+  let recoveredFromReasoning = false;
+  let multimodalDegraded = false;
+  let visionCandidates = [];
+
+  try {
+    const result = await invokeGuideLlm(ctx, limits, {
+      prompt,
+      system,
+      imageUrls: useOutbound ? [] : imageUrls,
+      allowMultimodal: !useOutbound && imageUrls.length > 0,
+    });
+    extracted = result.extracted || { candidates: [] };
+    channel = result.channel;
+    recoveredFromReasoning = result.recoveredFromReasoning === true;
+    multimodalDegraded = result.multimodalDegraded === true;
+    rememberAiTraces(job, result.traces);
+  } catch (error) {
+    llmError = error instanceof Error ? error.message : String(error);
+    llmErrorKind = classifyLlmError(error);
+    rememberAiTraces(job, error.traces);
+    addWarning(job, extractFailureCopy(llmErrorKind || 'llm_error', locale, { detail: llmError }));
+  }
+
+  if (imageUrls.length && useOutbound) {
+    try {
+      const vision = await invokeGuideLlm(ctx, limits, {
+        prompt: multimodalPrompt(job.draft.guides, job.draft.intent),
+        system: 'Extract day/place lists from public route-card images. JSON candidates only.',
+        imageUrls,
+        allowMultimodal: true,
+      });
+      visionCandidates = Array.isArray(vision.extracted?.candidates) ? vision.extracted.candidates : [];
+      multimodalDegraded = vision.multimodalDegraded === true;
+      rememberAiTraces(job, vision.traces);
+      if (multimodalDegraded) {
+        addWarning(job, message(locale,
+          '公开路线图多模态读取已降级为正文解析（未把图片二进制写入追踪）。',
+          'Multimodal read of public route-card images degraded to text (image bytes are not stored in traces).'));
+      }
+    } catch (error) {
+      multimodalDegraded = true;
+      rememberAiTraces(job, error.traces);
+      addWarning(job, message(locale,
+        '公开路线图读图失败，已改用正文解析。',
+        'Reading public route-card images failed; continuing with the text pipeline.'));
+    }
+  }
+
+  if (!job.draft.intent.destination && typeof extracted.intent?.destination === 'string') {
+    job.draft.intent.destination = extracted.intent.destination.trim();
+    job.draft.intent.guideQuery = `${job.draft.intent.destination} ${job.draft.intent.interests.length ? job.draft.intent.interests.join(' ') : '景点'} 旅游 景点攻略`.trim();
+  }
+
+  let resolved = resolveExtractCandidates(extracted, job.draft.guides, job.draft.intent, {
+    visionCandidates,
+    llmErrorKind,
+  });
+
+  if (!resolved.candidates.length && hasGuides && !job.work.extractRetried) {
+    job.work.extractRetried = true;
+    try {
+      const retry = await invokeGuideLlm(ctx, limits, {
+        prompt: guideTextForExtractRetry(job.draft.guides),
+        system: extractRetryInstruction(locale, job.draft.intent.dayCount),
+        allowMultimodal: false,
+      });
+      rememberAiTraces(job, retry.traces);
+      const retryResolved = resolveExtractCandidates(retry.extracted || {}, [], job.draft.intent);
+      if (retryResolved.candidates.length) {
+        resolved = {
+          ...retryResolved,
+          source: 'llm_retry',
+          llmCandidateCount: resolved.llmCandidateCount,
+          guideCandidateCount: resolved.guideCandidateCount,
+          visionCandidateCount: resolved.visionCandidateCount,
+          failKinds: resolved.failKinds,
+        };
+        addWarning(job, message(locale,
+          '首次模型抽取为空，简版重试已成功识别景点。',
+          'First extraction was empty; a simplified retry succeeded.'));
+      }
+    } catch (error) {
+      rememberAiTraces(job, error.traces);
+      const detail = error instanceof Error ? error.message : String(error);
+      if (!llmError) {
+        llmError = detail;
+        llmErrorKind = classifyLlmError(error);
+      }
+    }
+  }
+
+  return {
+    extracted,
+    resolved,
+    llmError,
+    llmErrorKind,
+    channel,
+    recoveredFromReasoning,
+    multimodalDegraded,
+    visionCount: visionCandidates.length,
+  };
 }
 
 function appendGuide(job, guide, locale) {
@@ -432,68 +559,51 @@ async function advance(job, ctx) {
     }
     applyGuideDerivedIntent(job.draft.intent, job.draft.guides, limits);
     const hasGuides = (job.draft.guides || []).some((guide) => String(guide.text || '').trim());
-    let extracted = {};
-    let llmError = null;
-    try {
-      const result = await ctx.ai.extract(
-        extractionText(job.draft.guides, job.draft.intent),
-        EXTRACTION_SCHEMA,
-        extractionInstruction(job.draft.intent, hasGuides),
-      );
-      extracted = result.results[0] || {};
-    } catch (error) {
-      llmError = error instanceof Error ? error.message : String(error);
-      addWarning(job, message(locale,
-        `模型抽取失败（${llmError}），将尝试从攻略正文提取。`,
-        `Model extraction failed (${llmError}); trying guide text parsing.`));
-    }
-    if (!job.draft.intent.destination && typeof extracted.intent?.destination === 'string') {
-      job.draft.intent.destination = extracted.intent.destination.trim();
-      job.draft.intent.guideQuery = `${job.draft.intent.destination} ${job.draft.intent.interests.length ? job.draft.intent.interests.join(' ') : '景点'} 旅游 景点攻略`.trim();
-    }
-    let resolved = resolveExtractCandidates(extracted, job.draft.guides, job.draft.intent);
-    if (!resolved.candidates.length && hasGuides && !job.work.extractRetried) {
-      job.work.extractRetried = true;
-      try {
-        const retry = await ctx.ai.extract(
-          guideTextForExtractRetry(job.draft.guides),
-          EXTRACTION_SCHEMA,
-          extractRetryInstruction(locale, job.draft.intent.dayCount),
-        );
-        const retryResolved = resolveExtractCandidates(retry.results[0] || {}, [], job.draft.intent);
-        if (retryResolved.candidates.length) {
-          resolved = { ...retryResolved, source: 'llm_retry', llmCandidateCount: resolved.llmCandidateCount };
-          addWarning(job, message(locale,
-            '首次模型抽取为空，简版重试已成功识别景点。',
-            'First extraction was empty; a simplified retry succeeded.'));
-        }
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        if (!llmError) llmError = detail;
-      }
-    }
+    const {
+      extracted,
+      resolved,
+      llmError,
+      llmErrorKind,
+      channel,
+      recoveredFromReasoning,
+      multimodalDegraded,
+      visionCount,
+    } = await extractWithPluginLlm(job, ctx, limits, locale, hasGuides);
     job.work.candidates = resolved.candidates;
     job.work.extractMeta = {
       source: resolved.source,
       llmCandidateCount: resolved.llmCandidateCount,
+      guideCandidateCount: resolved.guideCandidateCount,
+      visionCandidateCount: resolved.visionCandidateCount ?? visionCount,
       llmError,
+      llmErrorKind,
+      channel,
+      recoveredFromReasoning,
+      multimodalDegraded,
+      failKinds: resolved.failKinds || [],
     };
+    if (multimodalDegraded) {
+      addWarning(job, message(locale,
+        '公开路线图多模态读取已降级为正文解析（未把图片二进制写入追踪）。',
+        'Multimodal read of public route-card images degraded to text (image bytes are not stored in traces).'));
+    }
+    if (recoveredFromReasoning) {
+      addWarning(job, message(locale,
+        '模型 content 为空，已从 reasoning_content 安全回收 JSON；请改用非推理模型或提高 max_tokens。',
+        'Model content was empty; JSON was recovered from reasoning_content. Prefer a non-reasoning model or raise max_tokens.'));
+    }
     if (!resolved.candidates.length) {
-      const hints = [];
-      if (resolved.llmCandidateCount === 0 && !llmError) {
-        hints.push(message(locale,
-          '模型返回了 0 个景点，请检查 llm_parsing 插件是否配置了可用模型（如 deepseek-v4-flash）。',
-          'The model returned 0 places; check that llm_parsing has a working model (e.g. deepseek-v4-flash).'));
-      }
-      if (llmError) {
-        hints.push(message(locale,
-          `模型调用失败：${llmError}`,
-          `Model call failed: ${llmError}`));
-      }
-      hints.push(message(locale,
+      const kinds = [...(resolved.failKinds || [])];
+      if (!kinds.length) kinds.push(llmErrorKind || 'llm_empty');
+      if (hasGuides && !resolved.guideCandidateCount && !kinds.includes('body_parsed_0')) kinds.push('body_parsed_0');
+      addWarning(job, joinFailureCopy(kinds, locale, { detail: llmError }));
+      addWarning(job, message(locale,
         '没有提取到具体景点。请粘贴攻略正文、填写必去景点，或换一个更具体的城市。',
         'No specific places were extracted. Paste guide text, add must-see places, or try a more specific city.'));
-      for (const hint of hints) addWarning(job, hint);
+    } else if ((resolved.failKinds || []).includes('llm_empty') && resolved.guideCandidateCount > 0) {
+      addWarning(job, extractFailureCopy('llm_empty', locale));
+    } else if ((resolved.failKinds || []).includes('body_parsed_0') && resolved.llmCandidateCount > 0) {
+      addWarning(job, extractFailureCopy('body_parsed_0', locale));
     }
     job.work.candidateIndex = 0;
     job.work.evidence = [];
@@ -595,6 +705,18 @@ async function advance(job, ctx) {
         job.work.evidence.push(fallback);
       }
       job.work.geocodeDone = true;
+      const mapped = (job.work.evidence || []).filter((item) => Number.isFinite(item?.lat) && Number.isFinite(item?.lng)).length;
+      job.work.extractMeta = {
+        ...(job.work.extractMeta || {}),
+        geocodeCount: mapped,
+        evidenceCount: (job.work.evidence || []).length,
+      };
+      if ((job.work.candidates || []).length && mapped === 0) {
+        addWarning(job, extractFailureCopy('geocode_0', locale));
+        const kinds = [...(job.work.extractMeta.failKinds || [])];
+        if (!kinds.includes('geocode_0')) kinds.push('geocode_0');
+        job.work.extractMeta.failKinds = kinds;
+      }
       return;
     }
     if (!job.work.photosDone) {
@@ -621,7 +743,11 @@ async function advance(job, ctx) {
   }
 
   if (job.stage === 'schedule') {
-    if (!job.work.evidence.length) throw new Error(message(locale, '没有可发布的地图证据', 'No publishable map evidence was found'));
+    if (!job.work.evidence.length) {
+      const kinds = [...(job.work.extractMeta?.failKinds || [])];
+      if (!kinds.includes('geocode_0')) kinds.push('geocode_0');
+      throw new Error(joinFailureCopy(kinds, locale, { detail: job.work.extractMeta?.llmError }));
+    }
     const split = splitRegions(job.draft.intent, job.work.evidence, locale);
     job.work.evidence = split.evidence;
     job.work.regions = split.regions;

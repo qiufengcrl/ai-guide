@@ -71,6 +71,40 @@ function splitGuidePaste(...blobs) {
   return { urls, sourceText: rest.slice(0, 12000) };
 }
 
+function collectPublicImageUrls(note) {
+  const lists = [note?.imageList, note?.image_list, note?.images];
+  const urls = [];
+  const seen = new Set();
+  const push = (value) => {
+    const href = String(value || '').trim();
+    if (!href || seen.has(href)) return;
+    try {
+      const url = new URL(href);
+      if (url.protocol !== 'https:') return;
+    } catch {
+      return;
+    }
+    seen.add(href);
+    urls.push(href);
+  };
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (typeof item === 'string') {
+        push(item);
+        continue;
+      }
+      if (!item || typeof item !== 'object') continue;
+      const info = item.info_list || item.infoList || [];
+      if (Array.isArray(info)) {
+        for (const row of info) push(row?.url);
+      }
+      push(item.url_default || item.urlDefault || item.url_pre || item.urlPre || item.url);
+    }
+  }
+  return urls.slice(0, 8);
+}
+
 function parseInitialState(html, noteId) {
   const source = String(html || '');
   if (!/noteDetailMap/i.test(source)) {
@@ -87,7 +121,7 @@ function parseInitialState(html, noteId) {
   if (!note || (!title && !text)) {
     throw new Error('Xiaohongshu note text was unavailable');
   }
-  return { noteId, title, text };
+  return { noteId, title, text, imageUrls: collectPublicImageUrls(note) };
 }
 
 async function fetchWithTimeout(url, init = {}, timeoutMs = 15000) {
@@ -200,6 +234,7 @@ module.exports = {
   noteIdFromUrl,
   searchKeywordFromUrl,
   parseInitialState,
+  collectPublicImageUrls,
   resolveNoteUrl,
   fetchHtmlNote,
   fetchPublicNoteFromResolved,

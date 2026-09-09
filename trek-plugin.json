@@ -1,7 +1,7 @@
 {
   "id": "ai-guide",
   "name": "AI 攻略",
-  "version": "1.1.53",
+  "version": "1.2.0",
   "apiVersion": 1,
   "author": "Your Name",
   "description": "把小红书旅行攻略转换为可编辑的 TREK 地图行程",
@@ -23,7 +23,9 @@
     "http:outbound:xhslink.com",
     "http:outbound:xhslink.cn",
     "http:outbound:nominatim.openstreetmap.org",
-    "http:outbound:trek-amap-bridge"
+    "http:outbound:trek-amap-bridge",
+    "http:outbound:api.deepseek.com",
+    "http:outbound:api.openai.com"
   ],
   "requiredAddons": [
     "llm_parsing"
@@ -36,7 +38,9 @@
     "xhslink.com",
     "xhslink.cn",
     "nominatim.openstreetmap.org",
-    "trek-amap-bridge"
+    "trek-amap-bridge",
+    "api.deepseek.com",
+    "api.openai.com"
   ],
   "settings": [
     {
@@ -100,6 +104,46 @@
       "input_type": "text",
       "scope": "user",
       "hint": "毫秒时间戳，由插件在 Cookie 验证成功时自动记录；超过 7 天会在生成前非阻断提醒。无需手动填写，请勿把 Cookie 贴到这里。"
+    },
+    {
+      "key": "llm_api_base",
+      "label": "可选：插件直连 LLM Base URL",
+      "input_type": "text",
+      "scope": "instance",
+      "placeholder": "https://api.deepseek.com/v1",
+      "hint": "OpenAI 兼容 /v1。留空则只用 TREK llm_parsing 的 ctx.ai.complete（不走预订 ai.extract）。出站仅允许 api.deepseek.com / api.openai.com。"
+    },
+    {
+      "key": "llm_api_key",
+      "label": "可选：插件直连 LLM API Key",
+      "input_type": "password",
+      "scope": "instance",
+      "secret": true,
+      "hint": "与 llm_api_base 一起使用。不要把密钥写进仓库或攻略正文。未填写时走宿主 ai.complete。"
+    },
+    {
+      "key": "llm_model",
+      "label": "可选：插件直连模型名",
+      "input_type": "text",
+      "scope": "instance",
+      "placeholder": "deepseek-chat",
+      "hint": "优先非推理模型。推理模型若只填 reasoning_content、content 为空，插件会尝试回收或重试，不会把空 content 当成功。"
+    },
+    {
+      "key": "llm_max_tokens",
+      "label": "可选：LLM max_tokens",
+      "input_type": "number",
+      "scope": "instance",
+      "placeholder": "4096",
+      "hint": "直连出站时生效。推理模型建议 ≥ 8192。宿主 ai.complete 的上限由 TREK 决定。"
+    },
+    {
+      "key": "multimodal_notes",
+      "label": "读取公开笔记路线图",
+      "input_type": "checkbox",
+      "scope": "instance",
+      "default": true,
+      "hint": "仅使用公开笔记页已有的图片 URL，失败则降级正文。不抓登录墙私图，默认不把图片二进制写入追踪。"
     }
   ],
   "actions": [

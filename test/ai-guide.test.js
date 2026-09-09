@@ -43,12 +43,21 @@ const NOMINATIM_ROWS = {
   近点A: { name: 'Near A', lat: 35, lng: 135 },
   近点B: { name: 'Near B', lat: 35.01, lng: 135.01 },
   远点: { name: 'Far', lat: 36, lng: 136 },
+  北京: { name: 'Beijing', lat: 39.90, lng: 116.40, category: 'boundary', type: 'administrative' },
+  龙泉: { name: 'Longquan', lat: 28.07, lng: 119.14, category: 'boundary', type: 'administrative' },
   河南: { name: 'Henan', lat: 34.75, lng: 113.62, category: 'boundary', type: 'administrative' },
   河南省: { name: 'Henan', lat: 34.75, lng: 113.62, category: 'boundary', type: 'administrative' },
+  天坛: { name: 'Temple of Heaven', lat: 39.88, lng: 116.41, category: 'tourism', type: 'attraction' },
+  故宫: { name: 'Forbidden City', lat: 39.92, lng: 116.39, category: 'tourism', type: 'attraction' },
+  景山: { name: 'Jingshan Park', lat: 39.93, lng: 116.39, category: 'tourism', type: 'attraction' },
+  龙泉青瓷博物馆: { name: 'Longquan Celadon Museum', lat: 28.07, lng: 119.13, category: 'tourism', type: 'museum' },
+  凤阳山: { name: 'Fengyangshan', lat: 27.91, lng: 119.18, category: 'tourism', type: 'attraction' },
   龙门石窟: { name: 'Longmen Grottoes', lat: 34.55, lng: 112.47, category: 'tourism', type: 'attraction' },
   少林寺: { name: 'Shaolin Temple', lat: 34.51, lng: 112.94, category: 'tourism', type: 'attraction' },
   白马寺: { name: 'White Horse Temple', lat: 34.72, lng: 112.60, category: 'historic', type: 'temple' },
   清明上河园: { name: 'Millennium City Park', lat: 34.81, lng: 114.35, category: 'tourism', type: 'theme_park' },
+  颐和园: { name: 'Summer Palace', lat: 39.99, lng: 116.27, category: 'tourism', type: 'attraction' },
+  北海: { name: 'Beihai Park', lat: 39.93, lng: 116.39, category: 'tourism', type: 'attraction' },
 };
 
 function lookupGeoRow(query) {
@@ -97,7 +106,9 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.equal(manifest.icon, 'Sparkles');
   assert.deepEqual(manifest.requiredAddons, ['llm_parsing']);
   assert.equal(manifest.nativeModules, false);
-  assert.deepEqual(manifest.egress, ['www.xiaohongshu.com', 'edith.xiaohongshu.com', 'xhslink.com', 'xhslink.cn', 'nominatim.openstreetmap.org', 'trek-amap-bridge']);
+  assert.deepEqual(manifest.egress, ['www.xiaohongshu.com', 'edith.xiaohongshu.com', 'xhslink.com', 'xhslink.cn', 'nominatim.openstreetmap.org', 'trek-amap-bridge', 'api.deepseek.com', 'api.openai.com']);
+  assert.ok(manifest.permissions.includes('http:outbound:api.deepseek.com'));
+  assert.ok(manifest.permissions.includes('http:outbound:api.openai.com'));
   assert.ok(manifest.permissions.includes('http:outbound:xhslink.cn'));
   assert.ok(!manifest.permissions.includes('maps:read'));
   assert.ok(manifest.permissions.includes('http:outbound:nominatim.openstreetmap.org'));
@@ -110,7 +121,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.53');
+  assert.equal(manifest.version, '1.2.0');
 });
 
 function memoryDb() {
@@ -284,22 +295,24 @@ function xhsSessionThen(handler) {
 
 function buildHost(options = {}) {
   const trips = {};
+  const defaultResults = [{
+    intent: { destination: '京都' },
+    candidates: [
+      { name: 'Near A', nameZh: '近点A', dayHint: 1, durationMinutes: 60 },
+      { name: 'Near B', nameZh: '近点B', dayHint: 1, durationMinutes: 75 },
+      { name: 'Far', nameZh: '远点', dayHint: 1, durationMinutes: 90 },
+      { name: 'Missing', nameZh: '无坐标店', dayHint: 1 },
+    ],
+  }, { candidates: [{ name: 'MUST NOT USE' }] }];
+  const aiResults = options.aiResults || defaultResults;
   const host = sdk.createMockHost({
     grants: GRANTS,
     actingUserId: 7,
     config: { max_days: 8, max_places_per_day: 6, max_notes: 4, xhs_enabled: false, ...options.config },
     userSettings: options.userSettings || {},
     categories: options.categories,
-    aiResults: options.aiResults || [{
-      intent: { destination: '京都' },
-      candidates: [
-        { name: 'Near A', nameZh: '近点A', dayHint: 1, durationMinutes: 60 },
-        { name: 'Near B', nameZh: '近点B', dayHint: 1, durationMinutes: 75 },
-        { name: 'Far', nameZh: '远点', dayHint: 1, durationMinutes: 90 },
-        { name: 'Missing', nameZh: '无坐标店', dayHint: 1 },
-      ],
-    }, { candidates: [{ name: 'MUST NOT USE' }] }],
-    aiText: 'Keep the day flexible.',
+    aiResults,
+    aiText: options.aiText != null ? options.aiText : JSON.stringify(aiResults[0] || { candidates: [] }),
     trips,
   });
   const db = memoryDb();
@@ -644,14 +657,15 @@ test('公开草稿始终带上来源说明', () => {
   assert.deepEqual(draft.prepTips, []);
 });
 
-test('无 Cookie 的纯表单仍形成地图预览，并只使用 extract.results[0]', async () => {
+test('无 Cookie 的纯表单仍形成地图预览，并只使用 ai.complete JSON、不调用 ai.extract', async () => {
   const fixture = buildHost();
   const { state, geoCalls } = await makeReady(fixture);
   assert.ok(state.days.flatMap((day) => day.places).length >= 3);
   assert.ok(!state.warnings.some((warning) => warning.includes('Cookie')));
   assert.equal(state.sourceSummary.basis, 'destination');
   assert.ok(state.sourceSummary.query);
-  assert.ok(fixture.host.calls.some((call) => call.method === 'ai.extract'));
+  assert.ok(fixture.host.calls.some((call) => call.method === 'ai.complete'));
+  assert.ok(!fixture.host.calls.some((call) => call.method === 'ai.extract'));
   assert.ok(!geoCalls.includes('MUST NOT USE'));
   assert.ok(geoCalls.includes('京都'));
   assert.match(state.days[0].notes || '', /近点A|Near A/);
@@ -812,9 +826,9 @@ test('同一规划步骤进行中时，第二次 GET /plan 不会重入', async 
   const fixture = buildHost();
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
-  const original = fixture.host.ctx.ai.extract.bind(fixture.host.ctx.ai);
+  const original = fixture.host.ctx.ai.complete.bind(fixture.host.ctx.ai);
   let extractCalls = 0;
-  fixture.host.ctx.ai.extract = async (...args) => {
+  fixture.host.ctx.ai.complete = async (...args) => {
     extractCalls += 1;
     await gate;
     return original(...args);
@@ -2218,5 +2232,69 @@ test('buildTripHandoff 产出稳定的 ai-guide.handoff JSON', () => {
   }]);
   assert.ok(!JSON.stringify(handoff).includes('SHOULD_NOT_APPEAR'));
   assert.equal(HANDOFF_KEY, 'ai-guide.handoff');
+});
+
+test('A4 合成北京粘贴经规则路径得到候选和地图证据', async () => {
+  const fixture = buildHost({
+    aiResults: [{ candidates: [] }],
+    aiText: JSON.stringify({ candidates: [] }),
+  });
+  const { state, jobId } = await makeReady(fixture, {
+    destination: '北京',
+    dayCount: 1,
+    pace: 'balanced',
+    sourceText: '[一R]第一天：天坛-故宫-景山',
+  });
+  const names = state.days.flatMap((day) => day.places).map((place) => place.name);
+  assert.ok(names.includes('天坛'));
+  assert.ok(names.includes('故宫'));
+  assert.ok(names.includes('景山'));
+  assert.ok(state.days.flatMap((day) => day.places).length >= 3);
+  assert.equal(state.extractMeta.source, 'guide_text');
+  assert.ok(state.extractMeta.guideCandidateCount >= 3);
+  const row = [...fixture.db.jobs.values()].find((item) => item.id === jobId);
+  const work = JSON.parse(row.work_json);
+  assert.ok(Array.isArray(work.aiTrace));
+  assert.ok(work.aiTrace.length >= 1);
+  assert.doesNotMatch(JSON.stringify(work.aiTrace), /Cookie:|Bearer sk-/i);
+});
+
+test('A4 龙泉风格 Day1 箭头路线规划仍能出点', async () => {
+  const fixture = buildHost({
+    aiResults: [{ candidates: [] }],
+    aiText: JSON.stringify({ candidates: [] }),
+  });
+  const { state } = await makeReady(fixture, {
+    destination: '龙泉',
+    dayCount: 1,
+    sourceText: 'Day1：龙泉青瓷博物馆 → 凤阳山',
+  });
+  const names = state.days.flatMap((day) => day.places).map((place) => place.name);
+  assert.ok(names.includes('龙泉青瓷博物馆'));
+  assert.ok(names.includes('凤阳山'));
+});
+
+test('A3 RESOURCE_FORBIDDEN 失败文案分层且不调用 extract', async () => {
+  const fixture = buildHost();
+  fixture.host.ctx.ai.complete = async () => {
+    const err = new Error('RESOURCE_FORBIDDEN: ai.complete requires ai:invoke');
+    err.code = 'RESOURCE_FORBIDDEN';
+    throw err;
+  };
+  await fixture.app.load();
+  const created = await fixture.app.route({ method: 'POST', path: '/plan' }, {
+    body: { destination: '北京', dayCount: 1, locale: 'zh' },
+  });
+  const jobId = created.body.jobId;
+  let state;
+  for (let index = 0; index < 96; index += 1) {
+    state = (await fixture.app.route({ method: 'GET', path: '/plan' }, { query: { jobId } })).body;
+    if (state.status === 'ready' || state.status === 'failed') break;
+  }
+  assert.equal(state.status, 'failed');
+  assert.match(String(state.error || ''), /RESOURCE_FORBIDDEN|认证失败|模型/);
+  assert.ok(!fixture.host.calls.some((call) => call.method === 'ai.extract'));
+  const kinds = state.extractMeta?.failKinds || [];
+  assert.ok(kinds.includes('resource_forbidden') || /RESOURCE_FORBIDDEN/.test(String(state.error || '')));
 });
 

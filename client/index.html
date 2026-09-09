@@ -347,6 +347,11 @@
 
     <section class="stage-view preview-view hidden" id="preview" role="tabpanel" aria-labelledby="preview-title">
       <div class="preview-board trek-scroll">
+        <section id="plan-warnings" class="trek-card hidden" role="status">
+          <div class="trek-title" data-i18n="warnings">A few things to review</div>
+          <ul class="trek-stack" id="plan-warning-list"></ul>
+        </section>
+
         <section id="needs-confirm" class="trek-card hidden" role="status">
           <button class="trek-btn trek-btn--ghost" id="needs-confirm-toggle" type="button">
             <span data-i18n="needsConfirm">Need a location</span>
@@ -1336,6 +1341,21 @@
       return list;
     }
 
+    function renderWarnings(list) {
+      var panel = document.getElementById('plan-warnings');
+      var root = document.getElementById('plan-warning-list');
+      if (!panel || !root) return;
+      root.innerHTML = '';
+      var items = (list || []).map(function (item) { return String(item || '').trim(); }).filter(Boolean);
+      panel.classList.toggle('hidden', items.length === 0);
+      items.forEach(function (text) {
+        var row = document.createElement('p');
+        row.className = 'trek-muted';
+        row.textContent = text;
+        root.appendChild(row);
+      });
+    }
+
     function renderNeedsConfirm(days) {
       var panel = document.getElementById('needs-confirm');
       var count = document.getElementById('needs-confirm-count');
@@ -2054,6 +2074,7 @@
     }
 
     function render(data) {
+      renderWarnings(data.warnings || []);
       renderNeedsConfirm(data.days || []);
       renderSources(data.guides || [], data.sourceSummary || {});
       renderBudget(data.budget || null);
