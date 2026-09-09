@@ -28,7 +28,7 @@ const {
 const { readXhsCookieUpdatedAt } = require('../server/xhs/freshness');
 const { isMarketingGuide, filterMarketingGuides, buildTrekPlaceNotes, extractCommentInsights, commentTipsForPlace, attachPreviewTips, extractPrepTips, categorizePrepTip, scoreGuide, selectSearchNotes, collectReservations } = require('../server/guide-quality');
 const { estimateBudget, extractPriceClues } = require('../server/budget');
-const { buildTrekPlacePayload } = require('../server/trek-handoff');
+const { buildTrekPlacePayload, buildTripHandoff, HANDOFF_KEY } = require('../server/trek-handoff');
 
 setGeoThrottleInterval(0);
 setXhsThrottleForTests({ baseIntervalMs: 0, jitterMs: 0, backoffDelayMs: 0 });
@@ -1853,10 +1853,13 @@ test('营销帖过滤与 TREK 地点备注构建', () => {
     id: 'g_1',
     title: '京都攻略',
     url: 'https://www.xiaohongshu.com/explore/abc',
-    text: '门票需提前预约，周一闭馆',
+    text: '避坑：周一闭馆别白跑\n门票需提前预约，周一闭馆\n门票60元，人均120',
   }], 'zh');
   assert.match(notes, /清晨人少/);
   assert.match(notes, /预约/);
+  assert.match(notes, /门票/);
+  assert.match(notes, /费用参考/);
+  assert.match(notes, /避坑/);
   assert.match(notes, /出发前提示/);
   assert.match(notes, /来源/);
   const commentInsights = extractCommentInsights([
@@ -2111,5 +2114,109 @@ test('POST /geocode 返回可点选的地址列表', async () => {
   } finally {
     global.fetch = original;
   }
+});
+
+test('commit 把 budget/prepTips/reservations/sources 写入 trip meta', async () => {
+  const sourceText = [
+    '第一天我去了近点A，清晨人少。',
+    '门票需提前预约。',
+    '门票60元，人均120。',
+    '避坑：周一闭馆别白跑。',
+    '穿衣建议带薄外套防晒。',
+    '第二天近点B也好逛。',
+  ].join('\n');
+  const fixture = buildHost({
+    aiResults: [{
+      intent: { destination: '京都' },
+      candidates: [
+        {
+          name: 'Near A', nameZh: '近点A', dayHint: 1, durationMinutes: 60,
+          reason: '清晨人少', reservationRequired: true, reservationTips: '需提前预约', guideId: 'g_1',
+        },
+        { name: 'Near B', nameZh: '近点B', dayHint: 1, durationMinutes: 75, guideId: 'g_1' },
+      ],
+    }],
+  });
+  const { jobId, state } = await makeReady(fixture, {
+    destination: '京都',
+    sourceText,
+    locale: 'zh',
+  });
+  assert.ok(state.budget);
+  assert.ok(Array.isArray(state.prepTips) && state.prepTips.length >= 1);
+  const place = state.days.flatMap((day) => day.places).find((item) => !item.tooFar && !item.unmapped);
+  assert.ok(place);
+  const metaWrites = {};
+  const originalSet = fixture.host.ctx.meta.set.bind(fixture.host.ctx.meta);
+  fixture.host.ctx.meta.set = async (entityType, entityId, key, value) => {
+    metaWrites[`${entityType}:${entityId}:${key}`] = value;
+    return originalSet(entityType, entityId, key, value);
+  };
+  const committed = await fixture.app.route({ method: 'POST', path: '/commit' }, {
+    body: { jobId, title: '京都实用信息', evidenceIds: [place.evidenceId], locale: 'zh' },
+  });
+  assert.equal(committed.status, 200);
+  const tripId = committed.body.tripId;
+  const jobMeta = metaWrites[`trip:${tripId}:ai-guide.jobId`];
+  const handoff = metaWrites[`trip:${tripId}:${HANDOFF_KEY}`];
+  assert.equal(jobMeta, jobId);
+  assert.ok(handoff, `commit 应写入 ${HANDOFF_KEY}，实际 keys=${Object.keys(metaWrites).join(',')}`);
+  assert.equal(handoff.version, 1);
+  assert.ok(handoff.budget && handoff.budget.currency);
+  assert.ok(Array.isArray(handoff.prepTips));
+  assert.ok(handoff.prepTips.length >= 1);
+  assert.ok(Array.isArray(handoff.reservations));
+  assert.ok(Array.isArray(handoff.sources));
+  assert.ok(handoff.sources.some((source) => source.id || source.title || source.via === 'paste'));
+  const created = fixture.trips[tripId].places[0];
+  assert.match(String(created.notes || ''), /预约/);
+  assert.match(String(created.notes || ''), /门票|费用|避坑/);
+});
+
+test('buildTripHandoff 产出稳定的 ai-guide.handoff JSON', () => {
+  const handoff = buildTripHandoff({
+    payload: { locale: 'zh' },
+    draft: {
+      intent: { destination: '京都', dayCount: 2 },
+      warnings: ['部分笔记为营销帖已过滤'],
+      budget: {
+        currency: 'JPY',
+        days: 2,
+        estimated: true,
+        source: 'notes+model',
+        clues: [{ kind: 'tickets', amount: 400, currency: 'JPY' }],
+        economy: { transport: 1, lodging: 2, tickets: 3, food: 4, total: 10 },
+        comfort: { transport: 2, lodging: 3, tickets: 4, food: 5, total: 14 },
+        luxury: { transport: 3, lodging: 4, tickets: 5, food: 6, total: 18 },
+      },
+      prepTips: [{ text: '热门景点需提前预约', category: 'booking' }],
+      reservations: [{ name: '清水寺', dayTitle: '第 1 天 · 京都', tips: '需提前预约' }],
+      guides: [{
+        id: 'g_1',
+        title: '京都三日',
+        url: 'https://www.xiaohongshu.com/explore/abc',
+        via: 'paste',
+        text: 'SHOULD_NOT_APPEAR',
+      }],
+      days: [],
+    },
+  }, { now: '2026-09-09T00:00:00.000Z' });
+  assert.equal(handoff.version, 1);
+  assert.equal(handoff.generatedAt, '2026-09-09T00:00:00.000Z');
+  assert.equal(handoff.locale, 'zh');
+  assert.equal(handoff.destination, '京都');
+  assert.equal(handoff.dayCount, 2);
+  assert.equal(handoff.budget.currency, 'JPY');
+  assert.equal(handoff.budget.economy.total, 10);
+  assert.deepEqual(handoff.prepTips, [{ text: '热门景点需提前预约', category: 'booking' }]);
+  assert.equal(handoff.reservations[0].name, '清水寺');
+  assert.deepEqual(handoff.sources, [{
+    id: 'g_1',
+    title: '京都三日',
+    url: 'https://www.xiaohongshu.com/explore/abc',
+    via: 'paste',
+  }]);
+  assert.ok(!JSON.stringify(handoff).includes('SHOULD_NOT_APPEAR'));
+  assert.equal(HANDOFF_KEY, 'ai-guide.handoff');
 });
 

@@ -32,7 +32,7 @@ const {
 } = require('./pipeline');
 const { isMarketingGuide, commentTipsForPlace, extractCommentInsights, attachPreviewTips, selectSearchNotes, scoreGuide, QUALITY_MIN_SCORE } = require('./guide-quality');
 const { estimateBudget } = require('./budget');
-const { loadTrekCategoryMap, buildTrekPlacePayload } = require('./trek-handoff');
+const { loadTrekCategoryMap, buildTrekPlacePayload, buildTripHandoff, HANDOFF_KEY } = require('./trek-handoff');
 const { fetchPublicNote, fetchPublicNoteFromResolved, isShortLinkHost, noteIdFromUrl, resolveNoteUrl, searchKeywordFromUrl } = require('./xhs/url');
 const {
   normalizeXhsCookie,
@@ -948,6 +948,9 @@ module.exports = definePlugin({
             skippedUnmapped,
           });
           await ctx.meta.set('trip', tripId, 'ai-guide.jobId', job.id);
+          await ctx.meta.set('trip', tripId, HANDOFF_KEY, buildTripHandoff(job, {
+            locale: job.payload.locale || 'en',
+          }));
           job.committedTripId = tripId;
           job.draft.guides = job.draft.guides.map(({ text, ...guide }) => guide);
           await saveJob(ctx, job);

@@ -1,3 +1,5 @@
+const { extractPriceClues } = require('./budget');
+
 const MARKETING_TEXT_RE = /跟团|定制游|私信|加微信|加[Vv]|微信号|旅社|旅行社|包车游|一日游套餐|点击链接|代购|推广|商务合作|合作微信|报名咨询|vx[:：]|扫码咨询|纯玩团|当地向导|免费咨询|报名立减|进群优惠|导游微信|旅行顾问|点击主页|橱窗同款|佣金|广告合作|探店合作/i;
 
 const PERSONAL_RE = /我去了|我们去|打卡|踩坑|人均|住在|吃了|走了|排了|人少|人多|建议提前|别去|值得|不值得|第[一二三四五六七八]天|day\s*[1-8]|上午|下午|傍晚|清晨|闭馆|预约|避坑/i;
@@ -9,6 +11,16 @@ const QUALITY_MIN_SCORE = 22;
 const PREP_LINE_RE = /避坑|提前预约|预约|穿衣|签证|换汇|交通卡|交通|地铁|门票|开放时间|注意事项|携带|旺季|淡季|排队|抢票|限流|闭馆|周一闭馆|周二闭馆/i;
 
 const COMMENT_INSIGHT_RE = /避坑|排队|闭馆|周[一二三四五六日]|门票|价格|涨价|降价|人均|开放时间|营业时间|人少|拥挤|预约|抢票|注意事项|别去|不值得|推荐|必去|最新|更新|现在|目前|改到|调整到/i;
+
+const TICKET_HOURS_RE = /门票|票价|开放时间|营业时间|闭馆|限流/;
+const PITFALL_RE = /避坑|踩坑|别去|不值得|别白跑/;
+const FEE_KIND_ZH = {
+  tickets: '门票',
+  food: '人均',
+  lodging: '住宿',
+  transport: '交通',
+  other: '费用',
+};
 
 function foldText(text) {
   return String(text || '').toLowerCase().replace(/\s+/g, '');
@@ -219,6 +231,63 @@ function attachPreviewTips(draft, limit = 12) {
   return next;
 }
 
+function uniqueNoteTexts(items, limit = 3) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of items || []) {
+    const text = String(raw || '').trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function placePrepTexts(item, relatedGuides) {
+  const fromItem = Array.isArray(item?.prepTips)
+    ? item.prepTips.map((tip) => String(tip?.text || tip || '').trim()).filter(Boolean)
+    : [];
+  return uniqueNoteTexts([...fromItem, ...extractPrepTips(relatedGuides, 8)], 12);
+}
+
+function formatTicketHoursLine(item, relatedGuides, locale) {
+  const texts = uniqueNoteTexts(
+    placePrepTexts(item, relatedGuides).filter((text) => TICKET_HOURS_RE.test(text)),
+    3,
+  );
+  if (!texts.length) return '';
+  const label = locale === 'zh' ? '门票/开放' : 'Tickets/hours';
+  return `${label}：${texts.join(locale === 'zh' ? '；' : '; ')}`;
+}
+
+function formatFeeReferenceLine(relatedGuides, locale) {
+  const clues = extractPriceClues(relatedGuides, 4);
+  if (!clues.length) return '';
+  const bits = clues.map((clue) => {
+    const kind = locale === 'zh' ? (FEE_KIND_ZH[clue.kind] || FEE_KIND_ZH.other) : clue.kind;
+    const amount = clue.amount;
+    const currency = String(clue.currency || '').trim();
+    return currency ? `${kind} ${amount} ${currency}` : `${kind} ${amount}`;
+  });
+  return locale === 'zh'
+    ? `费用参考：${bits.join('；')}（来自笔记，非实时价格）`
+    : `Cost notes: ${bits.join('; ')} (from notes, not live prices)`;
+}
+
+function formatPitfallLine(item, relatedGuides, locale) {
+  const fromPrep = placePrepTexts(item, relatedGuides).filter((text) => PITFALL_RE.test(text)
+    || categorizePrepTip(text) === 'pitfall');
+  const fromComments = (Array.isArray(item?.commentTips) ? item.commentTips : [])
+    .filter((text) => PITFALL_RE.test(text));
+  const texts = uniqueNoteTexts([...fromPrep, ...fromComments], 3);
+  if (!texts.length) return '';
+  const label = locale === 'zh' ? '避坑' : 'Pitfalls';
+  return `${label}：${texts.join(locale === 'zh' ? '；' : '; ')}`;
+}
+
 function formatGuideSources(fromGuideIds, guides, locale) {
   const ids = Array.isArray(fromGuideIds) ? fromGuideIds.filter(Boolean) : [];
   if (!ids.length) return '';
@@ -247,6 +316,12 @@ function buildTrekPlaceNotes(item, guides, locale = 'zh') {
     parts.push(locale === 'zh' ? `预约：${tip}` : `Reservation: ${tip}`);
   }
   const relatedGuides = guidesForItem(guides, item?.fromGuideIds);
+  const ticketHours = formatTicketHoursLine(item, relatedGuides, locale);
+  if (ticketHours) parts.push(ticketHours);
+  const fees = formatFeeReferenceLine(relatedGuides, locale);
+  if (fees) parts.push(fees);
+  const pitfalls = formatPitfallLine(item, relatedGuides, locale);
+  if (pitfalls) parts.push(pitfalls);
   const prep = extractPrepTips(relatedGuides, 3);
   if (prep.length) {
     const label = locale === 'zh' ? '出发前提示' : 'Before you go';
@@ -282,4 +357,7 @@ module.exports = {
   guidesForItem,
   buildTrekPlaceNotes,
   formatGuideSources,
+  formatTicketHoursLine,
+  formatFeeReferenceLine,
+  formatPitfallLine,
 };
