@@ -12,7 +12,7 @@ Module._load = function (request, parent, isMain) {
 };
 const plugin = require('../server/index');
 Module._load = originalLoad;
-const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, nearDestination, pickDestinationBias, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, progressStepForJob, inferDestinationFromGuides, inferDayCountFromGuides, filterInventedCandidates, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES, guideSearchQueries } = require('../server/pipeline');
+const { gateAndSchedule, splitRegions, normalizeCandidates, candidatesFromGuideText, resolveExtractCandidates, splitRoutePlaceNames, normalizeInput, extractionText, extractionInstruction, isGenericPlaceName, isWeakPlaceName, publicDraft, placeSearchQuery, placeSearchNames, looksLikeShareCard, noteDisplayTitle, evidenceFromSearch, nearDestination, pickDestinationBias, resolveXhsKeywordSearch, truthySetting, remainingXhsNoteSlots, message, mapConcurrent, progressForJob, progressStepForJob, inferDestinationFromGuides, inferDayCountFromGuides, filterInventedCandidates, mergeGuideTexts, isLowQualityPlace, sortDayPlacesByDistance, PLACE_SEARCH_ALIASES, guideSearchQueries } = require('../server/pipeline');
 const { normalizeXhsCookie, formatXhsWarning, formatXhsDegradedWarning, isXhsAuthError, XhsSessionError } = require('../server/xhs/session');
 const { parseInitialState, splitGuidePaste } = require('../server/xhs/url');
 const { setGeoThrottleInterval, scoreRow, searchPlaces, isRateLimitError } = require('../server/geo/nominatim');
@@ -110,7 +110,7 @@ test('manifest 声明 page 导航、LLM addon、最小权限与唯一用户 Cook
   assert.deepEqual(cookieFields.map(({ scope, secret }) => ({ scope, secret })), [{ scope: 'user', secret: true }]);
   const cookieUpdatedAt = manifest.settings.find((field) => field.key === 'xhs_cookie_updated_at');
   assert.equal(cookieUpdatedAt.scope, 'user');
-  assert.equal(manifest.version, '1.1.52');
+  assert.equal(manifest.version, '1.1.53');
 });
 
 function memoryDb() {
@@ -439,6 +439,37 @@ test('小范围景点不会被拆成多个区域', () => {
   const split = splitRegions(intent, evidence, 'zh');
   assert.equal(split.regions.length, 0);
   assert.equal(evidence[0].regionName, undefined);
+});
+
+test('箭头路线会拆成多个地点，而不是一整条候选', () => {
+  const intent = { destination: '景德镇', dayCount: 2, pace: 'balanced', interests: [], mustSee: [] };
+  const names = splitRoutePlaceNames('Day1: 陶溪川 -> 西街 -> 留槎洲 -> 宝剑博物馆', intent);
+  assert.deepEqual(names, ['陶溪川', '西街', '留槎洲', '宝剑博物馆']);
+
+  const parsed = candidatesFromGuideText([{
+    id: 'g_1',
+    title: '景德镇两日',
+    text: 'Day1: 陶溪川 -> 西街 -> 留槎洲 -> 宝剑博物馆\nDay2: 古窑 -> 雕塑瓷厂',
+  }], intent);
+  assert.ok(parsed.some((item) => item.name === '陶溪川' && item.dayHint === 1));
+  assert.ok(parsed.some((item) => item.name === '宝剑博物馆' && item.dayHint === 1));
+  assert.ok(parsed.some((item) => item.name === '古窑' && item.dayHint === 2));
+  assert.ok(!parsed.some((item) => /->/.test(item.name)));
+
+  const fromLlm = normalizeCandidates({
+    candidates: [{ name: '陶溪川 -> 西街 -> 留槎洲 -> 宝剑博物馆', dayHint: 1 }],
+  }, intent);
+  assert.equal(fromLlm.length, 4);
+  assert.ok(fromLlm.every((item) => !/->/.test(item.name)));
+
+  const resolved = resolveExtractCandidates(
+    { candidates: [{ name: 'Day1: 陶溪川 -> 西街', dayHint: 1 }] },
+    [{ id: 'g_1', title: '景德镇', text: 'Day1: 陶溪川 -> 西街 -> 留槎洲' }],
+    intent,
+  );
+  assert.ok(resolved.candidates.some((item) => item.name === '陶溪川'));
+  assert.ok(resolved.candidates.some((item) => item.name === '西街'));
+  assert.ok(!resolved.candidates.some((item) => /->/.test(item.name)));
 });
 
 test('LLM 返回空时从衡阳东洲岛攻略正文规则提取景点', () => {
@@ -2041,5 +2072,44 @@ test('commit 接受手工补坐标，无坐标不阻断其余地点写入', asyn
   assert.equal(committed.status, 200);
   assert.deepEqual(committed.body.skippedUnmapped, []);
   assert.equal(fixture.trips[committed.body.tripId].places.length, 2);
+});
+
+test('POST /geocode 返回可点选的地址列表', async () => {
+  const fixture = buildHost();
+  await fixture.app.load();
+  const original = global.fetch;
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes('nominatim.openstreetmap.org')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get() { return null; } },
+        async json() {
+          return [{
+            name: '陶溪川文创街区',
+            lat: '29.301',
+            lon: '117.178',
+            display_name: '陶溪川文创街区, 景德镇市, 江西省',
+            category: 'tourism',
+            type: 'attraction',
+            importance: 0.6,
+          }];
+        },
+      };
+    }
+    throw new Error(`Unexpected fetch: ${href}`);
+  };
+  try {
+    const result = await fixture.app.route({ method: 'POST', path: '/geocode' }, {
+      body: { query: '陶溪川', destination: '景德镇', locale: 'zh' },
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.places[0].name, '陶溪川文创街区');
+    assert.ok(Number.isFinite(result.body.places[0].lat));
+    assert.match(result.body.places[0].address, /景德镇/);
+  } finally {
+    global.fetch = original;
+  }
 });
 

@@ -640,11 +640,15 @@
         stepMap: 'Match the map',
         stepSchedule: 'Build the days',
         needsConfirm: 'Need a location',
-        needsConfirmHint: 'These places stay in the plan. Open one to add coordinates.',
+        needsConfirmHint: 'These places stay in the plan. Open one to pick the right address.',
         pinLat: 'Latitude',
         pinLng: 'Longitude',
-        pinSave: 'Save location',
-        pinHint: 'Paste map coordinates if search missed this place.',
+        pinSave: 'Use this address',
+        pinHint: 'Search and tap the correct address. Coordinates are optional.',
+        pinQuery: 'Search address',
+        pinSearch: 'Search',
+        pinEmpty: 'No matching address',
+        pinCoords: 'Paste coordinates',
         commitPartial: 'Trip created. {count} places still need coordinates and were skipped.',
         pasteLinksChip: '{count} links',
         pasteTextChip: 'Note text included',
@@ -792,11 +796,15 @@
         stepMap: '匹配地图',
         stepSchedule: '排好日程',
         needsConfirm: '需要补位置',
-        needsConfirmHint: '这些点仍在行程里。点开后可手工补坐标。',
+        needsConfirmHint: '这些点仍在行程里。点开后搜索并选一条正确地址。',
         pinLat: '纬度',
         pinLng: '经度',
-        pinSave: '保存位置',
-        pinHint: '地图没找到时，可粘贴经纬度补上。',
+        pinSave: '使用这个地址',
+        pinHint: '搜一下正确地址，点选一条即可。经纬度可选用。',
+        pinQuery: '搜索地址',
+        pinSearch: '搜索',
+        pinEmpty: '没有匹配的地址',
+        pinCoords: '粘贴经纬度',
         commitPartial: '行程已创建。还有 {count} 个地点没有坐标，未写入。',
         pasteLinksChip: '{count} 条链接',
         pasteTextChip: '含攻略正文',
@@ -1322,7 +1330,7 @@
       var list = [];
       (days || []).forEach(function (day) {
         (day.places || []).forEach(function (place) {
-          if (place.unmapped || place.tooFar) list.push(place);
+          if (needsLocation(place) || place.tooFar) list.push(place);
         });
       });
       return list;
@@ -1341,7 +1349,7 @@
       document.querySelectorAll('.place-row').forEach(function (row) {
         var id = row.dataset.evidence;
         var place = findPlace(id);
-        var hide = filterNeedsConfirm && place && !place.unmapped && !place.tooFar;
+        var hide = filterNeedsConfirm && place && !needsLocation(place) && !place.tooFar;
         row.classList.toggle('hidden', Boolean(hide));
       });
     }
@@ -1562,6 +1570,175 @@
       root.appendChild(block);
     }
 
+    function needsLocation(place) {
+      if (!place) return false;
+      if (place.unmapped) return true;
+      return !Number.isFinite(Number(place.lat)) || !Number.isFinite(Number(place.lng));
+    }
+
+    function applyPickedAddress(place, hit) {
+      applyPlacePatch(place.evidenceId, Number(hit.lat), Number(hit.lng), hit.address || '');
+      renderNeedsConfirm(currentDraft.days || []);
+      renderDays(currentDraft.days || []);
+      renderDayRail();
+      setActiveDay(activeDayIndex);
+      selectPlace(place.evidenceId, { open: true });
+      trek.notify('success', t('pinSave'));
+    }
+
+    function renderAddressPicker(root, place) {
+      var box = document.createElement('div');
+      box.className = 'trek-stack pin-form';
+      var heading = document.createElement('div');
+      heading.className = 'trek-title';
+      heading.textContent = t('placeAddress');
+      box.appendChild(heading);
+      var hint = document.createElement('p');
+      hint.className = 'trek-faint';
+      hint.textContent = t('pinHint');
+      box.appendChild(hint);
+      var queryLabel = document.createElement('label');
+      var querySpan = document.createElement('span');
+      querySpan.className = 'trek-label';
+      querySpan.textContent = t('pinQuery');
+      var queryInput = document.createElement('input');
+      queryInput.className = 'trek-input';
+      queryInput.id = 'pin-query';
+      queryInput.value = place.name || '';
+      queryLabel.appendChild(querySpan);
+      queryLabel.appendChild(queryInput);
+      box.appendChild(queryLabel);
+      var searchBtn = document.createElement('button');
+      searchBtn.type = 'button';
+      searchBtn.className = 'trek-btn trek-btn--primary';
+      searchBtn.id = 'pin-search';
+      searchBtn.textContent = t('pinSearch');
+      box.appendChild(searchBtn);
+      var results = document.createElement('div');
+      results.className = 'trek-stack';
+      results.id = 'pin-results';
+      box.appendChild(results);
+
+      async function runSearch() {
+        var q = String(queryInput.value || place.name || '').trim();
+        if (q.length < 2) {
+          trek.notify('error', t('pinHint'));
+          return;
+        }
+        searchBtn.disabled = true;
+        results.innerHTML = '';
+        var loading = document.createElement('p');
+        loading.className = 'trek-faint';
+        loading.textContent = t('working');
+        results.appendChild(loading);
+        try {
+          var dest = (currentDraft && currentDraft.intent && currentDraft.intent.destination)
+            || (document.getElementById('destination') && document.getElementById('destination').value)
+            || '';
+          var data = await trek.invoke('/geocode', {
+            method: 'POST',
+            body: { query: q, destination: dest, locale: locale }
+          });
+          results.innerHTML = '';
+          var places = (data && data.places) || [];
+          if (!places.length) {
+            var empty = document.createElement('p');
+            empty.className = 'trek-faint';
+            empty.textContent = t('pinEmpty');
+            results.appendChild(empty);
+            return;
+          }
+          places.forEach(function (hit) {
+            var row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'trek-row';
+            var title = document.createElement('strong');
+            title.textContent = hit.name || q;
+            var addr = document.createElement('span');
+            addr.className = 'trek-muted';
+            addr.textContent = hit.address || [hit.lat, hit.lng].filter(Boolean).join(', ');
+            row.appendChild(title);
+            row.appendChild(addr);
+            row.addEventListener('click', function () { applyPickedAddress(place, hit); });
+            results.appendChild(row);
+          });
+        } catch (error) {
+          results.innerHTML = '';
+          var failed = document.createElement('p');
+          failed.className = 'trek-faint';
+          failed.textContent = invokeErrorMessage(error);
+          results.appendChild(failed);
+        } finally {
+          searchBtn.disabled = false;
+        }
+      }
+
+      searchBtn.addEventListener('click', runSearch);
+      queryInput.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          runSearch();
+        }
+      });
+
+      var extra = document.createElement('details');
+      extra.className = 'more-options';
+      var summary = document.createElement('summary');
+      summary.textContent = t('pinCoords');
+      extra.appendChild(summary);
+      var grid = document.createElement('div');
+      grid.className = 'pin-grid';
+      var latLabel = document.createElement('label');
+      var latSpan = document.createElement('span');
+      latSpan.className = 'trek-label';
+      latSpan.textContent = t('pinLat');
+      var latInput = document.createElement('input');
+      latInput.className = 'trek-input';
+      latInput.id = 'pin-lat';
+      latInput.inputMode = 'decimal';
+      latInput.value = place.lat != null && Number.isFinite(Number(place.lat)) ? String(place.lat) : '';
+      latLabel.appendChild(latSpan);
+      latLabel.appendChild(latInput);
+      var lngLabel = document.createElement('label');
+      var lngSpan = document.createElement('span');
+      lngSpan.className = 'trek-label';
+      lngSpan.textContent = t('pinLng');
+      var lngInput = document.createElement('input');
+      lngInput.className = 'trek-input';
+      lngInput.id = 'pin-lng';
+      lngInput.inputMode = 'decimal';
+      lngInput.value = place.lng != null && Number.isFinite(Number(place.lng)) ? String(place.lng) : '';
+      lngLabel.appendChild(lngSpan);
+      lngLabel.appendChild(lngInput);
+      grid.appendChild(latLabel);
+      grid.appendChild(lngLabel);
+      extra.appendChild(grid);
+      var save = document.createElement('button');
+      save.type = 'button';
+      save.className = 'trek-btn trek-btn--secondary';
+      save.textContent = t('pinSave');
+      save.addEventListener('click', function () {
+        var lat = Number(latInput.value);
+        var lng = Number(lngInput.value);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          var pair = String(latInput.value + ' ' + lngInput.value).match(/(-?\d+(?:\.\d+)?)\s*[,，\s]\s*(-?\d+(?:\.\d+)?)/);
+          if (pair) {
+            lat = Number(pair[1]);
+            lng = Number(pair[2]);
+          }
+        }
+        if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          trek.notify('error', t('pinHint'));
+          return;
+        }
+        applyPickedAddress(place, { lat: lat, lng: lng, address: place.address || '' });
+      });
+      extra.appendChild(save);
+      box.appendChild(extra);
+      root.appendChild(box);
+      window.setTimeout(runSearch, 0);
+    }
+
     function renderPlaceDetail(place) {
       var root = document.getElementById('place-detail');
       root.innerHTML = '';
@@ -1596,82 +1773,20 @@
         far.textContent = t('tooFar');
         meta.appendChild(far);
       }
-      if (place.unmapped) {
+      if (needsLocation(place)) {
         var unmapped = document.createElement('span');
         unmapped.className = 'trek-chip trek-chip--warning';
         unmapped.textContent = t('unmapped');
         meta.appendChild(unmapped);
       }
       root.appendChild(meta);
+      if (needsLocation(place)) renderAddressPicker(root, place);
       addDetailBlock(root, 'placeNotes', place.notes || place.reason || '');
-      addDetailBlock(root, 'placeAddress', place.address || '');
+      if (!needsLocation(place)) addDetailBlock(root, 'placeAddress', place.address || '');
       var comments = Array.isArray(place.commentTips) ? place.commentTips.join('；') : '';
       addDetailBlock(root, 'placeComments', comments);
       var prep = normalizePrepTips(place.prepTips).map(function (item) { return item.text; }).join('；');
       addDetailBlock(root, 'placePrep', prep);
-      if (place.unmapped) {
-        var pin = document.createElement('div');
-        pin.className = 'trek-stack pin-form';
-        var hint = document.createElement('p');
-        hint.className = 'trek-faint';
-        hint.textContent = t('pinHint');
-        pin.appendChild(hint);
-        var grid = document.createElement('div');
-        grid.className = 'pin-grid';
-        var latLabel = document.createElement('label');
-        var latSpan = document.createElement('span');
-        latSpan.className = 'trek-label';
-        latSpan.textContent = t('pinLat');
-        var latInput = document.createElement('input');
-        latInput.className = 'trek-input';
-        latInput.id = 'pin-lat';
-        latInput.inputMode = 'decimal';
-        latInput.value = place.lat != null && Number.isFinite(Number(place.lat)) ? String(place.lat) : '';
-        latLabel.appendChild(latSpan);
-        latLabel.appendChild(latInput);
-        var lngLabel = document.createElement('label');
-        var lngSpan = document.createElement('span');
-        lngSpan.className = 'trek-label';
-        lngSpan.textContent = t('pinLng');
-        var lngInput = document.createElement('input');
-        lngInput.className = 'trek-input';
-        lngInput.id = 'pin-lng';
-        lngInput.inputMode = 'decimal';
-        lngInput.value = place.lng != null && Number.isFinite(Number(place.lng)) ? String(place.lng) : '';
-        lngLabel.appendChild(lngSpan);
-        lngLabel.appendChild(lngInput);
-        grid.appendChild(latLabel);
-        grid.appendChild(lngLabel);
-        pin.appendChild(grid);
-        var save = document.createElement('button');
-        save.type = 'button';
-        save.className = 'trek-btn trek-btn--secondary';
-        save.textContent = t('pinSave');
-        save.addEventListener('click', function () {
-          var lat = Number(latInput.value);
-          var lng = Number(lngInput.value);
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-            var pair = String(latInput.value + ' ' + lngInput.value).match(/(-?\d+(?:\.\d+)?)\s*[,，\s]\s*(-?\d+(?:\.\d+)?)/);
-            if (pair) {
-              lat = Number(pair[1]);
-              lng = Number(pair[2]);
-            }
-          }
-          if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-            trek.notify('error', t('pinHint'));
-            return;
-          }
-          applyPlacePatch(place.evidenceId, lat, lng, place.address || '');
-          renderNeedsConfirm(currentDraft.days || []);
-          renderDays(currentDraft.days || []);
-          renderDayRail();
-          setActiveDay(activeDayIndex);
-          selectPlace(place.evidenceId, { open: true });
-          trek.notify('success', t('pinSave'));
-        });
-        pin.appendChild(save);
-        root.appendChild(pin);
-      }
     }
 
     function applyPlacePatch(evidenceId, lat, lng, address) {
@@ -1683,6 +1798,7 @@
           item.lng = lng;
           if (address) item.address = address;
           item.unmapped = false;
+          item.selected = true;
         });
       });
     }
@@ -1878,7 +1994,7 @@
             badge.textContent = t('tooFar');
             meta.appendChild(badge);
           }
-          if (place.unmapped) {
+          if (needsLocation(place)) {
             var unmappedBadge = document.createElement('span');
             unmappedBadge.className = 'trek-chip trek-chip--warning';
             unmappedBadge.textContent = t('unmapped');

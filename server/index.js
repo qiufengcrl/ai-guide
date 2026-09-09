@@ -846,6 +846,36 @@ module.exports = definePlugin({
       },
     },
     {
+      method: 'POST', path: '/geocode', auth: true,
+      async handler(req, ctx) {
+        const body = req.body && typeof req.body === 'object' ? req.body : {};
+        const query = String(body.query || '').trim().slice(0, 80);
+        if (query.length < 2) return response(200, { places: [] });
+        const destination = String(body.destination || '').trim().slice(0, 40);
+        const locale = body.locale || 'zh';
+        const text = destination && !query.includes(destination) ? `${destination} ${query}` : query;
+        try {
+          const result = await searchPlaces(text, geoSearchOptions(ctx.config, {
+            lang: locale,
+            limit: 6,
+          }));
+          return response(200, {
+            places: (result.places || []).slice(0, 6).map((place) => ({
+              name: place.name,
+              address: place.address || '',
+              lat: place.lat,
+              lng: place.lng,
+            })),
+          });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error || '');
+          return response(502, {
+            error: message(locale, `地址搜索失败：${detail}`, `Address search failed: ${detail}`),
+          });
+        }
+      },
+    },
+    {
       method: 'POST', path: '/commit', auth: true,
       async handler(req, ctx) {
         const body = req.body && typeof req.body === 'object' ? req.body : {};

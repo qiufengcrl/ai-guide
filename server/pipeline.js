@@ -37,12 +37,36 @@ function cleanGuidePlaceName(raw) {
   return name;
 }
 
+function stripDayPrefix(raw) {
+  return stripInvisible(raw)
+    .replace(/^(?:📅\s*)?(?:第\s*[0-9一二三四五六七八九十两]+\s*天|Day\s*[0-9]{1,2}|D[0-9]{1,2})\s*[:：]?\s*/i, '')
+    .trim();
+}
+
+function splitRoutePlaceNames(raw, intent) {
+  const text = stripDayPrefix(raw);
+  if (!text) return [];
+  const hasRoute = /(?:→|->|➡|—>)/.test(text);
+  const chunks = hasRoute ? text.split(/\s*(?:→|->|➡|—>)\s*/) : [text];
+  const names = [];
+  const seen = new Set();
+  for (const chunk of chunks) {
+    const cleaned = cleanGuidePlaceName(chunk);
+    if (!cleaned || GUIDE_ROUTE_SKIP.test(cleaned) || isWeakPlaceName(cleaned, intent)) continue;
+    for (const name of cleaned.split(/[/／、|｜]/).map(cleanGuidePlaceName)) {
+      if (name.length < 2 || name.length > 24) continue;
+      if (GUIDE_ROUTE_SKIP.test(name) || isWeakPlaceName(name, intent)) continue;
+      const key = foldName(name);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      names.push(name);
+    }
+  }
+  return names;
+}
+
 function guidePlaceNamesFromSegment(segment, intent) {
-  const cleaned = cleanGuidePlaceName(segment);
-  if (!cleaned || cleaned.length < 2 || cleaned.length > 24) return [];
-  if (GUIDE_ROUTE_SKIP.test(cleaned)) return [];
-  if (isWeakPlaceName(cleaned, intent)) return [];
-  return cleaned.split(/[/／、|｜]/).map(cleanGuidePlaceName).filter((item) => item.length >= 2);
+  return splitRoutePlaceNames(segment, intent);
 }
 
 function reservationHintsFromLine(line) {
@@ -222,7 +246,7 @@ function candidatesFromGuideText(guides, intent) {
       const numbered = trimmed.match(/^(?:\d+[.\u3001、]|[①②③④⑤⑥⑦⑧⑨⑩])\s*(.+)$/);
       if (numbered && push(numbered[1], guideId, trimmed, lineContext, currentDay)) return results;
 
-      if (/推荐路线|路线[:：]|→/.test(trimmed)) {
+      if (/推荐路线|路线[:：]|→|->|➡/.test(trimmed)) {
         const routePart = trimmed.replace(/^.*?(?:推荐路线|路线)[:：]?\s*/u, '');
         for (const segment of routePart.split(/\s*(?:→|->|➡|—>)\s*/)) {
           if (push(segment, guideId, trimmed, lineContext, currentDay)) return results;
@@ -528,6 +552,20 @@ function isWeakPlaceName(name, intent) {
   return (intent?.interests || []).some((item) => foldName(item) === folded);
 }
 
+function expandCandidate(item, intent) {
+  const names = splitRoutePlaceNames(item?.nameZh || item?.name, intent);
+  if (!names.length) {
+    const fallback = cleanGuidePlaceName(stripDayPrefix(item?.nameZh || item?.name));
+    if (!fallback || /(?:→|->|➡)/.test(fallback) || isWeakPlaceName(fallback, intent)) return [];
+    return [toCandidate({ ...item, name: fallback, nameZh: fallback }, intent)];
+  }
+  return names.map((name) => toCandidate({
+    ...item,
+    name,
+    nameZh: name,
+  }, intent));
+}
+
 function normalizeCandidates(raw, intent) {
   const model = Array.isArray(raw?.candidates) ? raw.candidates : [];
   const seen = new Set();
@@ -535,12 +573,15 @@ function normalizeCandidates(raw, intent) {
   const pushUnique = (item) => {
     if (!item?.name || isWeakPlaceName(item.name, intent)) return;
     if (isMarketingCandidate(item)) return;
+    if (/(?:→|->|➡)/.test(item.name)) return;
     const key = foldName(item.name);
     if (!key || seen.has(key)) return;
     seen.add(key);
     unique.push(item);
   };
-  for (const item of model) pushUnique(toCandidate(item, intent));
+  for (const item of model) {
+    for (const expanded of expandCandidate(item, intent)) pushUnique(expanded);
+  }
   const target = targetPlaceCount(intent);
   if (unique.length < target) {
     for (const name of intent.mustSee || []) {
@@ -568,6 +609,7 @@ function extractionText(guides, intent) {
     'Do not list the destination itself, a province, city, country, or administrative region as a place.',
     'For each place include nameZh (Simplified Chinese official name), nameEn (English official name when known), reason (real user tips or pitfalls from the notes), durationMinutes, reservationRequired, and reservationTips when notes mention 预约/抢票/提前预约.',
     `Spread places across days with dayHint from 1 to ${intent.dayCount}. If the notes have 第N天 / Day N headings, follow those headings.`,
+    'Never return a day route joined by arrows (A -> B -> C or A → B) as one candidate. One visitable place per candidate.',
     'If notes mention prices (人均/门票/住宿/交通), also fill budget with currency and economy/comfort/luxury objects, each with numeric transport, lodging, tickets, food for the whole trip. Do not invent live market quotes.',
   ].filter(Boolean).join('\n');
   const commentTips = (guides || [])
@@ -591,7 +633,7 @@ function extractionInstruction(intent, hasGuides) {
   const dest = intent.destination || 'the destination';
   const fields = 'Each candidate must include name, nameZh, nameEn, reason, durationMinutes, reservationRequired, reservationTips, dayHint, and guideId when sourced from a note. Use reservationRequired=true when notes mention 预约, 抢票, 提前预约, or 约满.';
   if (hasGuides) {
-    return `Extract specific visitable places that appear verbatim in the notes. ${fields} Prefer first-person visit notes over sponsored or group-tour pitches. Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Keep real user tips in reason for that one place only. When notes mention prices, also fill budget with currency and three tiers (economy, comfort, luxury), each with numeric transport, lodging, tickets, food for the whole trip. Do not invent live quotes. Do not invent places that are not in the notes. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}, matching 第N天/Day N headings when present. Target about ${target} places, or every named place in the notes if fewer. Do not invent coordinates.`;
+    return `Extract specific visitable places that appear verbatim in the notes. ${fields} Prefer first-person visit notes over sponsored or group-tour pitches. Prefer attractions, museums, temples, parks, neighborhoods, and food streets in ${dest}. Keep real user tips in reason for that one place only. Never return a route joined by arrows as one candidate. When notes mention prices, also fill budget with currency and three tiers (economy, comfort, luxury), each with numeric transport, lodging, tickets, food for the whole trip. Do not invent live quotes. Do not invent places that are not in the notes. Do not return the destination, a province, city, or country as a place. Use dayHint 1..${intent.dayCount}, matching 第N天/Day N headings when present. Target about ${target} places, or every named place in the notes if fewer. Do not invent coordinates.`;
   }
   return `No notes were supplied. Propose well-known visitable places in ${dest}. ${fields} Each name must be a specific attraction or neighborhood, not the destination, province, city, or country. Spread across ${intent.dayCount} days with dayHint. Target ${target} places. Do not invent coordinates.`;
 }
@@ -1369,6 +1411,7 @@ module.exports = {
   sortDayPlacesByDistance,
   reservationHintsFromLine,
   candidatesFromGuideText,
+  splitRoutePlaceNames,
   resolveExtractCandidates,
   guideTextForExtractRetry,
   extractRetryInstruction,

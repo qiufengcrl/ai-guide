@@ -27,12 +27,12 @@ test('redesign covers the complete planning and preview workflow', () => {
   for (const id of requiredIds) assert.match(html, new RegExp(`id=["']${id}["']`), id);
 
   for (const hook of [
-    "trek.onContext", "trek.invoke('/prefs'", "trek.invoke('/plan'", "trek.invoke('/commit'",
+    "trek.onContext", "trek.invoke('/prefs'", "trek.invoke('/plan'", "trek.invoke('/commit'", "trek.invoke('/geocode'",
     "progress.message", "place-photo", "photoUrl",
     "trek.navigate('/settings?tab=plugins')", "trek.openExternal",
     'renderNeedsConfirm', 'renderSources', 'renderDays', 'syncDayState',
     'showStage', 'renderPrepTips', 'renderPlaceDetail', 'setActiveDay',
-    'renderBudget', 'renderReservations',
+    'renderBudget', 'renderReservations', 'renderAddressPicker', 'needsLocation',
     'invokeErrorMessage', 'conflict', 'isTransientInvokeError', 'stillWorking',
     'sourceSummary', 'sourcesEmpty', 'trek.session.set', 'restorePlanForm',
   ]) assert.ok(appScript.includes(hook), hook);
