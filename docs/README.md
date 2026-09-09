@@ -1,7 +1,5 @@
 Put `screenshot.png` here.
 
-Grok Bot 公用编制（项目经理 / 开发 / 测试 / 评审，可复制到任意产品）：[grok-bot-kit/](grok-bot-kit/README.md)。
-
 It is what the plugin's store card shows, and the registry REJECTS a plugin whose README has no
 screenshot that resolves to a real image — so this is not optional.
 
